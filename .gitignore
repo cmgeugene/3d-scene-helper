@@ -11,6 +11,7 @@ pnpm-debug.log*
 # Build, coverage, and browser-test artifacts
 dist/
 coverage/
+.vite/
 playwright-report/
 test-results/
 blob-report/
