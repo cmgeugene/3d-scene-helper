@@ -11,15 +11,12 @@ import {
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
-import {
-  ASPECT_RATIO_VALUES,
-  MAX_SHADOW_MAP_SIZE,
-  RENDER_LAYERS,
-} from '../constants';
+import { ASPECT_RATIO_VALUES, RENDER_LAYERS } from '../constants';
 import type { SceneDocument } from '../persistence/sceneSchema';
 import type { EditorStore } from '../state/editorStore';
 import { CompositionGuides } from './CompositionGuides';
 import { EditorNavigation } from './EditorNavigation';
+import { LightingRig, SHADOW_BOUNDS_M } from './LightingRig';
 import { computeLetterbox, type LetterboxRectangle } from './cameraMath';
 import { OutputCamera } from './OutputCamera';
 import { SceneObject } from './SceneObject';
@@ -28,8 +25,6 @@ import { SelectionTransformControls } from './SelectionTransformControls';
 interface SceneViewportProps {
   store: StoreApi<EditorStore>;
 }
-
-const SHADOW_BOUNDS_M = 6;
 
 function moveToLayer(object: Object3D | null, layer: number) {
   object?.traverse((child) => {
@@ -123,56 +118,6 @@ function SelectedSubjectFacingHelper({
   return null;
 }
 
-function SceneLighting({ lighting }: { lighting: SceneDocument['lighting'] }) {
-  const shadowMapSize = Math.min(lighting.shadows.mapSize, MAX_SHADOW_MAP_SIZE);
-
-  return (
-    <>
-      <ambientLight intensity={lighting.environmentIntensity} color="#ffffff" />
-      <directionalLight
-        name="NeutralStudio.key"
-        color={lighting.key.color}
-        intensity={lighting.key.intensity}
-        position={[
-          lighting.key.direction.x * 3,
-          lighting.key.direction.y * 3,
-          lighting.key.direction.z * 3,
-        ]}
-        castShadow={lighting.shadows.enabled}
-        shadow-mapSize-width={shadowMapSize}
-        shadow-mapSize-height={shadowMapSize}
-        shadow-camera-left={-SHADOW_BOUNDS_M}
-        shadow-camera-right={SHADOW_BOUNDS_M}
-        shadow-camera-top={SHADOW_BOUNDS_M}
-        shadow-camera-bottom={-SHADOW_BOUNDS_M}
-        shadow-camera-near={0.1}
-        shadow-camera-far={24}
-        shadow-bias={-0.0004}
-      />
-      <directionalLight
-        name="NeutralStudio.fill"
-        color={lighting.fill.color}
-        intensity={lighting.fill.intensity}
-        position={[
-          lighting.fill.direction.x * 3,
-          lighting.fill.direction.y * 3,
-          lighting.fill.direction.z * 3,
-        ]}
-      />
-      <directionalLight
-        name="NeutralStudio.rim"
-        color={lighting.rim.color}
-        intensity={lighting.rim.intensity}
-        position={[
-          lighting.rim.direction.x * 3,
-          lighting.rim.direction.y * 3,
-          lighting.rim.direction.z * 3,
-        ]}
-      />
-    </>
-  );
-}
-
 function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
   const objects = useStore(store, (state) => state.document.objects);
   const selectedObjectId = useStore(store, (state) => state.selectedObjectId);
@@ -214,7 +159,7 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
       <color attach="background" args={[background.color]} />
       <OutputCamera store={store} />
       <EditorNavigation store={store} enabled={!transformDragging} />
-      <SceneLighting lighting={lighting} />
+      <LightingRig lighting={lighting} />
       <group name="SceneContent.layer0">
         {objects.map((object) => (
           <SceneObject

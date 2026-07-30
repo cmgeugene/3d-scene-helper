@@ -14,6 +14,11 @@ import {
   type LensPreset,
 } from '../presets/cameras';
 import {
+  applyLightingPreset as applyLightingPresetToDocument,
+  LIGHTING_PRESETS,
+  type LightingPresetId,
+} from '../presets/lighting';
+import {
   computeCameraShot,
   computeFrameSelectedCamera,
   computeLookAtSelectedCamera,
@@ -76,6 +81,8 @@ export interface EditorStore {
   applyCameraShot: (presetId: CameraShotPreset['id']) => void;
   frameSelected: () => void;
   lookAtSelected: () => void;
+  applyLightingPreset: (presetId: LightingPresetId) => void;
+  resetLightingPreset: () => void;
   setLighting: (lighting: SceneDocument['lighting']) => void;
   setBackgroundColor: (color: string) => void;
   setOutput: (output: SceneDocument['output']) => void;
@@ -392,6 +399,25 @@ export function createEditorStore(options: EditorStoreOptions) {
         ),
       );
       set({ statusMessage: `${selected.name}을 바라봅니다.` });
+    },
+    applyLightingPreset: (presetId) => {
+      set((state) => ({
+        document: sceneDocumentSchema.parse(
+          applyLightingPresetToDocument(state.document, presetId),
+        ),
+        isDirty: true,
+      }));
+    },
+    resetLightingPreset: () => {
+      const presetId = get().document.lighting.presetId;
+      const preset = LIGHTING_PRESETS.find(
+        (candidate) => candidate.id === presetId,
+      );
+      if (preset === undefined) {
+        set({ statusMessage: '재설정할 조명 프리셋을 먼저 선택하세요.' });
+        return;
+      }
+      get().applyLightingPreset(preset.id);
     },
     setLighting: (lighting) => {
       set((state) => ({

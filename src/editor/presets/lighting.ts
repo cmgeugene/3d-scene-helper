@@ -138,3 +138,22 @@ export const LIGHTING_PRESETS = [
     },
   },
 ] as const satisfies readonly LightingPreset[];
+
+export type LightingPresetId = (typeof LIGHTING_PRESETS)[number]['id'];
+
+export function applyLightingPreset(
+  document: SceneDocument,
+  presetId: string,
+): SceneDocument {
+  const preset = LIGHTING_PRESETS.find(
+    (candidate) => candidate.id === presetId,
+  );
+  if (preset === undefined) {
+    throw new RangeError(`Unknown lighting preset: ${presetId}`);
+  }
+
+  const next = structuredClone(document);
+  next.lighting = structuredClone(preset.value);
+  next.background = { color: preset.backgroundColor };
+  return next;
+}

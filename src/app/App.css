@@ -484,19 +484,41 @@ p {
 .camera-controls,
 .camera-actions,
 .shot-grid,
-.camera-field {
+.camera-field,
+.lighting-controls,
+.lighting-field {
   display: grid;
   gap: 0.55rem;
 }
 
-.camera-field {
+.camera-field,
+.lighting-field,
+.lighting-toggle {
   color: #aebbd0;
   font-size: 0.72rem;
 }
 
-.camera-field select {
+.camera-field select,
+.lighting-field select,
+.lighting-field input[type='text'] {
   min-height: 2rem;
   padding: 0.35rem;
+}
+
+.lighting-field input[type='color'] {
+  width: 100%;
+  height: 2rem;
+  padding: 0.15rem;
+}
+
+.lighting-toggle {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.lighting-toggle input {
+  accent-color: #6f9dff;
 }
 
 .shot-grid,

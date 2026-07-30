@@ -17,6 +17,7 @@ const forbiddenMarkers = [
   'gizmoOrigin',
   'orbitEnabled',
   'facingHelper',
+  'runtimeLighting',
 ];
 
 async function collectFiles(directory) {

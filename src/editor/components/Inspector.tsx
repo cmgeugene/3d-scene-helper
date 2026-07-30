@@ -3,6 +3,7 @@ import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { SceneObject } from '../persistence/sceneSchema';
 import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
+import { LIGHTING_PRESETS } from '../presets/lighting';
 import type { EditorStore } from '../state/editorStore';
 import type { EditorPanel } from '../types';
 
@@ -31,10 +32,9 @@ const PANEL_OPTIONS: ReadonlyArray<{
 ];
 
 const DEFERRED_PANEL_MESSAGES: Record<
-  Exclude<EditorPanel, 'scene' | 'camera'>,
+  Exclude<EditorPanel, 'scene' | 'camera' | 'lighting'>,
   string
 > = {
-  lighting: '조명 설정은 조명 구성 단계에서 제공됩니다.',
   output: '출력 설정은 내보내기 구성 단계에서 제공됩니다.',
 };
 
@@ -99,6 +99,174 @@ function CameraControls({ store }: InspectorProps) {
           선택 바라보기
         </button>
       </div>
+    </div>
+  );
+}
+
+interface LightingNumberInputProps {
+  ariaLabel: string;
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (value: number) => void;
+}
+
+function LightingNumberInput({
+  ariaLabel,
+  value,
+  min,
+  max,
+  onCommit,
+}: LightingNumberInputProps) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const commitDraft = () => {
+    if (draft !== null) {
+      const nextValue = Number(draft);
+      if (
+        draft.trim() !== '' &&
+        Number.isFinite(nextValue) &&
+        nextValue >= min &&
+        nextValue <= max
+      ) {
+        onCommit(nextValue);
+      }
+    }
+    setDraft(null);
+  };
+
+  return (
+    <input
+      aria-label={ariaLabel}
+      type="text"
+      inputMode="decimal"
+      value={draft ?? String(value)}
+      onFocus={() => {
+        setDraft(String(value));
+      }}
+      onChange={(event) => {
+        setDraft(event.currentTarget.value);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.currentTarget.blur();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          setDraft(null);
+        }
+      }}
+      onBlur={commitDraft}
+    />
+  );
+}
+
+function LightingControls({ store }: InspectorProps) {
+  const lighting = useStore(store, (state) => state.document.lighting);
+  const backgroundColor = useStore(
+    store,
+    (state) => state.document.background.color,
+  );
+
+  const setKeyDirection = (axis: (typeof AXES)[number], value: number) => {
+    if (!Number.isFinite(value)) return;
+    store.getState().setLighting({
+      ...lighting,
+      key: {
+        ...lighting.key,
+        direction: { ...lighting.key.direction, [axis]: value },
+      },
+    });
+  };
+
+  return (
+    <div className="lighting-controls">
+      <label className="lighting-field">
+        <span>프리셋</span>
+        <select
+          aria-label="조명 프리셋"
+          value={lighting.presetId}
+          onChange={(event) => {
+            const preset = LIGHTING_PRESETS.find(
+              ({ id }) => id === event.currentTarget.value,
+            );
+            if (preset !== undefined) {
+              store.getState().applyLightingPreset(preset.id);
+            }
+          }}
+        >
+          {LIGHTING_PRESETS.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {preset.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="lighting-field">
+        <span>노출</span>
+        <LightingNumberInput
+          ariaLabel="노출"
+          value={lighting.exposure}
+          min={0.1}
+          max={3}
+          onCommit={(exposure) => {
+            store.getState().setLighting({ ...lighting, exposure });
+          }}
+        />
+      </label>
+      <label className="lighting-field">
+        <span>배경</span>
+        <input
+          aria-label="배경 색상"
+          type="color"
+          value={backgroundColor}
+          onChange={(event) => {
+            store.getState().setBackgroundColor(event.currentTarget.value);
+          }}
+        />
+      </label>
+      <fieldset>
+        <legend>키 라이트 방향</legend>
+        <div className="axis-fields">
+          {AXES.map((axis) => (
+            <label key={axis}>
+              <span>{axis.toUpperCase()}</span>
+              <LightingNumberInput
+                ariaLabel={`키 라이트 방향 ${axis.toUpperCase()}`}
+                value={lighting.key.direction[axis]}
+                min={-3}
+                max={3}
+                onCommit={(value) => {
+                  setKeyDirection(axis, value);
+                }}
+              />
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <label className="lighting-toggle">
+        <input
+          type="checkbox"
+          checked={lighting.shadows.enabled}
+          onChange={(event) => {
+            store.getState().setLighting({
+              ...lighting,
+              shadows: {
+                ...lighting.shadows,
+                enabled: event.currentTarget.checked,
+              },
+            });
+          }}
+        />
+        <span>그림자</span>
+      </label>
+      <button
+        type="button"
+        onClick={() => {
+          store.getState().resetLightingPreset();
+        }}
+      >
+        프리셋으로 재설정
+      </button>
     </div>
   );
 }
@@ -299,6 +467,8 @@ export function Inspector({ store }: InspectorProps) {
           </>
         ) : activePanel === 'camera' ? (
           <CameraControls store={store} />
+        ) : activePanel === 'lighting' ? (
+          <LightingControls store={store} />
         ) : (
           <p className="panel-placeholder">
             {DEFERRED_PANEL_MESSAGES[activePanel]}

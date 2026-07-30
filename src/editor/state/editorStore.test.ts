@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
 import { CAMERA_SHOT_PRESETS } from '../presets/cameras';
+import { LIGHTING_PRESETS } from '../presets/lighting';
 import {
   createEditorStore,
   DOCUMENT_MUTATION_KINDS,
@@ -416,6 +417,50 @@ describe('editorStore', () => {
       isInteracting: false,
     });
     expect(documentChanges).toBe(1);
+    unsubscribe();
+  });
+
+  it('lighting preset과 reset을 한 번씩 commit하고 camera와 objects를 보존한다', () => {
+    const camera = structuredClone(store.getState().document.outputCamera);
+    const objects = structuredClone(store.getState().document.objects);
+    let documentChanges = 0;
+    const unsubscribe = store.subscribe((state, previousState) => {
+      if (state.document !== previousState.document) documentChanges += 1;
+    });
+
+    store.getState().applyLightingPreset('sunset');
+    expect(documentChanges).toBe(1);
+    expect(store.getState().document).toMatchObject({
+      lighting: LIGHTING_PRESETS[2].value,
+      background: { color: LIGHTING_PRESETS[2].backgroundColor },
+      outputCamera: camera,
+      objects,
+    });
+
+    store.getState().setLighting({
+      ...store.getState().document.lighting,
+      exposure: 1.7,
+      key: {
+        ...store.getState().document.lighting.key,
+        direction: { x: 0.2, y: 1.5, z: -0.4 },
+      },
+      shadows: {
+        ...store.getState().document.lighting.shadows,
+        enabled: false,
+      },
+    });
+    store.getState().setBackgroundColor('#010203');
+    const beforeResetChanges = documentChanges;
+
+    store.getState().resetLightingPreset();
+
+    expect(documentChanges).toBe(beforeResetChanges + 1);
+    expect(store.getState().document).toMatchObject({
+      lighting: LIGHTING_PRESETS[2].value,
+      background: { color: LIGHTING_PRESETS[2].backgroundColor },
+      outputCamera: camera,
+      objects,
+    });
     unsubscribe();
   });
 

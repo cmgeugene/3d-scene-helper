@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
 import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
+import { LIGHTING_PRESETS } from '../presets/lighting';
 import { createEditorStore } from '../state/editorStore';
 import { EditorShortcuts } from './EditorShortcuts';
 import { Inspector } from './Inspector';
@@ -163,6 +164,61 @@ describe('Inspector', () => {
     expect(store.getState().statusMessage).toBe(
       '바라볼 오브젝트를 먼저 선택하세요.',
     );
+  });
+
+  it('lighting panel에서 preset과 노출, 배경, key 방향, shadow 및 reset을 제어한다', async () => {
+    const user = userEvent.setup();
+    const camera = structuredClone(store.getState().document.outputCamera);
+    const objects = structuredClone(store.getState().document.objects);
+    render(<Inspector store={store} />);
+    await user.click(screen.getByRole('button', { name: '조명' }));
+
+    const preset = screen.getByLabelText('조명 프리셋');
+    expect(within(preset).getAllByRole('option')).toHaveLength(
+      LIGHTING_PRESETS.length,
+    );
+    await user.selectOptions(preset, 'sunset');
+    expect(store.getState().document.lighting).toEqual(
+      LIGHTING_PRESETS[2].value,
+    );
+    expect(store.getState().document.background.color).toBe(
+      LIGHTING_PRESETS[2].backgroundColor,
+    );
+
+    const exposure = screen.getByLabelText('노출');
+    fireEvent.change(exposure, {
+      target: { value: '1.35' },
+    });
+    fireEvent.blur(exposure);
+    fireEvent.change(screen.getByLabelText('배경 색상'), {
+      target: { value: '#112233' },
+    });
+    const keyDirectionX = screen.getByLabelText('키 라이트 방향 X');
+    fireEvent.change(keyDirectionX, {
+      target: { value: '-2' },
+    });
+    fireEvent.blur(keyDirectionX);
+    await user.click(screen.getByRole('checkbox', { name: '그림자' }));
+
+    expect(store.getState().document).toMatchObject({
+      lighting: {
+        presetId: 'sunset',
+        exposure: 1.35,
+        key: { direction: { x: -2 } },
+        shadows: { enabled: false },
+      },
+      background: { color: '#112233' },
+      outputCamera: camera,
+      objects,
+    });
+
+    await user.click(screen.getByRole('button', { name: '프리셋으로 재설정' }));
+    expect(store.getState().document).toMatchObject({
+      lighting: LIGHTING_PRESETS[2].value,
+      background: { color: LIGHTING_PRESETS[2].backgroundColor },
+      outputCamera: camera,
+      objects,
+    });
   });
 });
 
