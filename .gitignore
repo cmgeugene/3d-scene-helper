@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Node.js dependencies and logs
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build, coverage, and browser-test artifacts
+dist/
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# Local environment and editor files
+.env
+.env.*
+!.env.example
+*.local
+.vscode/
+.idea/
+
+# Hermes local state; keep implementation plans versioned
+.hermes/*
+!.hermes/plans/
+!.hermes/plans/**
