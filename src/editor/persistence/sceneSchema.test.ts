@@ -1,0 +1,210 @@
+import { describe, expect, it } from 'vitest';
+import {
+  FILM_GAUGE_MM,
+  MANNEQUIN_REFERENCE_HEIGHT_M,
+  RENDER_LAYERS,
+  SAFE_AREA_INSETS,
+  SCENE_STORAGE_KEY,
+} from '../constants';
+import { ASPECT_RATIO_PRESETS } from '../presets/aspectRatios';
+import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
+import { LIGHTING_PRESETS } from '../presets/lighting';
+import {
+  createSceneObject,
+  createStarterSceneDocument,
+  sceneDocumentSchema,
+} from './sceneSchema';
+
+const STARTER_IDS = {
+  documentId: 'scene-starter',
+  floorId: 'object-floor',
+  mannequinId: 'object-mannequin',
+} as const;
+
+describe('sceneDocumentSchema', () => {
+  it('결정적 starter 문서를 직렬화 왕복하며 핵심 불변식을 보존한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    const parsed = sceneDocumentSchema.parse(
+      JSON.parse(JSON.stringify(document)),
+    );
+
+    expect(parsed).toEqual(document);
+    expect(parsed.id).toBe('scene-starter');
+    expect(parsed.version).toBe(1);
+    expect(parsed.objects).toHaveLength(2);
+    expect(parsed.objects.find(({ kind }) => kind === 'floor')).toMatchObject({
+      id: 'object-floor',
+      exportable: true,
+      visible: true,
+    });
+    expect(
+      parsed.objects.find(({ kind }) => kind === 'mannequin'),
+    ).toMatchObject({
+      id: 'object-mannequin',
+      dimensions: { x: 0.5, y: 1.7, z: 0.3 },
+      visible: true,
+    });
+    expect(parsed.background).toEqual({ color: '#d8d8d8' });
+    expect(parsed.lighting.presetId).toBe('neutral-studio');
+    expect(parsed.outputCamera).toMatchObject({
+      position: { x: 0, y: 1.6, z: 5 },
+      target: { x: 0, y: 1.6, z: 0 },
+      focalLengthMm: 50,
+      rollDeg: 0,
+    });
+  });
+
+  it('중복 object ID를 거부한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    document.objects[1].id = document.objects[0].id;
+
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+  });
+
+  it('0 이하인 object scale을 거부한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    document.objects[1].transform.scale.y = 0;
+
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+  });
+
+  it('sceneNotes는 2000자를 허용하고 2001자를 거부한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    document.sceneNotes = 'a'.repeat(2000);
+
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(true);
+
+    document.sceneNotes += 'a';
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+  });
+
+  it('output 크기는 활성 aspect ratio와 1px 이내로 일치해야 한다', () => {
+    const mismatched = createStarterSceneDocument(STARTER_IDS);
+    mismatched.output = {
+      aspectRatioId: '9:16',
+      width: 1920,
+      height: 1080,
+      mode: 'clean',
+    };
+    const cinematic = createStarterSceneDocument(STARTER_IDS);
+    cinematic.output = {
+      aspectRatioId: '2.39:1',
+      width: 1920,
+      height: 804,
+      mode: 'clean',
+    };
+
+    expect(sceneDocumentSchema.safeParse(mismatched).success).toBe(false);
+    expect(sceneDocumentSchema.safeParse(cinematic).success).toBe(true);
+  });
+
+  it('선택적 motion guide를 허용하되 존재하지 않는 subject 참조는 거부한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    document.subjectMotionGuide = {
+      subjectId: STARTER_IDS.mannequinId,
+      direction: { x: 1, y: 0, z: 0 },
+      strength: 0.75,
+      label: '오른쪽',
+    };
+    document.cameraMotionGuide = {
+      motionType: 'dolly',
+      direction: { x: 0, y: 0, z: -1 },
+      strength: 0.5,
+      label: '돌리 인',
+    };
+
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(true);
+
+    document.subjectMotionGuide.subjectId = 'missing-object';
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+  });
+
+  it('빈 stable ID, 미지원 version, runtime 필드를 거부한다', () => {
+    const withEmptyId = createStarterSceneDocument(STARTER_IDS);
+    withEmptyId.objects[0].id = '';
+
+    const withUnsupportedVersion = {
+      ...createStarterSceneDocument(STARTER_IDS),
+      version: 2,
+    };
+    const withRuntimeField = {
+      ...createStarterSceneDocument(STARTER_IDS),
+      runtime: () => undefined,
+    };
+
+    expect(sceneDocumentSchema.safeParse(withEmptyId).success).toBe(false);
+    expect(sceneDocumentSchema.safeParse(withUnsupportedVersion).success).toBe(
+      false,
+    );
+    expect(sceneDocumentSchema.safeParse(withRuntimeField).success).toBe(false);
+  });
+
+  it('MVP의 모든 addable object를 plain-data factory로 결정적으로 만든다', () => {
+    const kinds = ['cube', 'sphere', 'cylinder', 'plane', 'mannequin'] as const;
+
+    const objects = kinds.map((kind) =>
+      createSceneObject(`object-${kind}`, { kind }),
+    );
+
+    expect(objects.map(({ kind }) => kind)).toEqual(kinds);
+    expect(objects.every(({ transform }) => transform.scale.x > 0)).toBe(true);
+    expect(
+      objects.every(
+        (object) =>
+          sceneDocumentSchema.shape.objects.element.safeParse(object).success,
+      ),
+    ).toBe(true);
+    expect(createSceneObject('object-cube', { kind: 'cube' })).toEqual(
+      createSceneObject('object-cube', { kind: 'cube' }),
+    );
+  });
+
+  it('starter factory는 주입 ID까지 최종 schema로 검증한다', () => {
+    expect(() =>
+      createStarterSceneDocument({ ...STARTER_IDS, documentId: '' }),
+    ).toThrow();
+    expect(() =>
+      createStarterSceneDocument({
+        ...STARTER_IDS,
+        mannequinId: STARTER_IDS.floorId,
+      }),
+    ).toThrow();
+  });
+
+  it('고정 상수와 typed preset 계약을 한 곳에서 제공한다', () => {
+    expect(FILM_GAUGE_MM).toBe(36);
+    expect(MANNEQUIN_REFERENCE_HEIGHT_M).toBe(1.7);
+    expect(RENDER_LAYERS).toEqual({ scene: 0, editor: 1, reference: 2 });
+    expect(SAFE_AREA_INSETS).toEqual({ action: 0.05, title: 0.1 });
+    expect(SCENE_STORAGE_KEY).toMatch(/^i2v-3d-scene-helper:/);
+
+    expect(ASPECT_RATIO_PRESETS.map(({ id }) => id)).toEqual([
+      '16:9',
+      '9:16',
+      '1:1',
+      '2.39:1',
+    ]);
+    expect(LENS_PRESETS.map(({ focalLengthMm }) => focalLengthMm)).toEqual([
+      18, 24, 35, 50, 85,
+    ]);
+    expect(CAMERA_SHOT_PRESETS).toHaveLength(6);
+    expect(
+      CAMERA_SHOT_PRESETS.every(
+        ({ framing }) => framing.reference === 'subject-bounds',
+      ),
+    ).toBe(true);
+    expect(LIGHTING_PRESETS.map(({ id }) => id)).toEqual([
+      'neutral-studio',
+      'daylight',
+      'sunset',
+      'night',
+      'cinematic-backlight',
+    ]);
+    expect(
+      LIGHTING_PRESETS.every(
+        ({ value }) =>
+          sceneDocumentSchema.shape.lighting.safeParse(value).success,
+      ),
+    ).toBe(true);
+  });
+});
