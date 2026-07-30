@@ -236,7 +236,7 @@ p {
   font-size: 0.68rem;
 }
 
-.inspector-tabs button[aria-selected='true'] {
+.inspector-tabs button[aria-pressed='true'] {
   border-color: #5d8bd6;
   color: #fff;
   background: #24436f;

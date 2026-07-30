@@ -44,15 +44,14 @@ export function Inspector({ store }: InspectorProps) {
   return (
     <section className="inspector" aria-labelledby="inspector-title">
       <h2 id="inspector-title">속성</h2>
-      <div className="inspector-tabs" role="tablist" aria-label="속성 패널">
+      <div className="inspector-tabs" role="group" aria-label="속성 패널">
         {PANEL_OPTIONS.map(({ id, label }) => (
           <button
             key={id}
             id={`inspector-tab-${id}`}
             type="button"
-            role="tab"
-            aria-selected={activePanel === id}
-            aria-controls={`inspector-panel-${id}`}
+            aria-pressed={activePanel === id}
+            aria-controls="inspector-panel"
             onClick={() => {
               setActivePanel(id);
             }}
@@ -62,8 +61,8 @@ export function Inspector({ store }: InspectorProps) {
         ))}
       </div>
       <div
-        id={`inspector-panel-${activePanel}`}
-        role="tabpanel"
+        id="inspector-panel"
+        role="region"
         aria-labelledby={`inspector-tab-${activePanel}`}
       >
         {activePanel === 'scene' ? (

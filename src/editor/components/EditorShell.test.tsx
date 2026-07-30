@@ -139,13 +139,15 @@ describe('EditorShell', () => {
     const store = createTestStore();
     render(<EditorShell store={store} webGLState="available" />);
 
-    await user.click(screen.getByRole('tab', { name: '카메라' }));
+    expect(screen.getByRole('group', { name: '속성 패널' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '카메라' }));
 
     expect(store.getState().activePanel).toBe('camera');
-    expect(screen.getByRole('tab', { name: '카메라' })).toHaveAttribute(
-      'aria-selected',
+    expect(screen.getByRole('button', { name: '카메라' })).toHaveAttribute(
+      'aria-pressed',
       'true',
     );
+    expect(screen.getByRole('region', { name: '카메라' })).toBeVisible();
     expect(
       screen.getByText('카메라 설정은 카메라 구성 단계에서 제공됩니다.'),
     ).toBeVisible();

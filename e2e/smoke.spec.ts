@@ -46,3 +46,28 @@ test('지원 최소 높이 미만에서는 데스크톱 안내만 표시한다',
     page.getByRole('complementary', { name: '에셋과 장면' }),
   ).toBeHidden();
 });
+
+test('지원 최소 너비 경계와 가로 overflow를 유지한다', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/');
+
+  await expect(
+    page.getByRole('complementary', { name: '에셋과 장면' }),
+  ).toBeVisible();
+  await expect(page.locator('.unsupported-notice')).toBeHidden();
+  expect(
+    await page.evaluate(
+      'document.documentElement.scrollWidth <= window.innerWidth',
+    ),
+  ).toBe(true);
+
+  await page.setViewportSize({ width: 1279, height: 720 });
+
+  await expect(page.locator('.desktop-editor')).toBeHidden();
+  await expect(page.locator('.unsupported-notice')).toBeVisible();
+  expect(
+    await page.evaluate(
+      'document.documentElement.scrollWidth <= window.innerWidth',
+    ),
+  ).toBe(true);
+});
