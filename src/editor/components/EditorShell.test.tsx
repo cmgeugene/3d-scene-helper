@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
@@ -165,11 +165,17 @@ describe('EditorShell', () => {
 
   it('상태 표시줄에서 선택과 변형 모드를 알린다', async () => {
     const user = userEvent.setup();
-    render(<EditorShell store={createTestStore()} webGLState="available" />);
+    const store = createTestStore();
+    render(<EditorShell store={store} webGLState="available" />);
 
     expect(screen.getByText('선택 없음 · 이동 모드 · 16:9')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Floor' }));
     expect(screen.getByText('Floor 선택됨 · 이동 모드 · 16:9')).toBeVisible();
+
+    act(() => store.getState().setStatusMessage('카메라 동작 완료'));
+    expect(
+      screen.getByText('카메라 동작 완료 · Floor 선택됨 · 이동 모드 · 16:9'),
+    ).toBeVisible();
   });
 
   it('속성 패널 탭 상태를 store와 동기화한다', async () => {
@@ -186,9 +192,8 @@ describe('EditorShell', () => {
       'true',
     );
     expect(screen.getByRole('region', { name: '카메라' })).toBeVisible();
-    expect(
-      screen.getByText('카메라 설정은 카메라 구성 단계에서 제공됩니다.'),
-    ).toBeVisible();
+    expect(screen.getByLabelText('렌즈')).toBeVisible();
+    expect(screen.getByRole('group', { name: '샷 프리셋' })).toBeVisible();
     expect(screen.queryByLabelText('위치 X')).not.toBeInTheDocument();
   });
 

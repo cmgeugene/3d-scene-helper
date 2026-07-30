@@ -22,13 +22,14 @@ export function StatusBar({ store }: StatusBarProps) {
     store,
     (state) => state.document.output.aspectRatioId,
   );
+  const statusMessage = useStore(store, (state) => state.statusMessage);
+  const summary = `${
+    selectedObject === undefined ? '선택 없음' : `${selectedObject.name} 선택됨`
+  } · ${TRANSFORM_MODE_LABELS[transformMode]} 모드 · ${aspectRatioId}`;
 
   return (
     <footer className="status-bar" aria-live="polite">
-      {selectedObject === undefined
-        ? '선택 없음'
-        : `${selectedObject.name} 선택됨`}{' '}
-      · {TRANSFORM_MODE_LABELS[transformMode]} 모드 · {aspectRatioId}
+      {statusMessage === null ? summary : `${statusMessage} · ${summary}`}
     </footer>
   );
 }

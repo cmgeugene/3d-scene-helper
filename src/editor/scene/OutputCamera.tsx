@@ -6,11 +6,36 @@ import {
 } from 'three';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
-import { RENDER_LAYERS } from '../constants';
+import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
+import { ASPECT_RATIO_VALUES, RENDER_LAYERS } from '../constants';
 import type { EditorStore } from '../state/editorStore';
+import { applyOutputCameraProjection } from './cameraMath';
 
 interface OutputCameraProps {
   store: StoreApi<EditorStore>;
+}
+
+const roundDiagnosticValue = (value: number) => Number(value.toFixed(6));
+
+function publishRuntimeCamera(
+  camera: PerspectiveCameraImpl,
+  target: EditorStore['document']['outputCamera']['target'],
+  domElement: HTMLCanvasElement,
+) {
+  if (!IS_EDITOR_TEST_BRIDGE_ENABLED) return;
+
+  domElement.dataset.runtimeCamera = JSON.stringify({
+    position: {
+      x: roundDiagnosticValue(camera.position.x),
+      y: roundDiagnosticValue(camera.position.y),
+      z: roundDiagnosticValue(camera.position.z),
+    },
+    target,
+    focalLengthMm: roundDiagnosticValue(camera.getFocalLength()),
+    filmGaugeMm: roundDiagnosticValue(camera.filmGauge),
+    aspect: roundDiagnosticValue(camera.aspect),
+    rotationZDeg: roundDiagnosticValue(MathUtils.radToDeg(camera.rotation.z)),
+  });
 }
 
 export function OutputCamera({ store }: OutputCameraProps) {
@@ -20,7 +45,11 @@ export function OutputCamera({ store }: OutputCameraProps) {
     store,
     (state) => state.navigation.isInteracting,
   );
-  const size = useThree((state) => state.size);
+  const outputAspectId = useStore(
+    store,
+    (state) => state.document.output.aspectRatioId,
+  );
+  const domElement = useThree((state) => state.gl.domElement);
   const setThree = useThree((state) => state.set);
 
   useLayoutEffect(() => {
@@ -46,11 +75,14 @@ export function OutputCamera({ store }: OutputCameraProps) {
       cameraData.target.z,
     );
     camera.rotateZ(MathUtils.degToRad(cameraData.rollDeg));
-    camera.aspect = size.width / Math.max(size.height, 1);
-    camera.setFocalLength(cameraData.focalLengthMm);
+    applyOutputCameraProjection(
+      camera,
+      ASPECT_RATIO_VALUES[outputAspectId],
+      cameraData.focalLengthMm,
+    );
     camera.layers.enable(RENDER_LAYERS.editor);
-    camera.updateProjectionMatrix();
-  }, [cameraData, isInteracting, size.height, size.width]);
+    publishRuntimeCamera(camera, cameraData.target, domElement);
+  }, [cameraData, domElement, isInteracting, outputAspectId]);
 
   return (
     <perspectiveCamera

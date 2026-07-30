@@ -14,7 +14,11 @@ interface EditorNavigationProps {
 
 const roundDiagnosticValue = (value: number) => Number(value.toFixed(6));
 
-function publishRuntimeCamera(camera: Camera, domElement: HTMLCanvasElement) {
+function publishRuntimeCamera(
+  camera: Camera,
+  target: Vector3,
+  domElement: HTMLCanvasElement,
+) {
   if (
     !IS_EDITOR_TEST_BRIDGE_ENABLED ||
     !(camera instanceof PerspectiveCamera)
@@ -28,7 +32,14 @@ function publishRuntimeCamera(camera: Camera, domElement: HTMLCanvasElement) {
       y: roundDiagnosticValue(camera.position.y),
       z: roundDiagnosticValue(camera.position.z),
     },
+    target: {
+      x: roundDiagnosticValue(target.x),
+      y: roundDiagnosticValue(target.y),
+      z: roundDiagnosticValue(target.z),
+    },
     focalLengthMm: roundDiagnosticValue(camera.getFocalLength()),
+    filmGaugeMm: roundDiagnosticValue(camera.filmGauge),
+    aspect: roundDiagnosticValue(camera.aspect),
     rotationZDeg: roundDiagnosticValue(MathUtils.radToDeg(camera.rotation.z)),
   });
 }
@@ -42,7 +53,7 @@ function applyCameraRoll(
   camera.up.set(0, 1, 0);
   camera.lookAt(target);
   camera.rotateZ(MathUtils.degToRad(rollDeg));
-  publishRuntimeCamera(camera, domElement);
+  publishRuntimeCamera(camera, target, domElement);
 }
 
 function setNavigationEnabled(

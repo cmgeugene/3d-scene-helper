@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { SceneObject } from '../persistence/sceneSchema';
+import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
 import type { EditorStore } from '../state/editorStore';
 import type { EditorPanel } from '../types';
 
@@ -29,11 +30,78 @@ const PANEL_OPTIONS: ReadonlyArray<{
   { id: 'output', label: '출력' },
 ];
 
-const DEFERRED_PANEL_MESSAGES: Record<Exclude<EditorPanel, 'scene'>, string> = {
-  camera: '카메라 설정은 카메라 구성 단계에서 제공됩니다.',
+const DEFERRED_PANEL_MESSAGES: Record<
+  Exclude<EditorPanel, 'scene' | 'camera'>,
+  string
+> = {
   lighting: '조명 설정은 조명 구성 단계에서 제공됩니다.',
   output: '출력 설정은 내보내기 구성 단계에서 제공됩니다.',
 };
+
+function CameraControls({ store }: InspectorProps) {
+  const camera = useStore(store, (state) => state.document.outputCamera);
+
+  return (
+    <div className="camera-controls">
+      <label className="camera-field">
+        <span>렌즈</span>
+        <select
+          aria-label="렌즈"
+          value={camera.focalLengthMm}
+          onChange={(event) => {
+            const focalLengthMm = Number(event.currentTarget.value);
+            const preset = LENS_PRESETS.find(
+              (candidate) => candidate.focalLengthMm === focalLengthMm,
+            );
+            if (preset !== undefined) {
+              store.getState().setCameraLens(preset.focalLengthMm);
+            }
+          }}
+        >
+          {LENS_PRESETS.map((preset) => (
+            <option key={preset.focalLengthMm} value={preset.focalLengthMm}>
+              {preset.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <fieldset>
+        <legend>샷 프리셋</legend>
+        <div className="shot-grid">
+          {CAMERA_SHOT_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => {
+                store.getState().applyCameraShot(preset.id);
+              }}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <div className="camera-actions">
+        <button
+          type="button"
+          onClick={() => {
+            store.getState().frameSelected();
+          }}
+        >
+          선택 프레임 맞춤
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            store.getState().lookAtSelected();
+          }}
+        >
+          선택 바라보기
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function createTransformDraft(object: SceneObject | undefined) {
   if (object === undefined) return {};
@@ -229,6 +297,8 @@ export function Inspector({ store }: InspectorProps) {
               </div>
             </fieldset>
           </>
+        ) : activePanel === 'camera' ? (
+          <CameraControls store={store} />
         ) : (
           <p className="panel-placeholder">
             {DEFERRED_PANEL_MESSAGES[activePanel]}

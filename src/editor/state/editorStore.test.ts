@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
+import { CAMERA_SHOT_PRESETS } from '../presets/cameras';
 import {
   createEditorStore,
   DOCUMENT_MUTATION_KINDS,
@@ -56,6 +57,7 @@ describe('editorStore', () => {
       isInteracting: false,
     });
     expect(state.inProgressTransform).toBeNull();
+    expect(state.statusMessage).toBeNull();
     expect(state.exportState).toEqual({
       status: 'idle',
       progress: 0,
@@ -399,6 +401,95 @@ describe('editorStore', () => {
     expect(store.getState().isDirty).toBe(true);
   });
 
+  it('lens preset을 explicit camera commit 한 번으로 적용한다', () => {
+    let documentChanges = 0;
+    const unsubscribe = store.subscribe((state, previousState) => {
+      if (state.document !== previousState.document) documentChanges += 1;
+    });
+
+    store.getState().setCameraLens(35);
+
+    expect(store.getState().document.outputCamera.focalLengthMm).toBe(35);
+    expect(store.getState().navigation).toMatchObject({
+      position: store.getState().document.outputCamera.position,
+      target: store.getState().document.outputCamera.target,
+      isInteracting: false,
+    });
+    expect(documentChanges).toBe(1);
+    unsubscribe();
+  });
+
+  it('selection, transform mode, aspect 변경은 이전 camera status를 지운다', () => {
+    store.getState().setCameraLens(35);
+    expect(store.getState().statusMessage).toBe('35mm 렌즈를 적용했습니다.');
+
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    expect(store.getState().statusMessage).toBeNull();
+    store.getState().setCameraLens(50);
+    store.getState().setTransformMode('rotate');
+    expect(store.getState().statusMessage).toBeNull();
+    store.getState().setCameraLens(85);
+    store.getState().setOutput({
+      ...store.getState().document.output,
+      aspectRatioId: '9:16',
+      width: 1080,
+      height: 1920,
+    });
+    expect(store.getState().statusMessage).toBeNull();
+  });
+
+  it('6개 shot preset을 selected bounds에서 explicit camera commit한다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+
+    for (const preset of CAMERA_SHOT_PRESETS) {
+      store.getState().applyCameraShot(preset.id);
+      const camera = store.getState().document.outputCamera;
+      expect(camera.target.x).toBe(0);
+      expect(camera.target.z).toBe(0);
+      expect(Number.isFinite(camera.position.z)).toBe(true);
+      expect(camera.rollDeg).toBe(preset.framing.rollDeg);
+    }
+  });
+
+  it('frame/look at selected는 bounds를 사용하고 selection이 없으면 camera를 보존해 status를 알린다', () => {
+    const initialCamera = store.getState().document.outputCamera;
+
+    store.getState().frameSelected();
+    expect(store.getState().document.outputCamera).toBe(initialCamera);
+    expect(store.getState().statusMessage).toBe(
+      '프레임에 맞출 오브젝트를 먼저 선택하세요.',
+    );
+
+    store.getState().lookAtSelected();
+    expect(store.getState().document.outputCamera).toBe(initialCamera);
+    expect(store.getState().statusMessage).toBe(
+      '바라볼 오브젝트를 먼저 선택하세요.',
+    );
+
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    store.getState().frameSelected();
+    expect(store.getState().document.outputCamera.target).toEqual({
+      x: 0,
+      y: 0.85,
+      z: 0,
+    });
+    expect(store.getState().statusMessage).toBe(
+      'Mannequin을 프레임에 맞췄습니다.',
+    );
+
+    store.getState().commitCamera({
+      ...store.getState().document.outputCamera,
+      position: { x: 4, y: 3, z: 6 },
+      target: { x: 1, y: 1, z: 1 },
+    });
+    store.getState().lookAtSelected();
+    expect(store.getState().document.outputCamera).toMatchObject({
+      position: { x: 4, y: 3, z: 6 },
+      target: { x: 0, y: 0.85, z: 0 },
+    });
+    expect(store.getState().statusMessage).toBe('Mannequin을 바라봅니다.');
+  });
+
   it('transient setter는 document와 dirty 상태를 변경하지 않는다', () => {
     const originalDocument = store.getState().document;
 
@@ -415,6 +506,7 @@ describe('editorStore', () => {
       progress: 0.5,
       error: null,
     });
+    store.getState().setStatusMessage('테스트 상태');
 
     expect(store.getState()).toMatchObject({
       document: originalDocument,
@@ -423,6 +515,7 @@ describe('editorStore', () => {
       activePanel: 'camera',
       navigation: { isInteracting: true },
       exportState: { status: 'exporting', progress: 0.5 },
+      statusMessage: '테스트 상태',
       isDirty: false,
     });
   });

@@ -9,6 +9,7 @@ import {
   type Raycaster,
 } from 'three';
 import type { TransformControls as TransformControlsImpl } from 'three-stdlib';
+import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
 import { RENDER_LAYERS } from '../constants';
@@ -99,6 +100,7 @@ export function SelectionTransformControls({
   const camera = useThree((state) => state.camera) as PerspectiveCamera;
   const domElement = useThree((state) => state.gl.domElement);
   const mode = store.getState().transformMode;
+  const cameraData = useStore(store, (state) => state.document.outputCamera);
 
   useLayoutEffect(() => {
     const controls = controlsRef.current;
@@ -109,7 +111,7 @@ export function SelectionTransformControls({
     internals.raycaster.layers.set(RENDER_LAYERS.editor);
   }, []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     publishDiagnostics(object, mode, draggingRef.current, camera, domElement);
     return () => {
       if (IS_EDITOR_TEST_BRIDGE_ENABLED) {
@@ -121,7 +123,7 @@ export function SelectionTransformControls({
         delete domElement.dataset.gizmoOrigin;
       }
     };
-  }, [camera, domElement, mode, object, objectData.transform]);
+  }, [camera, cameraData, domElement, mode, object, objectData.transform]);
 
   useEffect(
     () => () => {

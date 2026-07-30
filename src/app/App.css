@@ -305,11 +305,67 @@ p {
     #080c13;
 }
 
+.scene-viewport-surface {
+  position: absolute !important;
+  inset: 0;
+  overflow: hidden;
+}
+
+.camera-frame {
+  position: absolute;
+  overflow: hidden;
+  background: #111827;
+  box-shadow: 0 0 0 1px rgb(124 168 255 / 30%);
+}
+
 .scene-canvas {
   position: absolute !important;
   inset: 0;
   width: 100% !important;
   height: 100% !important;
+}
+
+.composition-guides {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.composition-line,
+.composition-safe {
+  position: absolute;
+  display: block;
+}
+
+.composition-line {
+  background: rgb(236 245 255 / 72%);
+  box-shadow: 0 0 2px rgb(7 12 20 / 80%);
+}
+
+.composition-line--vertical {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.composition-line--horizontal {
+  right: 0;
+  left: 0;
+  height: 1px;
+}
+
+.composition-line--center {
+  background: rgb(126 216 255 / 88%);
+}
+
+.composition-safe {
+  border: 1px dashed rgb(255 213 126 / 86%);
+}
+
+.composition-safe--title {
+  border-color: rgb(255 157 178 / 88%);
 }
 
 .viewport-guidance {
@@ -424,9 +480,34 @@ p {
 .transform-fields,
 .object-controls,
 .object-actions,
-.axis-fields {
+.axis-fields,
+.camera-controls,
+.camera-actions,
+.shot-grid,
+.camera-field {
   display: grid;
   gap: 0.55rem;
+}
+
+.camera-field {
+  color: #aebbd0;
+  font-size: 0.72rem;
+}
+
+.camera-field select {
+  min-height: 2rem;
+  padding: 0.35rem;
+}
+
+.shot-grid,
+.camera-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.shot-grid button,
+.camera-actions button {
+  min-width: 0;
+  font-size: 0.7rem;
 }
 
 .object-controls {

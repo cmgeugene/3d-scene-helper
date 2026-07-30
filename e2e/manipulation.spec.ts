@@ -109,12 +109,28 @@ async function findGizmoAxis(page: Page, canvas: Locator, axis: 'X' | 'Z') {
         box.x + origin.x + offset.x,
         box.y + origin.y + offset.y,
       );
-      if ((await canvas.getAttribute('data-transform-axis')) === axis)
-        return offset;
+      if ((await canvas.getAttribute('data-transform-axis')) === axis) {
+        await page.mouse.move(box.x + 2, box.y + 2);
+        await expect
+          .poll(() => canvas.getAttribute('data-transform-axis'), {
+            timeout: 500,
+          })
+          .not.toBe(axis);
+        await page.mouse.move(
+          box.x + origin.x + offset.x,
+          box.y + origin.y + offset.y,
+        );
+        await page.waitForTimeout(32);
+        if ((await canvas.getAttribute('data-transform-axis')) === axis) {
+          return offset;
+        }
+      }
     }
   }
 
-  throw new Error(`${axis} gizmo handle을 찾지 못했습니다.`);
+  throw new Error(
+    `${axis} gizmo handle을 찾지 못했습니다. origin=${JSON.stringify(origin)} canvas=${JSON.stringify(box)}`,
+  );
 }
 
 async function rotateZGizmo(
@@ -363,6 +379,28 @@ for (const subject of [
       await page.getByRole('button', { name: subject.addLabel }).click();
     }
     await expect(canvas).toHaveAttribute('data-transform-object', subject.root);
+    await page.getByRole('button', { name: '카메라' }).click();
+    await page.getByRole('button', { name: '선택 프레임 맞춤' }).click();
+    await expect(page.locator('.status-bar')).toContainText(
+      `${subject.label}을 프레임에 맞췄습니다.`,
+    );
+    await expect
+      .poll(async () => {
+        const origin = JSON.parse(
+          (await canvas.getAttribute('data-gizmo-origin')) ?? 'null',
+        ) as { x: number; y: number } | null;
+        const box = await canvas.boundingBox();
+        return (
+          origin !== null &&
+          box !== null &&
+          origin.x >= 0 &&
+          origin.x <= box.width &&
+          origin.y >= 0 &&
+          origin.y <= box.height
+        );
+      })
+      .toBe(true);
+    await page.getByRole('button', { name: '장면', exact: true }).click();
 
     const beforeTranslate = await selectedTransform(page);
     await page.keyboard.press('w');

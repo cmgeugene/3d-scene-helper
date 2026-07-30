@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
+import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
 import { createEditorStore } from '../state/editorStore';
 import { EditorShortcuts } from './EditorShortcuts';
 import { Inspector } from './Inspector';
@@ -112,6 +113,56 @@ describe('Inspector', () => {
     await user.click(screen.getByRole('button', { name: '삭제' }));
     expect(store.getState().selectedObjectId).toBeNull();
     expect(store.getState().document.objects).toHaveLength(2);
+  });
+
+  it('camera panel에서 5개 lens와 6개 bounds 기반 shot/action을 적용한다', async () => {
+    const user = userEvent.setup();
+    render(<Inspector store={store} />);
+    await user.click(screen.getByRole('button', { name: '카메라' }));
+
+    const lens = screen.getByLabelText('렌즈');
+    expect(screen.getAllByRole('option', { name: /mm$/ })).toHaveLength(
+      LENS_PRESETS.length,
+    );
+    await user.selectOptions(lens, '35');
+    expect(store.getState().document.outputCamera.focalLengthMm).toBe(35);
+
+    const shotGroup = screen.getByRole('group', { name: '샷 프리셋' });
+    for (const preset of CAMERA_SHOT_PRESETS) {
+      expect(
+        within(shotGroup).getByRole('button', { name: preset.label }),
+      ).toBeVisible();
+    }
+    await user.click(within(shotGroup).getByRole('button', { name: '전신' }));
+    expect(store.getState().statusMessage).toBe('전신 샷을 적용했습니다.');
+
+    await user.click(screen.getByRole('button', { name: '선택 프레임 맞춤' }));
+    expect(store.getState().document.outputCamera.target).toEqual({
+      x: 0,
+      y: 0.85,
+      z: 0,
+    });
+    await user.click(screen.getByRole('button', { name: '선택 바라보기' }));
+    expect(store.getState().statusMessage).toBe('Mannequin을 바라봅니다.');
+  });
+
+  it('camera selected action은 selection이 없을 때 camera를 보존하고 status를 설정한다', async () => {
+    const user = userEvent.setup();
+    store.getState().selectObject(null);
+    const camera = store.getState().document.outputCamera;
+    render(<Inspector store={store} />);
+    await user.click(screen.getByRole('button', { name: '카메라' }));
+
+    await user.click(screen.getByRole('button', { name: '선택 프레임 맞춤' }));
+    expect(store.getState().document.outputCamera).toBe(camera);
+    expect(store.getState().statusMessage).toBe(
+      '프레임에 맞출 오브젝트를 먼저 선택하세요.',
+    );
+    await user.click(screen.getByRole('button', { name: '선택 바라보기' }));
+    expect(store.getState().document.outputCamera).toBe(camera);
+    expect(store.getState().statusMessage).toBe(
+      '바라볼 오브젝트를 먼저 선택하세요.',
+    );
   });
 });
 

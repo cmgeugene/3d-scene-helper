@@ -1,4 +1,5 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import { ASPECT_RATIO_VALUES } from '../constants';
 import {
   createSceneObject,
   sceneDocumentSchema,
@@ -6,6 +7,18 @@ import {
   type SceneDocument,
   type SceneObject,
 } from '../persistence/sceneSchema';
+import {
+  CAMERA_SHOT_PRESETS,
+  LENS_PRESETS,
+  type CameraShotPreset,
+  type LensPreset,
+} from '../presets/cameras';
+import {
+  computeCameraShot,
+  computeFrameSelectedCamera,
+  computeLookAtSelectedCamera,
+} from '../scene/cameraMath';
+import { getSceneObjectBounds } from '../scene/sceneObjectModel';
 import type {
   EditorNavigation,
   EditorPanel,
@@ -45,6 +58,7 @@ export interface EditorStore {
   navigation: EditorNavigation;
   inProgressTransform: InProgressTransform | null;
   exportState: ExportState;
+  statusMessage: string | null;
   addObject: (input: AddSceneObjectInput) => string;
   selectObject: (id: string | null) => void;
   setHoveredObject: (id: string | null) => void;
@@ -58,6 +72,10 @@ export interface EditorStore {
   deleteObject: (id: string) => void;
   resetScene: () => void;
   commitCamera: (camera: SceneDocument['outputCamera']) => void;
+  setCameraLens: (focalLengthMm: LensPreset['focalLengthMm']) => void;
+  applyCameraShot: (presetId: CameraShotPreset['id']) => void;
+  frameSelected: () => void;
+  lookAtSelected: () => void;
   setLighting: (lighting: SceneDocument['lighting']) => void;
   setBackgroundColor: (color: string) => void;
   setOutput: (output: SceneDocument['output']) => void;
@@ -73,6 +91,7 @@ export interface EditorStore {
   setActivePanel: (panel: EditorPanel) => void;
   setNavigation: (navigation: EditorNavigation) => void;
   setExportState: (exportState: ExportState) => void;
+  setStatusMessage: (statusMessage: string | null) => void;
 }
 
 export function createEditorStore(options: EditorStoreOptions) {
@@ -126,6 +145,7 @@ export function createEditorStore(options: EditorStoreOptions) {
       progress: 0,
       error: null,
     },
+    statusMessage: null,
     addObject: (input) => {
       if ((input as { kind: string }).kind === 'floor') {
         throw new Error('Floor is starter scene content');
@@ -141,6 +161,7 @@ export function createEditorStore(options: EditorStoreOptions) {
         }),
         selectedObjectId: id,
         isDirty: true,
+        statusMessage: null,
       }));
 
       return id;
@@ -152,6 +173,7 @@ export function createEditorStore(options: EditorStoreOptions) {
           state.document.objects.some((object) => object.id === id)
             ? id
             : null,
+        statusMessage: null,
       }));
     },
     setHoveredObject: (id) => {
@@ -241,6 +263,7 @@ export function createEditorStore(options: EditorStoreOptions) {
           }),
           selectedObjectId: duplicateId,
           isDirty: true,
+          statusMessage: null,
         };
       });
 
@@ -272,6 +295,7 @@ export function createEditorStore(options: EditorStoreOptions) {
               ? null
               : state.inProgressTransform,
           isDirty: true,
+          statusMessage: null,
         };
       });
     },
@@ -287,6 +311,7 @@ export function createEditorStore(options: EditorStoreOptions) {
           isInteracting: false,
         },
         isDirty: true,
+        statusMessage: null,
       });
     },
     commitCamera: (camera) => {
@@ -302,6 +327,71 @@ export function createEditorStore(options: EditorStoreOptions) {
         },
         isDirty: true,
       }));
+    },
+    setCameraLens: (focalLengthMm) => {
+      if (
+        !LENS_PRESETS.some((preset) => preset.focalLengthMm === focalLengthMm)
+      ) {
+        throw new RangeError('지원하지 않는 렌즈 프리셋입니다.');
+      }
+      const camera = get().document.outputCamera;
+      get().commitCamera({ ...camera, focalLengthMm });
+      set({ statusMessage: `${focalLengthMm}mm 렌즈를 적용했습니다.` });
+    },
+    applyCameraShot: (presetId) => {
+      const preset = CAMERA_SHOT_PRESETS.find(({ id }) => id === presetId);
+      if (preset === undefined) return;
+      const state = get();
+      const selected = state.document.objects.find(
+        ({ id }) => id === state.selectedObjectId,
+      );
+      const fallback = state.document.objects.find(
+        ({ kind, visible }) => kind === 'mannequin' && visible,
+      );
+      const subject = selected ?? fallback;
+      const camera = computeCameraShot(
+        subject === undefined ? null : getSceneObjectBounds(subject),
+        state.document.outputCamera,
+        ASPECT_RATIO_VALUES[state.document.output.aspectRatioId],
+        preset,
+      );
+      get().commitCamera(camera);
+      set({ statusMessage: `${preset.label} 샷을 적용했습니다.` });
+    },
+    frameSelected: () => {
+      const state = get();
+      const selected = state.document.objects.find(
+        ({ id }) => id === state.selectedObjectId,
+      );
+      if (selected === undefined) {
+        set({ statusMessage: '프레임에 맞출 오브젝트를 먼저 선택하세요.' });
+        return;
+      }
+      get().commitCamera(
+        computeFrameSelectedCamera(
+          getSceneObjectBounds(selected),
+          state.document.outputCamera,
+          ASPECT_RATIO_VALUES[state.document.output.aspectRatioId],
+        ),
+      );
+      set({ statusMessage: `${selected.name}을 프레임에 맞췄습니다.` });
+    },
+    lookAtSelected: () => {
+      const state = get();
+      const selected = state.document.objects.find(
+        ({ id }) => id === state.selectedObjectId,
+      );
+      if (selected === undefined) {
+        set({ statusMessage: '바라볼 오브젝트를 먼저 선택하세요.' });
+        return;
+      }
+      get().commitCamera(
+        computeLookAtSelectedCamera(
+          getSceneObjectBounds(selected),
+          state.document.outputCamera,
+        ),
+      );
+      set({ statusMessage: `${selected.name}을 바라봅니다.` });
     },
     setLighting: (lighting) => {
       set((state) => ({
@@ -322,6 +412,7 @@ export function createEditorStore(options: EditorStoreOptions) {
       set((state) => ({
         document: sceneDocumentSchema.parse({ ...state.document, output }),
         isDirty: true,
+        statusMessage: null,
       }));
     },
     setSubjectMotionGuide: (guide) => {
@@ -359,7 +450,7 @@ export function createEditorStore(options: EditorStoreOptions) {
       }));
     },
     setTransformMode: (transformMode) => {
-      set({ transformMode });
+      set({ transformMode, statusMessage: null });
     },
     setGuideVisibility: (visibility) => {
       set((state) => ({
@@ -374,6 +465,9 @@ export function createEditorStore(options: EditorStoreOptions) {
     },
     setExportState: (exportState) => {
       set({ exportState: structuredClone(exportState) });
+    },
+    setStatusMessage: (statusMessage) => {
+      set({ statusMessage });
     },
   }));
 }
