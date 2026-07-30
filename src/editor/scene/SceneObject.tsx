@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef } from 'react';
-import { DoubleSide, MathUtils, type Mesh } from 'three';
+import { useCallback, useLayoutEffect, useRef } from 'react';
+import { DoubleSide, MathUtils, type Group, type Mesh } from 'three';
 import { RENDER_LAYERS } from '../constants';
 import type { SceneObject as SceneObjectData } from '../persistence/sceneSchema';
 import { Mannequin } from './Mannequin';
@@ -9,6 +9,7 @@ interface SceneObjectProps {
   object: SceneObjectData;
   selected: boolean;
   onSelect: (id: string) => void;
+  onRootReady: (id: string, root: Group | null) => void;
 }
 
 interface PrimitiveProps {
@@ -118,12 +119,24 @@ function SelectionHelper({ object }: { object: SceneObjectData }) {
   );
 }
 
-export function SceneObject({ object, selected, onSelect }: SceneObjectProps) {
+export function SceneObject({
+  object,
+  selected,
+  onSelect,
+  onRootReady,
+}: SceneObjectProps) {
   const model = getSceneObjectModel(object);
   const { position, rotationDeg, scale } = object.transform;
+  const rootRef = useCallback(
+    (root: Group | null) => {
+      onRootReady(object.id, root);
+    },
+    [object.id, onRootReady],
+  );
 
   return (
     <group
+      ref={rootRef}
       name={model.testName}
       userData={{ sceneObjectId: object.id, displayName: model.displayName }}
       position={[position.x, position.y, position.z]}

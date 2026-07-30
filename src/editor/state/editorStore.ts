@@ -52,6 +52,7 @@ export interface EditorStore {
   setObjectColor: (id: string, color: string) => void;
   setObjectVisibility: (id: string, visible: boolean) => void;
   beginTransform: () => void;
+  cancelTransform: () => void;
   commitTransform: (transform: SceneObject['transform']) => void;
   duplicateObject: (id: string) => string | null;
   deleteObject: (id: string) => void;
@@ -191,6 +192,13 @@ export function createEditorStore(options: EditorStoreOptions) {
           },
         };
       });
+    },
+    cancelTransform: () => {
+      set((state) =>
+        state.inProgressTransform === null
+          ? state
+          : { inProgressTransform: null },
+      );
     },
     commitTransform: (transform) => {
       set((state) => {

@@ -198,6 +198,54 @@ describe('editorStore', () => {
     expect(store.getState().inProgressTransform).not.toBeNull();
   });
 
+  it('cancelTransform은 runtime drag를 document mutation 없이 끝낸다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    const documentBeforeDrag = store.getState().document;
+    store.getState().beginTransform();
+
+    store.getState().cancelTransform();
+
+    expect(store.getState().document).toBe(documentBeforeDrag);
+    expect(store.getState().inProgressTransform).toBeNull();
+    expect(store.getState().isDirty).toBe(false);
+  });
+
+  it('한 transform drag는 document 변경을 정확히 한 번만 만든다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    let documentChanges = 0;
+    const unsubscribe = store.subscribe((state, previousState) => {
+      if (state.document !== previousState.document) documentChanges += 1;
+    });
+    const finalTransform = {
+      position: { x: 1, y: 0.85, z: 0 },
+      rotationDeg: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    };
+
+    store.getState().beginTransform();
+    store.getState().commitTransform(finalTransform);
+    store.getState().commitTransform(finalTransform);
+
+    expect(documentChanges).toBe(1);
+    unsubscribe();
+  });
+
+  it('commitTransform은 NaN과 infinite transform을 거부한다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    store.getState().beginTransform();
+    const documentBeforeCommit = store.getState().document;
+
+    expect(() =>
+      store.getState().commitTransform({
+        position: { x: Number.NaN, y: 0.85, z: 0 },
+        rotationDeg: { x: 0, y: Number.POSITIVE_INFINITY, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      }),
+    ).toThrow();
+    expect(store.getState().document).toBe(documentBeforeCommit);
+    expect(store.getState().inProgressTransform).not.toBeNull();
+  });
+
   it('object를 주입된 새 ID로 복제해 원본과 독립된 사본을 선택한다', () => {
     store = makeStore(['object-mannequin-copy']);
 

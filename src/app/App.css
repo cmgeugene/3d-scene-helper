@@ -117,7 +117,7 @@ p {
 
 .toolbar-actions {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: auto auto auto minmax(0, 1fr);
   min-width: 0;
   gap: 0.55rem;
 }
@@ -422,9 +422,41 @@ p {
 }
 
 .transform-fields,
+.object-controls,
+.object-actions,
 .axis-fields {
   display: grid;
   gap: 0.55rem;
+}
+
+.object-controls {
+  margin-top: 0.7rem !important;
+}
+
+.object-controls > label {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  color: #aebbd0;
+  font-size: 0.72rem;
+}
+
+.object-controls input[type='color'] {
+  width: 2.5rem;
+  height: 1.8rem;
+  padding: 0.15rem;
+}
+
+.object-controls input[type='checkbox'] {
+  accent-color: #6f9dff;
+}
+
+.object-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.axis-fields input[aria-invalid='true'] {
+  border-color: #ff7f73;
 }
 
 .axis-fields {

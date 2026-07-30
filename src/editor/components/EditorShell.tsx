@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import type { StoreApi } from 'zustand';
 import type { EditorStore } from '../state/editorStore';
 import { AssetPanel } from './AssetPanel';
+import { EditorShortcuts } from './EditorShortcuts';
 import { Inspector } from './Inspector';
 import { Outliner } from './Outliner';
 import { StatusBar } from './StatusBar';
@@ -48,6 +49,7 @@ export function EditorShell({
 }: EditorShellProps) {
   return (
     <main className="editor-shell">
+      <EditorShortcuts store={store} />
       <div className="desktop-editor">
         <TopToolbar store={store} />
         <div className="editor-workspace">

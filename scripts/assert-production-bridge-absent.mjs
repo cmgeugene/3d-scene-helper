@@ -7,7 +7,16 @@ const projectRoot = path.resolve(
   '..',
 );
 const distDirectory = path.join(projectRoot, 'dist');
-const forbiddenMarkers = ['__I2V_EDITOR_STORE__', 'runtimeCamera'];
+const forbiddenMarkers = [
+  '__I2V_EDITOR_STORE__',
+  'runtimeCamera',
+  'runtimeTransform',
+  'transformObject',
+  'transformDragging',
+  'transformAxis',
+  'gizmoOrigin',
+  'orbitEnabled',
+];
 
 async function collectFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });

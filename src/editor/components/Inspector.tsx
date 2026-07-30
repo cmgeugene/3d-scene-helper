@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { SceneObject } from '../persistence/sceneSchema';
@@ -34,12 +35,63 @@ const DEFERRED_PANEL_MESSAGES: Record<Exclude<EditorPanel, 'scene'>, string> = {
   output: '출력 설정은 내보내기 구성 단계에서 제공됩니다.',
 };
 
+function createTransformDraft(object: SceneObject | undefined) {
+  if (object === undefined) return {};
+  return Object.fromEntries(
+    TRANSFORM_GROUPS.flatMap(({ key }) =>
+      AXES.map((axis) => [
+        `${key}.${axis}`,
+        String(object.transform[key][axis]),
+      ]),
+    ),
+  );
+}
+
 export function Inspector({ store }: InspectorProps) {
   const selectedObject = useStore(store, (state) =>
     state.document.objects.find(({ id }) => id === state.selectedObjectId),
   );
   const activePanel = useStore(store, (state) => state.activePanel);
   const setActivePanel = useStore(store, (state) => state.setActivePanel);
+  const [draftObject, setDraftObject] = useState(selectedObject);
+  const [draft, setDraft] = useState<Record<string, string>>(() =>
+    createTransformDraft(selectedObject),
+  );
+  const [invalidFields, setInvalidFields] = useState<Set<string>>(new Set());
+
+  if (draftObject !== selectedObject) {
+    setDraftObject(selectedObject);
+    setDraft(createTransformDraft(selectedObject));
+    setInvalidFields(new Set());
+  }
+
+  const commitDraft = (
+    key: keyof SceneObject['transform'],
+    axis: (typeof AXES)[number],
+  ) => {
+    if (selectedObject === undefined) return;
+    const field = `${key}.${axis}`;
+    const rawValue = draft[field] ?? '';
+    const value = Number(rawValue);
+    const valid =
+      rawValue.trim() !== '' &&
+      Number.isFinite(value) &&
+      (key !== 'scale' || value > 0);
+
+    if (!valid) {
+      setDraft((current) => ({
+        ...current,
+        [field]: String(selectedObject.transform[key][axis]),
+      }));
+      setInvalidFields((current) => new Set(current).add(field));
+      return;
+    }
+
+    const transform = structuredClone(selectedObject.transform);
+    transform[key][axis] = value;
+    store.getState().beginTransform();
+    store.getState().commitTransform(transform);
+  };
 
   return (
     <section className="inspector" aria-labelledby="inspector-title">
@@ -82,9 +134,29 @@ export function Inspector({ store }: InspectorProps) {
                           aria-label={`${label} ${axis.toUpperCase()}`}
                           type="number"
                           step={key === 'rotationDeg' ? 1 : 0.01}
-                          value={selectedObject?.transform[key][axis] ?? ''}
+                          value={draft[`${key}.${axis}`] ?? ''}
                           disabled={selectedObject === undefined}
-                          readOnly
+                          aria-invalid={invalidFields.has(`${key}.${axis}`)}
+                          onChange={(event) => {
+                            const field = `${key}.${axis}`;
+                            const value = event.currentTarget.value;
+                            setInvalidFields((current) => {
+                              const next = new Set(current);
+                              next.delete(field);
+                              return next;
+                            });
+                            setDraft((current) => ({
+                              ...current,
+                              [field]: value,
+                            }));
+                          }}
+                          onBlur={() => {
+                            commitDraft(key, axis);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter')
+                              event.currentTarget.blur();
+                          }}
                         />
                       </label>
                     ))}
@@ -92,6 +164,70 @@ export function Inspector({ store }: InspectorProps) {
                 </fieldset>
               ))}
             </div>
+            <fieldset className="object-controls">
+              <legend>오브젝트</legend>
+              <label>
+                <span>색상</span>
+                <input
+                  aria-label="색상"
+                  type="color"
+                  value={selectedObject?.color ?? '#000000'}
+                  disabled={selectedObject === undefined}
+                  onChange={(event) => {
+                    if (selectedObject !== undefined) {
+                      store
+                        .getState()
+                        .setObjectColor(
+                          selectedObject.id,
+                          event.currentTarget.value,
+                        );
+                    }
+                  }}
+                />
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selectedObject?.visible ?? false}
+                  disabled={selectedObject === undefined}
+                  onChange={(event) => {
+                    if (selectedObject !== undefined) {
+                      store
+                        .getState()
+                        .setObjectVisibility(
+                          selectedObject.id,
+                          event.currentTarget.checked,
+                        );
+                    }
+                  }}
+                />
+                <span>표시</span>
+              </label>
+              <div className="object-actions">
+                <button
+                  type="button"
+                  disabled={selectedObject === undefined}
+                  onClick={() => {
+                    if (selectedObject !== undefined) {
+                      store.getState().duplicateObject(selectedObject.id);
+                    }
+                  }}
+                >
+                  복제
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedObject === undefined}
+                  onClick={() => {
+                    if (selectedObject !== undefined) {
+                      store.getState().deleteObject(selectedObject.id);
+                    }
+                  }}
+                >
+                  삭제
+                </button>
+              </div>
+            </fieldset>
           </>
         ) : (
           <p className="panel-placeholder">

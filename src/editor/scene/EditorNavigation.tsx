@@ -9,6 +9,7 @@ import type { EditorStore } from '../state/editorStore';
 
 interface EditorNavigationProps {
   store: StoreApi<EditorStore>;
+  enabled: boolean;
 }
 
 const roundDiagnosticValue = (value: number) => Number(value.toFixed(6));
@@ -44,7 +45,18 @@ function applyCameraRoll(
   publishRuntimeCamera(camera, domElement);
 }
 
-export function EditorNavigation({ store }: EditorNavigationProps) {
+function setNavigationEnabled(
+  controls: OrbitControls | null,
+  domElement: HTMLCanvasElement,
+  enabled: boolean,
+) {
+  if (controls !== null) controls.enabled = enabled;
+  if (IS_EDITOR_TEST_BRIDGE_ENABLED) {
+    domElement.dataset.orbitEnabled = String(enabled);
+  }
+}
+
+export function EditorNavigation({ store, enabled }: EditorNavigationProps) {
   const controlsRef = useRef<OrbitControls | null>(null);
   const camera = useThree((state) => state.camera);
   const domElement = useThree((state) => state.gl.domElement);
@@ -137,6 +149,10 @@ export function EditorNavigation({ store }: EditorNavigationProps) {
       if (controlsRef.current === controls) controlsRef.current = null;
     };
   }, [camera, cameraData.rollDeg, cameraData.target, domElement, store]);
+
+  useEffect(() => {
+    setNavigationEnabled(controlsRef.current, domElement, enabled);
+  }, [domElement, enabled]);
 
   useEffect(() => {
     const controls = controlsRef.current;

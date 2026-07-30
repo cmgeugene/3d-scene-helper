@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
@@ -190,5 +190,24 @@ describe('EditorShell', () => {
       screen.getByText('카메라 설정은 카메라 구성 단계에서 제공됩니다.'),
     ).toBeVisible();
     expect(screen.queryByLabelText('위치 X')).not.toBeInTheDocument();
+  });
+
+  it('toolbar 조작 action과 전역 transform shortcut을 실제 shell에 연결한다', async () => {
+    const user = userEvent.setup();
+    const store = createTestStore();
+    render(<EditorShell store={store} webGLState="available" />);
+    await user.click(screen.getByRole('button', { name: 'Mannequin' }));
+    const actions = screen.getByRole('group', { name: '오브젝트 조작' });
+
+    await user.click(within(actions).getByRole('button', { name: '복제' }));
+    expect(store.getState().selectedObjectId).toBe('generated-test');
+    expect(store.getState().document.objects).toHaveLength(3);
+
+    await user.keyboard('e');
+    expect(store.getState().transformMode).toBe('rotate');
+
+    await user.click(within(actions).getByRole('button', { name: '삭제' }));
+    expect(store.getState().selectedObjectId).toBeNull();
+    expect(store.getState().document.objects).toHaveLength(2);
   });
 });

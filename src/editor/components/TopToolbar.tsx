@@ -20,6 +20,8 @@ const GUIDE_OPTIONS: ReadonlyArray<{
 
 export function TopToolbar({ store }: TopToolbarProps) {
   const output = useStore(store, (state) => state.document.output);
+  const selectedObjectId = useStore(store, (state) => state.selectedObjectId);
+  const transformMode = useStore(store, (state) => state.transformMode);
   const guideVisibility = useStore(store, (state) => state.guideVisibility);
   const resetScene = useStore(store, (state) => state.resetScene);
   const setOutput = useStore(store, (state) => state.setOutput);
@@ -38,6 +40,49 @@ export function TopToolbar({ store }: TopToolbarProps) {
           </button>
           <button type="button" onClick={resetScene}>
             기본 장면으로 초기화
+          </button>
+        </div>
+
+        <div className="toolbar-group" role="group" aria-label="오브젝트 조작">
+          {(
+            [
+              ['translate', '이동 (W)'],
+              ['rotate', '회전 (E)'],
+              ['scale', '크기 (R)'],
+            ] as const
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={transformMode === mode}
+              onClick={() => {
+                store.getState().setTransformMode(mode);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            disabled={selectedObjectId === null}
+            onClick={() => {
+              if (selectedObjectId !== null) {
+                store.getState().duplicateObject(selectedObjectId);
+              }
+            }}
+          >
+            복제
+          </button>
+          <button
+            type="button"
+            disabled={selectedObjectId === null}
+            onClick={() => {
+              if (selectedObjectId !== null) {
+                store.getState().deleteObject(selectedObjectId);
+              }
+            }}
+          >
+            삭제
           </button>
         </div>
 

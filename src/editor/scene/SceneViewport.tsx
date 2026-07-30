@@ -1,5 +1,5 @@
 import { Canvas } from '@react-three/fiber';
-import { useLayoutEffect, useRef } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { PCFShadowMap, SRGBColorSpace, type Group, type Object3D } from 'three';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
@@ -9,6 +9,7 @@ import type { EditorStore } from '../state/editorStore';
 import { EditorNavigation } from './EditorNavigation';
 import { OutputCamera } from './OutputCamera';
 import { SceneObject } from './SceneObject';
+import { SelectionTransformControls } from './SelectionTransformControls';
 
 interface SceneViewportProps {
   store: StoreApi<EditorStore>;
@@ -103,12 +104,41 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
   const background = useStore(store, (state) => state.document.background);
   const lighting = useStore(store, (state) => state.document.lighting);
   const selectObject = useStore(store, (state) => state.selectObject);
+  const transformMode = useStore(store, (state) => state.transformMode);
+  const [objectRoots, setObjectRoots] = useState(
+    () => new Map<string, Group>(),
+  );
+  const [transformDragging, setTransformDragging] = useState(false);
+  const handleRootReady = useCallback((id: string, root: Group | null) => {
+    setObjectRoots((current) => {
+      const previous = current.get(id);
+      if (root === null && previous === undefined) return current;
+      if (root !== null && previous === root) return current;
+      const next = new Map(current);
+      if (root === null) next.delete(id);
+      else next.set(id, root);
+      return next;
+    });
+  }, []);
+  const selectedObject = useMemo(
+    () => objects.find(({ id }) => id === selectedObjectId),
+    [objects, selectedObjectId],
+  );
+  const selectedRoot =
+    selectedObject === undefined
+      ? undefined
+      : objectRoots.get(selectedObject.id);
+  const validSelectedRoot =
+    selectedRoot?.name === `scene-object:${selectedObject?.id}` &&
+    selectedRoot.userData.sceneObjectId === selectedObject?.id
+      ? selectedRoot
+      : undefined;
 
   return (
     <>
       <color attach="background" args={[background.color]} />
       <OutputCamera store={store} />
-      <EditorNavigation store={store} />
+      <EditorNavigation store={store} enabled={!transformDragging} />
       <SceneLighting lighting={lighting} />
       <group name="SceneContent.layer0">
         {objects.map((object) => (
@@ -117,9 +147,19 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
             object={object}
             selected={selectedObjectId === object.id}
             onSelect={selectObject}
+            onRootReady={handleRootReady}
           />
         ))}
       </group>
+      {selectedObject !== undefined && validSelectedRoot !== undefined ? (
+        <SelectionTransformControls
+          key={`${selectedObject.id}:${transformMode}`}
+          store={store}
+          object={validSelectedRoot}
+          objectData={selectedObject}
+          onDraggingChange={setTransformDragging}
+        />
+      ) : null}
       <EditorHelpers />
     </>
   );
