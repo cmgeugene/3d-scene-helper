@@ -186,6 +186,24 @@ describe('exportFrame pure output model', () => {
       },
     });
     expect(policy.layerMask & (1 << 1)).toBe(0);
+
+    expect(
+      getExportVisibilityPolicy('reference', {
+        thirds: true,
+        center: false,
+        actionSafe: false,
+        titleSafe: false,
+        motion: false,
+      }),
+    ).toEqual({
+      layerMask: 1,
+      compositionGuides: {
+        thirds: true,
+        center: false,
+        actionSafe: false,
+        titleSafe: false,
+      },
+    });
   });
 });
 

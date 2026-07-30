@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
+import { MAX_SCENE_NOTES_LENGTH } from '../constants';
 import type { SceneObject } from '../persistence/sceneSchema';
 import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
@@ -31,6 +32,42 @@ const PANEL_OPTIONS: ReadonlyArray<{
   { id: 'output', label: '출력' },
 ];
 
+const SUBJECT_MOTION_PRESETS = [
+  { id: 'left', label: '왼쪽', direction: { x: -1, y: 0, z: 0 } },
+  { id: 'right', label: '오른쪽', direction: { x: 1, y: 0, z: 0 } },
+  { id: 'up', label: '위쪽', direction: { x: 0, y: 1, z: 0 } },
+  { id: 'down', label: '아래쪽', direction: { x: 0, y: -1, z: 0 } },
+  { id: 'forward', label: '앞쪽', direction: { x: 0, y: 0, z: -1 } },
+  { id: 'back', label: '뒤쪽', direction: { x: 0, y: 0, z: 1 } },
+] as const;
+
+const CAMERA_MOTION_PRESETS = [
+  {
+    id: 'pan',
+    label: '팬 오른쪽',
+    motionType: 'pan',
+    direction: { x: 1, y: 0, z: 0 },
+  },
+  {
+    id: 'tilt',
+    label: '틸트 업',
+    motionType: 'tilt',
+    direction: { x: 0, y: 1, z: 0 },
+  },
+  {
+    id: 'dolly',
+    label: '돌리 인',
+    motionType: 'dolly',
+    direction: { x: 0, y: 0, z: -1 },
+  },
+  {
+    id: 'orbit',
+    label: '오빗 오른쪽',
+    motionType: 'orbit',
+    direction: { x: 1, y: 0, z: 0 },
+  },
+] as const;
+
 const DEFERRED_PANEL_MESSAGES: Record<
   Exclude<EditorPanel, 'scene' | 'camera' | 'lighting'>,
   string
@@ -38,8 +75,101 @@ const DEFERRED_PANEL_MESSAGES: Record<
   output: '출력 설정은 내보내기 구성 단계에서 제공됩니다.',
 };
 
+function SubjectMotionControls({
+  store,
+  selectedObject,
+}: InspectorProps & { selectedObject: SceneObject | undefined }) {
+  const guide = useStore(store, (state) => state.document.subjectMotionGuide);
+  const sceneNotes = useStore(store, (state) => state.document.sceneNotes);
+  const selectedPreset = SUBJECT_MOTION_PRESETS.find(
+    ({ label }) => label === guide?.label,
+  );
+  const ownedGuide =
+    guide?.subjectId === selectedObject?.id ? guide : undefined;
+
+  return (
+    <fieldset className="object-controls">
+      <legend>I2V 모션 메모</legend>
+      <label>
+        <span>피사체 방향</span>
+        <select
+          aria-label="피사체 모션 방향"
+          value={ownedGuide === undefined ? '' : (selectedPreset?.id ?? '')}
+          disabled={selectedObject === undefined}
+          onChange={(event) => {
+            if (event.currentTarget.value === '') {
+              store.getState().setSubjectMotionGuide(null);
+              return;
+            }
+            const preset = SUBJECT_MOTION_PRESETS.find(
+              ({ id }) => id === event.currentTarget.value,
+            );
+            if (preset !== undefined && selectedObject !== undefined) {
+              store.getState().setSubjectMotionGuide({
+                subjectId: selectedObject.id,
+                direction: preset.direction,
+                strength: ownedGuide?.strength ?? 0.5,
+                label: preset.label,
+              });
+            }
+          }}
+        >
+          <option value="">없음</option>
+          {SUBJECT_MOTION_PRESETS.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {preset.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>피사체 강도</span>
+        <input
+          aria-label="피사체 모션 강도"
+          type="range"
+          min="0"
+          max="1"
+          step="0.1"
+          value={ownedGuide?.strength ?? 0.5}
+          disabled={ownedGuide === undefined}
+          onChange={(event) => {
+            if (ownedGuide !== undefined) {
+              store.getState().setSubjectMotionGuide({
+                ...ownedGuide,
+                strength: Number(event.currentTarget.value),
+              });
+            }
+          }}
+        />
+      </label>
+      <label>
+        <span>장면 노트</span>
+        <textarea
+          aria-label="장면 노트"
+          maxLength={MAX_SCENE_NOTES_LENGTH}
+          rows={3}
+          value={sceneNotes}
+          onChange={(event) => {
+            store.getState().setSceneNotes(event.currentTarget.value);
+          }}
+        />
+      </label>
+      <small>
+        {sceneNotes.length}/{MAX_SCENE_NOTES_LENGTH}
+      </small>
+    </fieldset>
+  );
+}
+
 function CameraControls({ store }: InspectorProps) {
   const camera = useStore(store, (state) => state.document.outputCamera);
+  const motionGuide = useStore(
+    store,
+    (state) => state.document.cameraMotionGuide,
+  );
+  const selectedMotionPreset = CAMERA_MOTION_PRESETS.find(
+    ({ motionType }) => motionType === motionGuide?.motionType,
+  );
 
   return (
     <div className="camera-controls">
@@ -99,6 +229,60 @@ function CameraControls({ store }: InspectorProps) {
           선택 바라보기
         </button>
       </div>
+      <fieldset>
+        <legend>I2V 카메라 모션</legend>
+        <label className="camera-field">
+          <span>유형과 방향</span>
+          <select
+            aria-label="카메라 모션"
+            value={selectedMotionPreset?.id ?? ''}
+            onChange={(event) => {
+              if (event.currentTarget.value === '') {
+                store.getState().setCameraMotionGuide(null);
+                return;
+              }
+              const preset = CAMERA_MOTION_PRESETS.find(
+                ({ id }) => id === event.currentTarget.value,
+              );
+              if (preset !== undefined) {
+                store.getState().setCameraMotionGuide({
+                  motionType: preset.motionType,
+                  direction: preset.direction,
+                  strength: motionGuide?.strength ?? 0.5,
+                  label: preset.label,
+                });
+              }
+            }}
+          >
+            <option value="">없음</option>
+            {CAMERA_MOTION_PRESETS.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="camera-field">
+          <span>강도</span>
+          <input
+            aria-label="카메라 모션 강도"
+            type="range"
+            min="0"
+            max="1"
+            step="0.1"
+            value={motionGuide?.strength ?? 0.5}
+            disabled={motionGuide === undefined}
+            onChange={(event) => {
+              if (motionGuide !== undefined) {
+                store.getState().setCameraMotionGuide({
+                  ...motionGuide,
+                  strength: Number(event.currentTarget.value),
+                });
+              }
+            }}
+          />
+        </label>
+      </fieldset>
     </div>
   );
 }
@@ -464,6 +648,10 @@ export function Inspector({ store }: InspectorProps) {
                 </button>
               </div>
             </fieldset>
+            <SubjectMotionControls
+              store={store}
+              selectedObject={selectedObject}
+            />
           </>
         ) : activePanel === 'camera' ? (
           <CameraControls store={store} />

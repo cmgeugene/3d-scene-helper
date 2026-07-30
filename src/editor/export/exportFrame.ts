@@ -60,6 +60,13 @@ interface ExportFrameDependencies {
   createCanvas: () => HTMLCanvasElement;
 }
 
+export function shouldIncludeMotionGuides(
+  mode: SceneDocument['output']['mode'],
+  motionVisible: boolean,
+) {
+  return mode === 'reference' && motionVisible;
+}
+
 export function getExportVisibilityPolicy(
   mode: SceneDocument['output']['mode'],
   guideVisibility: Readonly<GuideVisibility>,
@@ -77,7 +84,11 @@ export function getExportVisibilityPolicy(
   }
 
   return {
-    layerMask: (1 << RENDER_LAYERS.scene) | (1 << RENDER_LAYERS.reference),
+    layerMask:
+      (1 << RENDER_LAYERS.scene) |
+      (shouldIncludeMotionGuides(mode, guideVisibility.motion)
+        ? 1 << RENDER_LAYERS.reference
+        : 0),
     compositionGuides: {
       thirds: guideVisibility.thirds,
       center: guideVisibility.center,

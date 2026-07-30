@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import { ASPECT_RATIO_VALUES } from '../constants';
+import { ASPECT_RATIO_VALUES, MAX_SCENE_NOTES_LENGTH } from '../constants';
 import {
   createSceneObject,
   sceneDocumentSchema,
@@ -97,10 +97,10 @@ export interface EditorStore {
   setBackgroundColor: (color: string) => void;
   setOutput: (output: SceneDocument['output']) => void;
   setSubjectMotionGuide: (
-    guide: SceneDocument['subjectMotionGuide'] | null,
+    guide: NonNullable<SceneDocument['subjectMotionGuide']> | null,
   ) => void;
   setCameraMotionGuide: (
-    guide: SceneDocument['cameraMotionGuide'] | null,
+    guide: NonNullable<SceneDocument['cameraMotionGuide']> | null,
   ) => void;
   setSceneNotes: (notes: string) => void;
   setTransformMode: (mode: TransformMode) => void;
@@ -528,13 +528,23 @@ export function createEditorStore(options: EditorStoreOptions) {
         if (guide === null) {
           delete nextDocument.subjectMotionGuide;
         } else {
-          nextDocument.subjectMotionGuide = guide;
+          if (state.selectedObjectId === null) return state;
+          nextDocument.subjectMotionGuide = {
+            ...guide,
+            subjectId: state.selectedObjectId,
+          };
         }
-        return recordMutation(
+        const mutation = recordMutation(
           state,
           sceneDocumentSchema.parse(nextDocument),
           'update-motion-metadata',
         );
+        return guide === null
+          ? mutation
+          : {
+              ...mutation,
+              guideVisibility: { ...state.guideVisibility, motion: true },
+            };
       });
     },
     setCameraMotionGuide: (guide) => {
@@ -545,18 +555,24 @@ export function createEditorStore(options: EditorStoreOptions) {
         } else {
           nextDocument.cameraMotionGuide = guide;
         }
-        return recordMutation(
+        const mutation = recordMutation(
           state,
           sceneDocumentSchema.parse(nextDocument),
           'update-motion-metadata',
         );
+        return guide === null
+          ? mutation
+          : {
+              ...mutation,
+              guideVisibility: { ...state.guideVisibility, motion: true },
+            };
       });
     },
     setSceneNotes: (sceneNotes) => {
       set((state) => {
         const nextDocument = sceneDocumentSchema.parse({
           ...state.document,
-          sceneNotes,
+          sceneNotes: sceneNotes.slice(0, MAX_SCENE_NOTES_LENGTH),
         });
         return recordMutation(state, nextDocument, 'update-motion-metadata');
       });

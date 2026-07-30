@@ -377,6 +377,7 @@ describe('editorStore', () => {
     store.getState().setLighting(lighting);
     store.getState().setBackgroundColor('#112233');
     store.getState().setOutput(output);
+    store.getState().selectObject(STARTER_IDS.mannequinId);
     store.getState().setSubjectMotionGuide({
       subjectId: STARTER_IDS.mannequinId,
       direction: { x: 1, y: 0, z: 0 },

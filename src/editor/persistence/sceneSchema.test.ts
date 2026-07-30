@@ -124,8 +124,10 @@ describe('sceneDocumentSchema', () => {
     }
   });
 
-  it('선택적 motion guide를 허용하되 존재하지 않는 subject 참조는 거부한다', () => {
+  it('reserved scene notes와 optional motion guide를 version bump 없이 JSON 왕복한다', () => {
     const document = createStarterSceneDocument(STARTER_IDS);
+    document.sceneNotes =
+      'Subject moves right while the camera dollies in. Keep the clean start frame free of guides.';
     document.subjectMotionGuide = {
       subjectId: STARTER_IDS.mannequinId,
       direction: { x: 1, y: 0, z: 0 },
@@ -139,9 +141,37 @@ describe('sceneDocumentSchema', () => {
       label: '돌리 인',
     };
 
-    expect(sceneDocumentSchema.safeParse(document).success).toBe(true);
+    const parsed = sceneDocumentSchema.parse(
+      JSON.parse(JSON.stringify(document)),
+    );
 
-    document.subjectMotionGuide.subjectId = 'missing-object';
+    expect(parsed).toEqual(document);
+    expect(parsed.version).toBe(1);
+
+    if (parsed.subjectMotionGuide === undefined) {
+      throw new Error('subject motion guide was not restored');
+    }
+    parsed.subjectMotionGuide.subjectId = 'missing-object';
+    expect(sceneDocumentSchema.safeParse(parsed).success).toBe(false);
+  });
+
+  it('zero-length subject/camera motion directions를 거부한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    document.subjectMotionGuide = {
+      subjectId: STARTER_IDS.mannequinId,
+      direction: { x: 0, y: 0, z: 0 },
+      strength: 0.5,
+      label: '정지',
+    };
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+
+    delete document.subjectMotionGuide;
+    document.cameraMotionGuide = {
+      motionType: 'dolly',
+      direction: { x: 0, y: 0, z: 0 },
+      strength: 0.5,
+      label: '정지',
+    };
     expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
   });
 

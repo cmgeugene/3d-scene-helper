@@ -18,6 +18,7 @@ import type { EditorStore } from '../state/editorStore';
 import { CompositionGuides } from './CompositionGuides';
 import { EditorNavigation } from './EditorNavigation';
 import { LightingRig, SHADOW_BOUNDS_M } from './LightingRig';
+import { MotionGuides } from './MotionGuides';
 import { computeLetterbox, type LetterboxRectangle } from './cameraMath';
 import { OutputCamera } from './OutputCamera';
 import { SceneObject } from './SceneObject';
@@ -121,12 +122,17 @@ function SelectedSubjectFacingHelper({
 }
 
 function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
+  const document = useStore(store, (state) => state.document);
   const objects = useStore(store, (state) => state.document.objects);
   const selectedObjectId = useStore(store, (state) => state.selectedObjectId);
   const background = useStore(store, (state) => state.document.background);
   const lighting = useStore(store, (state) => state.document.lighting);
   const selectObject = useStore(store, (state) => state.selectObject);
   const transformMode = useStore(store, (state) => state.transformMode);
+  const motionGuidesVisible = useStore(
+    store,
+    (state) => state.guideVisibility.motion,
+  );
   const [objectRoots, setObjectRoots] = useState(
     () => new Map<string, Group>(),
   );
@@ -188,6 +194,7 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
           />
         </>
       ) : null}
+      {motionGuidesVisible ? <MotionGuides document={document} /> : null}
       <EditorHelpers />
     </>
   );
@@ -277,6 +284,7 @@ export function SceneViewport({ store, onExportReady }: SceneViewportProps) {
               gl.shadowMap.enabled = true;
               gl.shadowMap.type = PCFShadowMap;
               camera.layers.enable(RENDER_LAYERS.editor);
+              camera.layers.enable(RENDER_LAYERS.reference);
             }}
             onPointerMissed={() => {
               store.getState().selectObject(null);

@@ -23,11 +23,13 @@ interface TopToolbarProps {
 const GUIDE_OPTIONS: ReadonlyArray<{
   key: keyof GuideVisibility;
   label: string;
+  compactLabel?: string;
 }> = [
   { key: 'thirds', label: '3분할선' },
   { key: 'center', label: '중앙 십자선' },
   { key: 'actionSafe', label: '액션 안전 영역' },
   { key: 'titleSafe', label: '타이틀 안전 영역' },
+  { key: 'motion', label: '모션 가이드', compactLabel: '모션' },
 ];
 
 function readFileText(file: File): Promise<string> {
@@ -191,16 +193,17 @@ export function TopToolbar({ store, storage, frameExporter }: TopToolbarProps) {
 
         <fieldset className="guide-controls">
           <legend>구도 가이드</legend>
-          {GUIDE_OPTIONS.map(({ key, label }) => (
+          {GUIDE_OPTIONS.map(({ key, label, compactLabel }) => (
             <label key={key}>
               <input
                 type="checkbox"
+                aria-label={label}
                 checked={guideVisibility[key]}
                 onChange={(event) => {
                   setGuideVisibility({ [key]: event.currentTarget.checked });
                 }}
               />
-              <span>{label}</span>
+              <span>{compactLabel ?? label}</span>
             </label>
           ))}
           <button

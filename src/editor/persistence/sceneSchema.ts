@@ -16,6 +16,23 @@ const vector3Schema = z.strictObject({
   z: z.number(),
 });
 
+export function hasRenderableMotionDirection({
+  x,
+  y,
+  z,
+}: {
+  x: number;
+  y: number;
+  z: number;
+}) {
+  return x * x + y * y + z * z > 1e-12;
+}
+
+const motionDirectionSchema = vector3Schema.refine(
+  hasRenderableMotionDirection,
+  { message: 'Motion direction must have non-zero length' },
+);
+
 const positiveVector3Schema = z.strictObject({
   x: z.number().positive(),
   y: z.number().positive(),
@@ -118,14 +135,14 @@ const outputSchema = z
 
 const subjectMotionGuideSchema = z.strictObject({
   subjectId: stableIdSchema,
-  direction: vector3Schema,
+  direction: motionDirectionSchema,
   strength: z.number().min(0).max(1),
   label: z.string().trim().min(1),
 });
 
 const cameraMotionGuideSchema = z.strictObject({
   motionType: z.enum(['pan', 'tilt', 'dolly', 'orbit']),
-  direction: vector3Schema,
+  direction: motionDirectionSchema,
   strength: z.number().min(0).max(1),
   label: z.string().trim().min(1),
 });

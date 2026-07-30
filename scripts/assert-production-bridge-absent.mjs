@@ -18,6 +18,7 @@ const forbiddenMarkers = [
   'orbitEnabled',
   'facingHelper',
   'runtimeLighting',
+  'motionGuides',
 ];
 
 async function collectFiles(directory) {
