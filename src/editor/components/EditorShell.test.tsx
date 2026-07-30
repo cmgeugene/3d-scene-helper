@@ -1,9 +1,16 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
 import { createEditorStore } from '../state/editorStore';
 import { EditorShell } from './EditorShell';
+
+const sceneViewportModuleLoaded = vi.hoisted(() => vi.fn());
+
+vi.mock('../scene/SceneViewport', () => {
+  sceneViewportModuleLoaded();
+  return { SceneViewport: () => null };
+});
 
 function createTestStore() {
   return createEditorStore({
@@ -17,6 +24,27 @@ function createTestStore() {
 }
 
 describe('EditorShell', () => {
+  beforeEach(() => {
+    sceneViewportModuleLoaded.mockClear();
+  });
+
+  it('WebGL fallback에서는 viewport chunk를 불러오지 않는다', async () => {
+    render(
+      <EditorShell
+        store={createTestStore()}
+        webGLState="fallback"
+        canvasEnabled
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        'WebGL을 사용할 수 없어 3D 장면을 표시할 수 없습니다.',
+      ),
+    ).toBeVisible();
+    expect(sceneViewportModuleLoaded).not.toHaveBeenCalled();
+  });
+
   it('에셋, 뷰포트, 속성의 3열 편집 작업 영역을 표시한다', () => {
     render(<EditorShell store={createTestStore()} webGLState="available" />);
 
@@ -90,17 +118,27 @@ describe('EditorShell', () => {
     );
   });
 
-  it('한국어 시작 안내와 현재 세션 범위의 조작만 제공한다', () => {
-    render(<EditorShell store={createTestStore()} webGLState="available" />);
+  it('한국어 시작 안내와 S04 asset 추가를 제공하되 이후 기능은 비활성화한다', async () => {
+    const user = userEvent.setup();
+    const store = createTestStore();
+    render(<EditorShell store={store} webGLState="available" />);
 
     expect(
       screen.getByText('기본 마네킹을 선택하고 화면비와 가이드를 정해 보세요.'),
     ).toBeVisible();
-    expect(screen.getByRole('button', { name: '큐브 추가' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '구 추가' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '원기둥 추가' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '평면 추가' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '마네킹 추가' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '큐브 추가' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '구 추가' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '원기둥 추가' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '평면 추가' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '마네킹 추가' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: '큐브 추가' }));
+    expect(store.getState().document.objects.at(-1)).toMatchObject({
+      id: 'generated-test',
+      kind: 'cube',
+      transform: { position: { x: -1.1, y: 0.5, z: 0 } },
+    });
+    expect(store.getState().selectedObjectId).toBe('generated-test');
     expect(screen.getByRole('button', { name: '로컬 저장' })).toBeDisabled();
     expect(
       screen.getByRole('button', { name: '최근 장면 열기' }),

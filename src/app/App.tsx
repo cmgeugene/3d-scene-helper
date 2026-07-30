@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { EditorShell, type WebGLState } from '../editor/components/EditorShell';
 import { createStarterSceneDocument } from '../editor/persistence/sceneSchema';
 import { createEditorStore } from '../editor/state/editorStore';
+import { IS_EDITOR_TEST_BRIDGE_ENABLED } from './runtimeMode';
 
 const editorStore = createEditorStore({
   initialDocument: createStarterSceneDocument({
@@ -11,6 +12,16 @@ const editorStore = createEditorStore({
   }),
   idFactory: () => globalThis.crypto.randomUUID(),
 });
+
+declare global {
+  interface Window {
+    __I2V_EDITOR_STORE__?: typeof editorStore;
+  }
+}
+
+if (IS_EDITOR_TEST_BRIDGE_ENABLED) {
+  window.__I2V_EDITOR_STORE__ = editorStore;
+}
 
 function canUseWebGL() {
   const canvas = document.createElement('canvas');
@@ -33,7 +44,11 @@ function canUseWebGL() {
   }
 }
 
-export function App() {
+interface AppProps {
+  canvasEnabled?: boolean;
+}
+
+export function App({ canvasEnabled = true }: AppProps) {
   const [webGLState, setWebGLState] = useState<WebGLState>('checking');
 
   useEffect(() => {
@@ -47,5 +62,11 @@ export function App() {
     };
   }, []);
 
-  return <EditorShell store={editorStore} webGLState={webGLState} />;
+  return (
+    <EditorShell
+      store={editorStore}
+      webGLState={webGLState}
+      canvasEnabled={canvasEnabled}
+    />
+  );
 }

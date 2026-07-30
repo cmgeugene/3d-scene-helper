@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import type { StoreApi } from 'zustand';
 import type { EditorStore } from '../state/editorStore';
 import { AssetPanel } from './AssetPanel';
@@ -8,9 +9,16 @@ import { TopToolbar } from './TopToolbar';
 
 export type WebGLState = 'checking' | 'available' | 'fallback';
 
+const SceneViewport = lazy(() =>
+  import('../scene/SceneViewport').then((module) => ({
+    default: module.SceneViewport,
+  })),
+);
+
 interface EditorShellProps {
   store: StoreApi<EditorStore>;
   webGLState: WebGLState;
+  canvasEnabled?: boolean;
 }
 
 const WEBGL_MESSAGES: Record<WebGLState, string> = {
@@ -19,22 +27,44 @@ const WEBGL_MESSAGES: Record<WebGLState, string> = {
   fallback: 'WebGL을 사용할 수 없어 기본 안내 화면을 표시합니다.',
 };
 
-export function EditorShell({ store, webGLState }: EditorShellProps) {
+function ViewportPlaceholder({ webGLState }: { webGLState: WebGLState }) {
+  return (
+    <div className="viewport-placeholder">
+      <p className="eyebrow">기본 장면 준비 완료</p>
+      <h2>구도를 시작해 보세요</h2>
+      <p>
+        {webGLState === 'fallback'
+          ? 'WebGL을 사용할 수 없어 3D 장면을 표시할 수 없습니다.'
+          : '기본 마네킹을 선택하고 화면비와 가이드를 정해 보세요.'}
+      </p>
+    </div>
+  );
+}
+
+export function EditorShell({
+  store,
+  webGLState,
+  canvasEnabled = false,
+}: EditorShellProps) {
   return (
     <main className="editor-shell">
       <div className="desktop-editor">
         <TopToolbar store={store} />
         <div className="editor-workspace">
           <aside className="left-panel" aria-label="에셋과 장면">
-            <AssetPanel />
+            <AssetPanel store={store} />
             <Outliner store={store} />
           </aside>
           <section className="viewport-panel" aria-label="장면 뷰포트">
-            <div className="viewport-placeholder">
-              <p className="eyebrow">기본 장면 준비 완료</p>
-              <h2>구도를 시작해 보세요</h2>
-              <p>기본 마네킹을 선택하고 화면비와 가이드를 정해 보세요.</p>
-            </div>
+            {canvasEnabled && webGLState === 'available' ? (
+              <Suspense
+                fallback={<ViewportPlaceholder webGLState={webGLState} />}
+              >
+                <SceneViewport store={store} />
+              </Suspense>
+            ) : (
+              <ViewportPlaceholder webGLState={webGLState} />
+            )}
             <p
               className={`webgl-status webgl-status--${webGLState}`}
               role="status"

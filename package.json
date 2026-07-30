@@ -9,17 +9,18 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/assert-production-bridge-absent.mjs",
+    "build:e2e": "tsc -b && vite build --mode e2e",
     "preview": "vite preview",
     "test": "vitest",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:external": "playwright test",
     "check:preview-port": "node scripts/assert-port-available.mjs 127.0.0.1 4173",
-    "test:e2e:preview": "npm run check:preview-port && npm run build && start-server-and-test \"npm run preview -- --host 127.0.0.1 --port 4173 --strictPort\" http-get://127.0.0.1:4173 \"npm run test:e2e:external\"",
+    "test:e2e:preview": "npm run check:preview-port && npm run build:e2e && start-server-and-test \"npm run preview -- --host 127.0.0.1 --port 4173 --strictPort\" http-get://127.0.0.1:4173 \"npm run test:e2e:external\"",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",
-    "format:check": "prettier --check package.json package-lock.json index.html tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts eslint.config.js .prettierrc.json playwright.config.ts \"scripts/**/*.mjs\" \"src/**/*.{ts,tsx,css}\" \"e2e/**/*.ts\" README.md docs/session-handoffs/S01.md"
+    "format:check": "prettier --check package.json package-lock.json index.html tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts eslint.config.js .prettierrc.json playwright.config.ts \"scripts/**/*.mjs\" \"src/**/*.{ts,tsx,css}\" \"e2e/**/*.ts\" README.md \"docs/session-handoffs/*.md\""
   },
   "dependencies": {
     "@react-three/drei": "10.7.7",

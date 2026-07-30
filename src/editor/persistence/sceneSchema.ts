@@ -166,6 +166,7 @@ export type AddableSceneObjectKind = Exclude<SceneObjectKind, 'floor'>;
 export interface CreateSceneObjectInput {
   kind: SceneObjectKind;
   name?: string;
+  position?: { x: number; z: number };
 }
 
 export interface AddSceneObjectInput extends CreateSceneObjectInput {
@@ -225,12 +226,23 @@ export function createSceneObject(
   input: CreateSceneObjectInput,
 ): SceneObject {
   const defaults = OBJECT_DEFAULTS[input.kind];
+  const position =
+    input.position === undefined
+      ? undefined
+      : {
+          x: input.position.x,
+          y: defaults.positionY,
+          z: input.position.z,
+        };
 
   return sceneObjectSchema.parse({
     id,
     kind: input.kind,
     name: input.name ?? defaults.name,
-    transform: identityTransform(defaults.positionY),
+    transform: {
+      ...identityTransform(defaults.positionY),
+      ...(position === undefined ? {} : { position }),
+    },
     dimensions: defaults.dimensions,
     color: defaults.color,
     visible: true,

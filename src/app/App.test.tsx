@@ -4,7 +4,7 @@ import { App } from './App';
 
 describe('App', () => {
   it('제품명을 최상위 제목으로 표시한다', () => {
-    render(<App />);
+    render(<App canvasEnabled={false} />);
 
     expect(
       screen.getByRole('heading', {
@@ -18,7 +18,7 @@ describe('App', () => {
   });
 
   it('WebGL을 사용할 수 없으면 명시적인 대체 안내를 표시한다', async () => {
-    render(<App />);
+    render(<App canvasEnabled={false} />);
 
     expect(
       await screen.findByText(
@@ -36,7 +36,7 @@ describe('App', () => {
       context,
     );
 
-    render(<App />);
+    render(<App canvasEnabled={false} />);
 
     expect(
       await screen.findByText('WebGL을 사용할 수 있습니다.'),
