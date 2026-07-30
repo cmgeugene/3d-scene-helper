@@ -20,6 +20,7 @@ interface EditorShellProps {
   store: StoreApi<EditorStore>;
   webGLState: WebGLState;
   canvasEnabled?: boolean;
+  storage?: Storage;
 }
 
 const WEBGL_MESSAGES: Record<WebGLState, string> = {
@@ -46,12 +47,13 @@ export function EditorShell({
   store,
   webGLState,
   canvasEnabled = false,
+  storage = window.localStorage,
 }: EditorShellProps) {
   return (
     <main className="editor-shell">
       <EditorShortcuts store={store} />
       <div className="desktop-editor">
-        <TopToolbar store={store} />
+        <TopToolbar store={store} storage={storage} />
         <div className="editor-workspace">
           <aside className="left-panel" aria-label="에셋과 장면">
             <AssetPanel store={store} />

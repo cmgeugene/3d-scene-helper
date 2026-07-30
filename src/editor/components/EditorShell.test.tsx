@@ -1,6 +1,15 @@
-import { act, render, screen, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { SCENE_STORAGE_KEY } from '../constants';
+import { encodeSceneDocument } from '../persistence/sceneCodec';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
 import { createEditorStore } from '../state/editorStore';
 import { EditorShell } from './EditorShell';
@@ -23,8 +32,23 @@ function createTestStore() {
   });
 }
 
+function createMemoryStorage(initial: Record<string, string> = {}): Storage {
+  const values = new Map(Object.entries(initial));
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, value),
+  };
+}
+
 describe('EditorShell', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     sceneViewportModuleLoaded.mockClear();
   });
 
@@ -62,6 +86,7 @@ describe('EditorShell', () => {
 
   it('화면비와 가이드를 바꾸고 기본 장면으로 초기화한다', async () => {
     const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const store = createTestStore();
     store.getState().addObject({ kind: 'cube', name: '테스트 큐브' });
     render(<EditorShell store={store} webGLState="available" />);
@@ -118,7 +143,7 @@ describe('EditorShell', () => {
     );
   });
 
-  it('한국어 시작 안내와 S04 asset 추가를 제공하되 이후 기능은 비활성화한다', async () => {
+  it('한국어 시작 안내와 asset 추가를 제공하되 PNG 출력은 비활성화한다', async () => {
     const user = userEvent.setup();
     const store = createTestStore();
     render(<EditorShell store={store} webGLState="available" />);
@@ -139,23 +164,7 @@ describe('EditorShell', () => {
       transform: { position: { x: -1.1, y: 0.5, z: 0 } },
     });
     expect(store.getState().selectedObjectId).toBe('generated-test');
-    expect(screen.getByRole('button', { name: '로컬 저장' })).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: '최근 장면 열기' }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: 'JSON 가져오기' }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: 'JSON 내보내기' }),
-    ).toBeDisabled();
     expect(screen.getByRole('button', { name: 'PNG 내보내기' })).toBeDisabled();
-    expect(
-      screen.queryByRole('button', { name: '실행 취소' }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: '다시 실행' }),
-    ).not.toBeInTheDocument();
     expect(
       screen.getByText(
         '이 편집기는 1280×720 이상의 데스크톱 화면이 필요합니다.',
@@ -214,5 +223,193 @@ describe('EditorShell', () => {
     await user.click(within(actions).getByRole('button', { name: '삭제' }));
     expect(store.getState().selectedObjectId).toBeNull();
     expect(store.getState().document.objects).toHaveLength(2);
+  });
+
+  it('undo/redo 버튼과 Cmd/Ctrl+Z shortcut을 focus guard와 함께 연결한다', async () => {
+    const user = userEvent.setup();
+    const store = createTestStore();
+    render(<EditorShell store={store} webGLState="available" />);
+    const undoButton = screen.getByRole('button', { name: '실행 취소' });
+    const redoButton = screen.getByRole('button', { name: '다시 실행' });
+
+    expect(undoButton).toBeDisabled();
+    expect(redoButton).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '큐브 추가' }));
+    expect(undoButton).toBeEnabled();
+
+    await user.click(undoButton);
+    expect(store.getState().document.objects).toHaveLength(2);
+    expect(redoButton).toBeEnabled();
+
+    await user.keyboard('{Control>}{Shift>}z{/Shift}{/Control}');
+    expect(store.getState().document.objects).toHaveLength(3);
+
+    const screenRatio = screen.getByLabelText('화면비');
+    await user.click(screenRatio);
+    await user.keyboard('{Control>}z{/Control}');
+    expect(store.getState().document.objects).toHaveLength(3);
+
+    await user.click(
+      screen.getByRole('heading', { name: 'I2V 3D Scene Helper' }),
+    );
+    await user.keyboard('{Control>}z{/Control}');
+    expect(store.getState().document.objects).toHaveLength(2);
+  });
+
+  it('local save/reopen과 validated JSON file import를 toolbar에 연결한다', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const store = createTestStore();
+    const storage = createMemoryStorage();
+    render(
+      <EditorShell store={store} storage={storage} webGLState="available" />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '큐브 추가' }));
+    await user.click(screen.getByRole('button', { name: '로컬 저장' }));
+    const saved = storage.getItem(SCENE_STORAGE_KEY);
+    expect(saved).not.toBeNull();
+    expect(store.getState().isDirty).toBe(false);
+
+    act(() => store.getState().renameObject('generated-test', 'Unsaved cube'));
+    await user.click(screen.getByRole('button', { name: '최근 장면 열기' }));
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === 'generated-test')?.name,
+    ).toBe('Cube');
+    expect(store.getState().isDirty).toBe(false);
+
+    const imported = createStarterSceneDocument({
+      documentId: 'scene-file',
+      floorId: 'floor-file',
+      mannequinId: 'mannequin-file',
+    });
+    imported.name = 'Imported file';
+    await user.upload(
+      screen.getByLabelText('장면 JSON 파일'),
+      new File([encodeSceneDocument(imported)], 'scene.json', {
+        type: 'application/json',
+      }),
+    );
+
+    await waitFor(() =>
+      expect(store.getState()).toMatchObject({
+        document: { id: 'scene-file', name: 'Imported file' },
+        isDirty: true,
+      }),
+    );
+    expect(screen.getByRole('button', { name: 'JSON 내보내기' })).toBeEnabled();
+  });
+
+  it('dirty document의 reset, reopen, valid import를 확인 없이 교체하지 않는다', async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const store = createTestStore();
+    const storage = createMemoryStorage({
+      [SCENE_STORAGE_KEY]: encodeSceneDocument(store.getState().document),
+    });
+    render(
+      <EditorShell store={store} storage={storage} webGLState="available" />,
+    );
+    await user.click(screen.getByRole('button', { name: '큐브 추가' }));
+    const dirtyDocument = store.getState().document;
+
+    await user.click(screen.getByRole('button', { name: '최근 장면 열기' }));
+    await user.click(screen.getByRole('button', { name: '새 장면' }));
+
+    const imported = createStarterSceneDocument({
+      documentId: 'blocked-import',
+      floorId: 'blocked-floor',
+      mannequinId: 'blocked-mannequin',
+    });
+    const input = screen.getByLabelText('장면 JSON 파일');
+    expect(input).toHaveAttribute('tabindex', '-1');
+    await user.upload(
+      input,
+      new File([encodeSceneDocument(imported)], 'blocked.json', {
+        type: 'application/json',
+      }),
+    );
+
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(3));
+    expect(store.getState().document).toBe(dirtyDocument);
+    expect(store.getState().isDirty).toBe(true);
+    expect(store.getState().statusMessage).toBe(
+      'JSON 장면 가져오기를 취소했습니다.',
+    );
+  });
+
+  it('늦게 완료된 이전 JSON import가 더 최신 import 결과를 덮어쓰지 않는다', async () => {
+    const store = createTestStore();
+    render(<EditorShell store={store} webGLState="available" />);
+    const input = screen.getByLabelText('장면 JSON 파일');
+    const first = createStarterSceneDocument({
+      documentId: 'first-import',
+      floorId: 'first-floor',
+      mannequinId: 'first-mannequin',
+    });
+    const second = createStarterSceneDocument({
+      documentId: 'second-import',
+      floorId: 'second-floor',
+      mannequinId: 'second-mannequin',
+    });
+    let resolveFirst!: (value: string) => void;
+    const firstFile = {
+      size: encodeSceneDocument(first).length,
+      text: () =>
+        new Promise<string>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    } as File;
+    const secondFile = {
+      size: encodeSceneDocument(second).length,
+      text: () => Promise.resolve(encodeSceneDocument(second)),
+    } as File;
+
+    fireEvent.change(input, { target: { files: [firstFile] } });
+    expect(
+      screen.getByRole('button', { name: 'JSON 가져오기' }),
+    ).toBeDisabled();
+    fireEvent.change(input, { target: { files: [secondFile] } });
+
+    await waitFor(() =>
+      expect(store.getState().document.id).toBe('second-import'),
+    );
+    await act(async () => {
+      resolveFirst(encodeSceneDocument(first));
+      await Promise.resolve();
+    });
+
+    expect(store.getState().document.id).toBe('second-import');
+  });
+
+  it('malformed JSON import 실패 시 live scene과 valid autosave를 모두 보존한다', async () => {
+    const user = userEvent.setup();
+    const store = createTestStore();
+    const validAutosave = encodeSceneDocument(store.getState().document);
+    const storage = createMemoryStorage({
+      [SCENE_STORAGE_KEY]: validAutosave,
+    });
+    render(
+      <EditorShell store={store} storage={storage} webGLState="available" />,
+    );
+    act(() => store.getState().addObject({ kind: 'cube' }));
+    const liveDocument = store.getState().document;
+
+    await user.upload(
+      screen.getByLabelText('장면 JSON 파일'),
+      new File(['{"version":1}'], 'broken.json', {
+        type: 'application/json',
+      }),
+    );
+
+    await waitFor(() =>
+      expect(store.getState().statusMessage).toMatch(
+        /유효하지 않은 장면 데이터/,
+      ),
+    );
+    expect(store.getState().document).toBe(liveDocument);
+    expect(storage.getItem(SCENE_STORAGE_KEY)).toBe(validAutosave);
   });
 });

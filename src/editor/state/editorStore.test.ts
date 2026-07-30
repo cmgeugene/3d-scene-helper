@@ -7,6 +7,7 @@ import {
   DOCUMENT_MUTATION_KINDS,
   type EditorStore,
 } from './editorStore';
+import { HISTORY_LIMIT } from './history';
 
 const STARTER_IDS = {
   documentId: 'scene-starter',
@@ -329,7 +330,7 @@ describe('editorStore', () => {
       selectedObjectId: null,
       hoveredObjectId: null,
       inProgressTransform: null,
-      isDirty: true,
+      isDirty: false,
       navigation: {
         position: { x: 0, y: 1.6, z: 5 },
         target: { x: 0, y: 1.6, z: 0 },
@@ -584,5 +585,275 @@ describe('editorStore', () => {
 
     expect(store.getState().navigation.position.x).toBe(1);
     expect(store.getState().exportState.progress).toBe(0.25);
+  });
+
+  it('allowlisted document mutation만 undo/redo하고 transient state는 history에서 제외한다', () => {
+    const originalDocument = structuredClone(store.getState().document);
+
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    store.getState().setHoveredObject(STARTER_IDS.floorId);
+    store.getState().setActivePanel('camera');
+    store.getState().setNavigation({
+      position: { x: 3, y: 2, z: 7 },
+      target: { x: 0, y: 1, z: 0 },
+      isInteracting: true,
+    });
+    store.getState().setExportState({
+      status: 'exporting',
+      progress: 0.5,
+      error: null,
+    });
+
+    expect(store.getState().history.past).toHaveLength(0);
+
+    store.getState().renameObject(STARTER_IDS.mannequinId, 'Actor');
+    expect(store.getState().history.past).toHaveLength(1);
+    expect(store.getState().canUndo).toBe(true);
+    expect(store.getState().canRedo).toBe(false);
+
+    store.getState().undo();
+    expect(store.getState().document).toEqual(originalDocument);
+    expect(store.getState().selectedObjectId).toBe(STARTER_IDS.mannequinId);
+    expect(store.getState().activePanel).toBe('camera');
+    expect(store.getState().canUndo).toBe(false);
+    expect(store.getState().canRedo).toBe(true);
+
+    store.getState().redo();
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.name,
+    ).toBe('Actor');
+    expect(store.getState().canUndo).toBe(true);
+    expect(store.getState().canRedo).toBe(false);
+  });
+
+  it('undo가 제거한 object를 가리키는 transient selection과 hover만 정리한다', () => {
+    store = makeStore(['history-cube']);
+    store.getState().addObject({ kind: 'cube' });
+    store.getState().setHoveredObject('history-cube');
+
+    store.getState().undo();
+
+    expect(store.getState().document.objects).toHaveLength(2);
+    expect(store.getState().selectedObjectId).toBeNull();
+    expect(store.getState().hoveredObjectId).toBeNull();
+    expect(store.getState().canRedo).toBe(true);
+  });
+
+  it('camera history undo/redo만 document camera와 runtime navigation을 함께 동기화한다', () => {
+    const originalCamera = structuredClone(
+      store.getState().document.outputCamera,
+    );
+    const committedCamera = {
+      ...originalCamera,
+      position: { x: 4, y: 3, z: 7 },
+      target: { x: 1, y: 1, z: 0 },
+    };
+    store.getState().commitCamera(committedCamera);
+    store.getState().setNavigation({
+      position: { x: 99, y: 99, z: 99 },
+      target: { x: 9, y: 9, z: 9 },
+      isInteracting: true,
+    });
+
+    store.getState().undo();
+    expect(store.getState().document.outputCamera).toEqual(originalCamera);
+    expect(store.getState().navigation).toEqual({
+      position: originalCamera.position,
+      target: originalCamera.target,
+      isInteracting: false,
+    });
+
+    store.getState().redo();
+    expect(store.getState().document.outputCamera).toEqual(committedCamera);
+    expect(store.getState().navigation).toEqual({
+      position: committedCamera.position,
+      target: committedCamera.target,
+      isInteracting: false,
+    });
+
+    store.getState().setNavigation({
+      position: { x: 8, y: 7, z: 6 },
+      target: { x: 0, y: 1, z: 0 },
+      isInteracting: true,
+    });
+    const transientNavigation = structuredClone(store.getState().navigation);
+    store.getState().renameObject(STARTER_IDS.mannequinId, 'Actor');
+    store.getState().undo();
+    expect(store.getState().navigation).toEqual(transientNavigation);
+  });
+
+  it('persisted document로 되돌아오면 dirty를 해제하고 no-op mutation은 history에 넣지 않는다', () => {
+    const persisted = store.getState().document;
+    store.getState().markDocumentPersisted(persisted);
+
+    store.getState().renameObject(STARTER_IDS.mannequinId, 'Mannequin');
+    expect(store.getState().canUndo).toBe(false);
+    expect(store.getState().isDirty).toBe(false);
+
+    store.getState().renameObject(STARTER_IDS.mannequinId, 'Actor');
+    expect(store.getState().isDirty).toBe(true);
+    store.getState().undo();
+
+    expect(store.getState().document).toEqual(persisted);
+    expect(store.getState().isDirty).toBe(false);
+  });
+
+  it('연속 gizmo drag의 begin/commit 경계를 history 한 entry로 기록한다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    const originalTransform = structuredClone(
+      store.getState().document.objects[1].transform,
+    );
+    const finalTransform = {
+      position: { x: 2, y: 0.85, z: -1 },
+      rotationDeg: { x: 0, y: 35, z: 0 },
+      scale: { x: 1.2, y: 1.2, z: 1.2 },
+    };
+
+    store.getState().beginTransform();
+    store.getState().commitTransform(finalTransform);
+    store.getState().commitTransform(finalTransform);
+
+    expect(store.getState().history.past).toHaveLength(1);
+    store.getState().undo();
+    expect(store.getState().document.objects[1].transform).toEqual(
+      originalTransform,
+    );
+    store.getState().redo();
+    expect(store.getState().document.objects[1].transform).toEqual(
+      finalTransform,
+    );
+  });
+
+  it('S02 document mutation allowlist의 모든 mutation family를 history에 기록한다', () => {
+    store = makeStore(['object-cube', 'object-cube-copy']);
+    const starter = structuredClone(store.getState().document);
+
+    const cubeId = store.getState().addObject({ kind: 'cube' });
+    const copyId = store.getState().duplicateObject(cubeId);
+    store.getState().renameObject(cubeId, 'Hero cube');
+    if (copyId === null) throw new Error('복제 ID가 필요합니다.');
+    store.getState().deleteObject(copyId);
+    store.getState().selectObject(cubeId);
+    store.getState().beginTransform();
+    store.getState().commitTransform({
+      ...store.getState().document.objects.at(-1)!.transform,
+      position: { x: 2, y: 0.5, z: 0 },
+    });
+    store.getState().commitCamera({
+      ...starter.outputCamera,
+      focalLengthMm: 35,
+    });
+    store.getState().setLighting({
+      ...starter.lighting,
+      exposure: 1.2,
+    });
+    store.getState().setBackgroundColor('#112233');
+    store.getState().setOutput({
+      aspectRatioId: '9:16',
+      width: 1080,
+      height: 1920,
+      mode: 'clean',
+    });
+    store.getState().setSubjectMotionGuide({
+      subjectId: cubeId,
+      direction: { x: 1, y: 0, z: 0 },
+      strength: 0.5,
+      label: '오른쪽',
+    });
+    store.getState().setCameraMotionGuide({
+      motionType: 'dolly',
+      direction: { x: 0, y: 0, z: -1 },
+      strength: 0.5,
+      label: '돌리 인',
+    });
+    store.getState().setSceneNotes('history note');
+
+    expect(
+      store.getState().history.past.map(({ mutationKind }) => mutationKind),
+    ).toEqual([
+      'add-object',
+      'duplicate-object',
+      'update-object-property',
+      'delete-object',
+      'commit-transform',
+      'commit-camera',
+      'update-lighting-background',
+      'update-lighting-background',
+      'update-output',
+      'update-motion-metadata',
+      'update-motion-metadata',
+      'update-motion-metadata',
+    ]);
+  });
+
+  it('undo/redo history를 최근 50 entry로 제한한다', () => {
+    for (let index = 1; index <= HISTORY_LIMIT + 5; index += 1) {
+      store.getState().renameObject(STARTER_IDS.mannequinId, `Actor ${index}`);
+    }
+
+    expect(store.getState().history.past).toHaveLength(HISTORY_LIMIT);
+    for (let index = 0; index < HISTORY_LIMIT; index += 1) {
+      store.getState().undo();
+    }
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.name,
+    ).toBe('Actor 5');
+    expect(store.getState().history.future).toHaveLength(HISTORY_LIMIT);
+
+    for (let index = 0; index < HISTORY_LIMIT; index += 1) {
+      store.getState().redo();
+    }
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.name,
+    ).toBe(`Actor ${HISTORY_LIMIT + 5}`);
+  });
+
+  it('validated scene replacement는 transient/history를 정리하고 정확한 persisted snapshot만 dirty를 해제한다', () => {
+    store = makeStore(['object-cube']);
+    store.getState().addObject({ kind: 'cube' });
+    const imported = createStarterSceneDocument({
+      documentId: 'scene-imported',
+      floorId: 'floor-imported',
+      mannequinId: 'mannequin-imported',
+    });
+    imported.outputCamera.position = { x: 3, y: 2, z: 8 };
+
+    store.getState().replaceDocument(imported, false);
+    const importedSnapshot = store.getState().document;
+
+    expect(store.getState()).toMatchObject({
+      document: imported,
+      selectedObjectId: null,
+      hoveredObjectId: null,
+      inProgressTransform: null,
+      history: { past: [], future: [] },
+      canUndo: false,
+      canRedo: false,
+      isDirty: true,
+      navigation: {
+        position: { x: 3, y: 2, z: 8 },
+        target: imported.outputCamera.target,
+        isInteracting: false,
+      },
+    });
+
+    store.getState().markDocumentPersisted(importedSnapshot);
+    expect(store.getState().isDirty).toBe(false);
+
+    store.getState().renameObject('mannequin-imported', 'Imported actor');
+    store.getState().markDocumentPersisted(importedSnapshot);
+    expect(store.getState().isDirty).toBe(true);
+
+    store.getState().replaceDocument(imported, true);
+    expect(store.getState().isDirty).toBe(false);
   });
 });

@@ -1,0 +1,100 @@
+export const HISTORY_LIMIT = 50 as const;
+
+export interface HistoryEntry<Document, MutationKind extends string = string> {
+  document: Document;
+  mutationKind: MutationKind;
+}
+
+export interface DocumentHistory<
+  Document,
+  MutationKind extends string = string,
+> {
+  past: Array<HistoryEntry<Document, MutationKind>>;
+  future: Array<HistoryEntry<Document, MutationKind>>;
+}
+
+export function createDocumentHistory<
+  Document,
+  MutationKind extends string = string,
+>(): DocumentHistory<Document, MutationKind> {
+  return { past: [], future: [] };
+}
+
+export function recordDocumentHistory<Document, MutationKind extends string>(
+  history: DocumentHistory<Document, MutationKind>,
+  document: Document,
+  mutationKind: MutationKind,
+  allowlist: readonly MutationKind[],
+): DocumentHistory<Document, MutationKind> {
+  if (!allowlist.includes(mutationKind)) {
+    return history;
+  }
+
+  return {
+    past: [
+      ...history.past.slice(-(HISTORY_LIMIT - 1)),
+      { document: structuredClone(document), mutationKind },
+    ],
+    future: [],
+  };
+}
+
+export function undoDocumentHistory<
+  Document,
+  MutationKind extends string = string,
+>(
+  history: DocumentHistory<Document, MutationKind>,
+  currentDocument: Document,
+): {
+  document: Document;
+  mutationKind: MutationKind;
+  history: DocumentHistory<Document, MutationKind>;
+} | null {
+  const entry = history.past.at(-1);
+  if (entry === undefined) return null;
+
+  return {
+    document: structuredClone(entry.document),
+    mutationKind: entry.mutationKind,
+    history: {
+      past: history.past.slice(0, -1),
+      future: [
+        ...history.future,
+        {
+          document: structuredClone(currentDocument),
+          mutationKind: entry.mutationKind,
+        },
+      ],
+    },
+  };
+}
+
+export function redoDocumentHistory<
+  Document,
+  MutationKind extends string = string,
+>(
+  history: DocumentHistory<Document, MutationKind>,
+  currentDocument: Document,
+): {
+  document: Document;
+  mutationKind: MutationKind;
+  history: DocumentHistory<Document, MutationKind>;
+} | null {
+  const entry = history.future.at(-1);
+  if (entry === undefined) return null;
+
+  return {
+    document: structuredClone(entry.document),
+    mutationKind: entry.mutationKind,
+    history: {
+      past: [
+        ...history.past,
+        {
+          document: structuredClone(currentDocument),
+          mutationKind: entry.mutationKind,
+        },
+      ].slice(-HISTORY_LIMIT),
+      future: history.future.slice(0, -1),
+    },
+  };
+}

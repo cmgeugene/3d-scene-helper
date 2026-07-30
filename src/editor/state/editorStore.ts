@@ -32,6 +32,13 @@ import type {
   InProgressTransform,
   TransformMode,
 } from '../types';
+import {
+  createDocumentHistory,
+  recordDocumentHistory,
+  redoDocumentHistory,
+  undoDocumentHistory,
+  type DocumentHistory,
+} from './history';
 
 export const DOCUMENT_MUTATION_KINDS = [
   'add-object',
@@ -54,6 +61,9 @@ export interface EditorStoreOptions {
 
 export interface EditorStore {
   document: SceneDocument;
+  history: DocumentHistory<SceneDocument, DocumentMutationKind>;
+  canUndo: boolean;
+  canRedo: boolean;
   selectedObjectId: string | null;
   hoveredObjectId: string | null;
   transformMode: TransformMode;
@@ -99,11 +109,49 @@ export interface EditorStore {
   setNavigation: (navigation: EditorNavigation) => void;
   setExportState: (exportState: ExportState) => void;
   setStatusMessage: (statusMessage: string | null) => void;
+  replaceDocument: (document: SceneDocument, persisted: boolean) => void;
+  markDocumentPersisted: (document: SceneDocument) => void;
+  undo: () => void;
+  redo: () => void;
 }
 
 export function createEditorStore(options: EditorStoreOptions) {
   const document = sceneDocumentSchema.parse(options.initialDocument);
   const initialDocument = structuredClone(document);
+  let persistedDocument = structuredClone(document);
+  const documentsEqual = (left: SceneDocument, right: SceneDocument) =>
+    JSON.stringify(left) === JSON.stringify(right);
+
+  const recordMutation = (
+    state: EditorStore,
+    nextDocument: SceneDocument,
+    mutationKind: DocumentMutationKind,
+  ) => {
+    if (documentsEqual(state.document, nextDocument)) {
+      return {
+        document:
+          mutationKind === 'commit-camera' ? nextDocument : state.document,
+        history: state.history,
+        canUndo: state.canUndo,
+        canRedo: state.canRedo,
+        isDirty: state.isDirty,
+      };
+    }
+    const history = recordDocumentHistory(
+      state.history,
+      state.document,
+      mutationKind,
+      DOCUMENT_MUTATION_KINDS,
+    );
+
+    return {
+      document: nextDocument,
+      history,
+      canUndo: history.past.length > 0,
+      canRedo: false,
+      isDirty: !documentsEqual(nextDocument, persistedDocument),
+    };
+  };
 
   const updateObject = (
     set: StoreApi<EditorStore>['setState'],
@@ -115,20 +163,23 @@ export function createEditorStore(options: EditorStoreOptions) {
         return state;
       }
 
+      const nextDocument = sceneDocumentSchema.parse({
+        ...state.document,
+        objects: state.document.objects.map((object) =>
+          object.id === id ? { ...object, ...update } : object,
+        ),
+      });
       return {
-        document: sceneDocumentSchema.parse({
-          ...state.document,
-          objects: state.document.objects.map((object) =>
-            object.id === id ? { ...object, ...update } : object,
-          ),
-        }),
-        isDirty: true,
+        ...recordMutation(state, nextDocument, 'update-object-property'),
       };
     });
   };
 
   return createStore<EditorStore>((set, get) => ({
     document,
+    history: createDocumentHistory(),
+    canUndo: false,
+    canRedo: false,
     selectedObjectId: null,
     hoveredObjectId: null,
     transformMode: 'translate',
@@ -161,15 +212,17 @@ export function createEditorStore(options: EditorStoreOptions) {
       const id = options.idFactory();
       const object = createSceneObject(id, input);
 
-      set((state) => ({
-        document: sceneDocumentSchema.parse({
+      set((state) => {
+        const nextDocument = sceneDocumentSchema.parse({
           ...state.document,
           objects: [...state.document.objects, object],
-        }),
-        selectedObjectId: id,
-        isDirty: true,
-        statusMessage: null,
-      }));
+        });
+        return {
+          ...recordMutation(state, nextDocument, 'add-object'),
+          selectedObjectId: id,
+          statusMessage: null,
+        };
+      });
 
       return id;
     },
@@ -235,17 +288,17 @@ export function createEditorStore(options: EditorStoreOptions) {
           return state;
         }
 
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          objects: state.document.objects.map((object) =>
+            object.id === state.inProgressTransform?.objectId
+              ? { ...object, transform }
+              : object,
+          ),
+        });
         return {
-          document: sceneDocumentSchema.parse({
-            ...state.document,
-            objects: state.document.objects.map((object) =>
-              object.id === state.inProgressTransform?.objectId
-                ? { ...object, transform }
-                : object,
-            ),
-          }),
+          ...recordMutation(state, nextDocument, 'commit-transform'),
           inProgressTransform: null,
-          isDirty: true,
         };
       });
     },
@@ -263,13 +316,13 @@ export function createEditorStore(options: EditorStoreOptions) {
         duplicate.name = `${source.name} copy`;
         duplicate.transform.position.x += 0.5;
 
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          objects: [...state.document.objects, duplicate],
+        });
         return {
-          document: sceneDocumentSchema.parse({
-            ...state.document,
-            objects: [...state.document.objects, duplicate],
-          }),
+          ...recordMutation(state, nextDocument, 'duplicate-object'),
           selectedObjectId: duplicateId,
-          isDirty: true,
           statusMessage: null,
         };
       });
@@ -291,8 +344,9 @@ export function createEditorStore(options: EditorStoreOptions) {
           delete document.subjectMotionGuide;
         }
 
+        const nextDocument = sceneDocumentSchema.parse(document);
         return {
-          document: sceneDocumentSchema.parse(document),
+          ...recordMutation(state, nextDocument, 'delete-object'),
           selectedObjectId:
             state.selectedObjectId === id ? null : state.selectedObjectId,
           hoveredObjectId:
@@ -301,39 +355,46 @@ export function createEditorStore(options: EditorStoreOptions) {
             state.inProgressTransform?.objectId === id
               ? null
               : state.inProgressTransform,
-          isDirty: true,
           statusMessage: null,
         };
       });
     },
     resetScene: () => {
-      set({
-        document: structuredClone(initialDocument),
-        selectedObjectId: null,
-        hoveredObjectId: null,
-        inProgressTransform: null,
-        navigation: {
-          position: structuredClone(initialDocument.outputCamera.position),
-          target: structuredClone(initialDocument.outputCamera.target),
-          isInteracting: false,
-        },
-        isDirty: true,
-        statusMessage: null,
+      set(() => {
+        const nextDocument = structuredClone(initialDocument);
+        return {
+          document: nextDocument,
+          history: createDocumentHistory(),
+          canUndo: false,
+          canRedo: false,
+          selectedObjectId: null,
+          hoveredObjectId: null,
+          inProgressTransform: null,
+          navigation: {
+            position: structuredClone(initialDocument.outputCamera.position),
+            target: structuredClone(initialDocument.outputCamera.target),
+            isInteracting: false,
+          },
+          isDirty: !documentsEqual(nextDocument, persistedDocument),
+          statusMessage: null,
+        };
       });
     },
     commitCamera: (camera) => {
-      set((state) => ({
-        document: sceneDocumentSchema.parse({
+      set((state) => {
+        const nextDocument = sceneDocumentSchema.parse({
           ...state.document,
           outputCamera: camera,
-        }),
-        navigation: {
-          position: structuredClone(camera.position),
-          target: structuredClone(camera.target),
-          isInteracting: false,
-        },
-        isDirty: true,
-      }));
+        });
+        return {
+          ...recordMutation(state, nextDocument, 'commit-camera'),
+          navigation: {
+            position: structuredClone(camera.position),
+            target: structuredClone(camera.target),
+            isInteracting: false,
+          },
+        };
+      });
     },
     setCameraLens: (focalLengthMm) => {
       if (
@@ -401,12 +462,16 @@ export function createEditorStore(options: EditorStoreOptions) {
       set({ statusMessage: `${selected.name}을 바라봅니다.` });
     },
     applyLightingPreset: (presetId) => {
-      set((state) => ({
-        document: sceneDocumentSchema.parse(
+      set((state) => {
+        const nextDocument = sceneDocumentSchema.parse(
           applyLightingPresetToDocument(state.document, presetId),
-        ),
-        isDirty: true,
-      }));
+        );
+        return recordMutation(
+          state,
+          nextDocument,
+          'update-lighting-background',
+        );
+      });
     },
     resetLightingPreset: () => {
       const presetId = get().document.lighting.presetId;
@@ -420,26 +485,42 @@ export function createEditorStore(options: EditorStoreOptions) {
       get().applyLightingPreset(preset.id);
     },
     setLighting: (lighting) => {
-      set((state) => ({
-        document: sceneDocumentSchema.parse({ ...state.document, lighting }),
-        isDirty: true,
-      }));
+      set((state) => {
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          lighting,
+        });
+        return recordMutation(
+          state,
+          nextDocument,
+          'update-lighting-background',
+        );
+      });
     },
     setBackgroundColor: (color) => {
-      set((state) => ({
-        document: sceneDocumentSchema.parse({
+      set((state) => {
+        const nextDocument = sceneDocumentSchema.parse({
           ...state.document,
           background: { color },
-        }),
-        isDirty: true,
-      }));
+        });
+        return recordMutation(
+          state,
+          nextDocument,
+          'update-lighting-background',
+        );
+      });
     },
     setOutput: (output) => {
-      set((state) => ({
-        document: sceneDocumentSchema.parse({ ...state.document, output }),
-        isDirty: true,
-        statusMessage: null,
-      }));
+      set((state) => {
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          output,
+        });
+        return {
+          ...recordMutation(state, nextDocument, 'update-output'),
+          statusMessage: null,
+        };
+      });
     },
     setSubjectMotionGuide: (guide) => {
       set((state) => {
@@ -449,10 +530,11 @@ export function createEditorStore(options: EditorStoreOptions) {
         } else {
           nextDocument.subjectMotionGuide = guide;
         }
-        return {
-          document: sceneDocumentSchema.parse(nextDocument),
-          isDirty: true,
-        };
+        return recordMutation(
+          state,
+          sceneDocumentSchema.parse(nextDocument),
+          'update-motion-metadata',
+        );
       });
     },
     setCameraMotionGuide: (guide) => {
@@ -463,17 +545,21 @@ export function createEditorStore(options: EditorStoreOptions) {
         } else {
           nextDocument.cameraMotionGuide = guide;
         }
-        return {
-          document: sceneDocumentSchema.parse(nextDocument),
-          isDirty: true,
-        };
+        return recordMutation(
+          state,
+          sceneDocumentSchema.parse(nextDocument),
+          'update-motion-metadata',
+        );
       });
     },
     setSceneNotes: (sceneNotes) => {
-      set((state) => ({
-        document: sceneDocumentSchema.parse({ ...state.document, sceneNotes }),
-        isDirty: true,
-      }));
+      set((state) => {
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          sceneNotes,
+        });
+        return recordMutation(state, nextDocument, 'update-motion-metadata');
+      });
     },
     setTransformMode: (transformMode) => {
       set({ transformMode, statusMessage: null });
@@ -494,6 +580,104 @@ export function createEditorStore(options: EditorStoreOptions) {
     },
     setStatusMessage: (statusMessage) => {
       set({ statusMessage });
+    },
+    replaceDocument: (replacement, persisted) => {
+      const nextDocument = sceneDocumentSchema.parse(replacement);
+      if (persisted) persistedDocument = structuredClone(nextDocument);
+      set({
+        document: nextDocument,
+        history: createDocumentHistory(),
+        canUndo: false,
+        canRedo: false,
+        selectedObjectId: null,
+        hoveredObjectId: null,
+        inProgressTransform: null,
+        navigation: {
+          position: structuredClone(nextDocument.outputCamera.position),
+          target: structuredClone(nextDocument.outputCamera.target),
+          isInteracting: false,
+        },
+        isDirty: !documentsEqual(nextDocument, persistedDocument),
+        statusMessage: null,
+      });
+    },
+    markDocumentPersisted: (savedDocument) => {
+      const state = get();
+      if (state.document !== savedDocument) return;
+      persistedDocument = structuredClone(state.document);
+      set({ isDirty: false });
+    },
+    undo: () => {
+      set((state) => {
+        const result = undoDocumentHistory(state.history, state.document);
+        if (result === null) return state;
+        const nextDocument = sceneDocumentSchema.parse(result.document);
+        const navigation =
+          result.mutationKind === 'commit-camera'
+            ? {
+                position: structuredClone(nextDocument.outputCamera.position),
+                target: structuredClone(nextDocument.outputCamera.target),
+                isInteracting: false,
+              }
+            : state.navigation;
+
+        return {
+          document: nextDocument,
+          navigation,
+          history: result.history,
+          canUndo: result.history.past.length > 0,
+          canRedo: result.history.future.length > 0,
+          selectedObjectId: nextDocument.objects.some(
+            ({ id }) => id === state.selectedObjectId,
+          )
+            ? state.selectedObjectId
+            : null,
+          hoveredObjectId: nextDocument.objects.some(
+            ({ id }) => id === state.hoveredObjectId,
+          )
+            ? state.hoveredObjectId
+            : null,
+          inProgressTransform: null,
+          isDirty: !documentsEqual(nextDocument, persistedDocument),
+          statusMessage: '실행을 취소했습니다.',
+        };
+      });
+    },
+    redo: () => {
+      set((state) => {
+        const result = redoDocumentHistory(state.history, state.document);
+        if (result === null) return state;
+        const nextDocument = sceneDocumentSchema.parse(result.document);
+        const navigation =
+          result.mutationKind === 'commit-camera'
+            ? {
+                position: structuredClone(nextDocument.outputCamera.position),
+                target: structuredClone(nextDocument.outputCamera.target),
+                isInteracting: false,
+              }
+            : state.navigation;
+
+        return {
+          document: nextDocument,
+          navigation,
+          history: result.history,
+          canUndo: result.history.past.length > 0,
+          canRedo: result.history.future.length > 0,
+          selectedObjectId: nextDocument.objects.some(
+            ({ id }) => id === state.selectedObjectId,
+          )
+            ? state.selectedObjectId
+            : null,
+          hoveredObjectId: nextDocument.objects.some(
+            ({ id }) => id === state.hoveredObjectId,
+          )
+            ? state.hoveredObjectId
+            : null,
+          inProgressTransform: null,
+          isDirty: !documentsEqual(nextDocument, persistedDocument),
+          statusMessage: '다시 실행했습니다.',
+        };
+      });
     },
   }));
 }

@@ -14,6 +14,17 @@ export function EditorShortcuts({ store }: EditorShortcutsProps) {
 
       const state = store.getState();
       const key = event.key.toLowerCase();
+
+      if (key === 'z' && (event.metaKey || event.ctrlKey) && !event.altKey) {
+        if (event.shiftKey) {
+          state.redo();
+        } else {
+          state.undo();
+        }
+        event.preventDefault();
+        return;
+      }
+
       if (
         !event.metaKey &&
         !event.ctrlKey &&

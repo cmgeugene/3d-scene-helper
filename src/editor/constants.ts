@@ -25,3 +25,5 @@ export const ASPECT_RATIO_VALUES = {
 
 export const STORAGE_NAMESPACE = 'i2v-3d-scene-helper' as const;
 export const SCENE_STORAGE_KEY = `${STORAGE_NAMESPACE}:scene:v${SCENE_DOCUMENT_VERSION}`;
+export const MAX_SCENE_STORAGE_BYTES = 4 * 1024 * 1024;
+export const AUTOSAVE_DEBOUNCE_MS = 500 as const;

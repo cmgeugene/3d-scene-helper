@@ -1,11 +1,20 @@
+import { useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
+import {
+  encodeSceneDocument,
+  importSceneDocument,
+  loadSceneDocument,
+  saveSceneDocument,
+} from '../persistence/sceneCodec';
 import { ASPECT_RATIO_PRESETS } from '../presets/aspectRatios';
+import { MAX_SCENE_STORAGE_BYTES } from '../constants';
 import type { EditorStore } from '../state/editorStore';
 import type { GuideVisibility } from '../types';
 
 interface TopToolbarProps {
   store: StoreApi<EditorStore>;
+  storage: Storage;
 }
 
 const GUIDE_OPTIONS: ReadonlyArray<{
@@ -18,28 +27,88 @@ const GUIDE_OPTIONS: ReadonlyArray<{
   { key: 'titleSafe', label: '타이틀 안전 영역' },
 ];
 
-export function TopToolbar({ store }: TopToolbarProps) {
+function readFileText(file: File): Promise<string> {
+  if (typeof file.text === 'function') return file.text();
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result)));
+    reader.addEventListener('error', () => reject(reader.error));
+    reader.readAsText(file);
+  });
+}
+
+function sceneDownloadName(name: string) {
+  const safeName = name
+    .trim()
+    .replace(/[^a-z0-9가-힣._-]+/gi, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${safeName || 'scene'}.json`;
+}
+
+export function TopToolbar({ store, storage }: TopToolbarProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const importGenerationRef = useRef(0);
+  const [isImporting, setIsImporting] = useState(false);
   const output = useStore(store, (state) => state.document.output);
   const selectedObjectId = useStore(store, (state) => state.selectedObjectId);
   const transformMode = useStore(store, (state) => state.transformMode);
   const guideVisibility = useStore(store, (state) => state.guideVisibility);
+  const canUndo = useStore(store, (state) => state.canUndo);
+  const canRedo = useStore(store, (state) => state.canRedo);
   const resetScene = useStore(store, (state) => state.resetScene);
   const setOutput = useStore(store, (state) => state.setOutput);
   const setGuideVisibility = useStore(
     store,
     (state) => state.setGuideVisibility,
   );
+  const confirmDocumentReplacement = () =>
+    !store.getState().isDirty ||
+    window.confirm(
+      '저장되지 않은 변경 사항이 있습니다. 현재 장면을 교체하시겠습니까?',
+    );
 
   return (
     <header className="top-toolbar">
       <h1>I2V 3D Scene Helper</h1>
       <nav className="toolbar-actions" aria-label="장면 도구">
         <div className="toolbar-group" role="group" aria-label="장면 시작">
-          <button type="button" onClick={resetScene}>
+          <button
+            type="button"
+            onClick={() => {
+              if (confirmDocumentReplacement()) resetScene();
+            }}
+          >
             새 장면
           </button>
-          <button type="button" onClick={resetScene}>
+          <button
+            type="button"
+            onClick={() => {
+              if (confirmDocumentReplacement()) resetScene();
+            }}
+          >
             기본 장면으로 초기화
+          </button>
+        </div>
+
+        <div
+          className="toolbar-group toolbar-history"
+          role="group"
+          aria-label="실행 기록"
+        >
+          <button
+            type="button"
+            disabled={!canUndo}
+            onClick={() => store.getState().undo()}
+          >
+            실행 취소
+          </button>
+          <button
+            type="button"
+            disabled={!canRedo}
+            onClick={() => store.getState().redo()}
+          >
+            다시 실행
           </button>
         </div>
 
@@ -145,29 +214,144 @@ export function TopToolbar({ store }: TopToolbarProps) {
         <div className="toolbar-group" role="group" aria-label="파일과 출력">
           <button
             type="button"
-            disabled
-            title="로컬 저장은 S08에서 제공됩니다."
+            onClick={() => {
+              const document = store.getState().document;
+              try {
+                saveSceneDocument(storage, document);
+                store.getState().markDocumentPersisted(document);
+                store
+                  .getState()
+                  .setStatusMessage('장면을 로컬에 저장했습니다.');
+              } catch (error) {
+                store
+                  .getState()
+                  .setStatusMessage(
+                    error instanceof Error
+                      ? error.message
+                      : '장면을 로컬에 저장하지 못했습니다.',
+                  );
+              }
+            }}
           >
             로컬 저장
           </button>
           <button
             type="button"
-            disabled
-            title="장면 불러오기는 S08에서 제공됩니다."
+            onClick={() => {
+              try {
+                const document = loadSceneDocument(storage);
+                if (document === null) {
+                  store
+                    .getState()
+                    .setStatusMessage('불러올 로컬 장면이 없습니다.');
+                  return;
+                }
+                if (!confirmDocumentReplacement()) {
+                  store
+                    .getState()
+                    .setStatusMessage('로컬 장면 열기를 취소했습니다.');
+                  return;
+                }
+                store.getState().replaceDocument(document, true);
+                store.getState().setStatusMessage('로컬 장면을 열었습니다.');
+              } catch (error) {
+                store
+                  .getState()
+                  .setStatusMessage(
+                    error instanceof Error
+                      ? error.message
+                      : '로컬 장면을 열지 못했습니다.',
+                  );
+              }
+            }}
           >
             최근 장면 열기
           </button>
           <button
             type="button"
-            disabled
-            title="JSON 가져오기는 S08에서 제공됩니다."
+            disabled={isImporting}
+            onClick={() => fileInputRef.current?.click()}
           >
             JSON 가져오기
           </button>
+          <input
+            ref={fileInputRef}
+            className="visually-hidden"
+            type="file"
+            tabIndex={-1}
+            accept="application/json,.json"
+            aria-label="장면 JSON 파일"
+            onChange={async (event) => {
+              const input = event.currentTarget;
+              const file = input.files?.[0];
+              if (file === undefined) return;
+              const generation = ++importGenerationRef.current;
+              setIsImporting(true);
+
+              try {
+                if (file.size > MAX_SCENE_STORAGE_BYTES) {
+                  throw new Error(
+                    '장면 JSON이 크기 제한을 초과했습니다. 더 작은 장면 파일을 선택하세요.',
+                  );
+                }
+                const serialized = await readFileText(file);
+                if (generation !== importGenerationRef.current) return;
+                let replaced = false;
+                importSceneDocument(serialized, (document) => {
+                  if (!confirmDocumentReplacement()) return;
+                  store.getState().replaceDocument(document, false);
+                  replaced = true;
+                });
+                store
+                  .getState()
+                  .setStatusMessage(
+                    replaced
+                      ? 'JSON 장면을 가져왔습니다.'
+                      : 'JSON 장면 가져오기를 취소했습니다.',
+                  );
+              } catch (error) {
+                store
+                  .getState()
+                  .setStatusMessage(
+                    error instanceof Error
+                      ? error.message
+                      : 'JSON 장면을 가져오지 못했습니다.',
+                  );
+              } finally {
+                if (generation === importGenerationRef.current) {
+                  input.value = '';
+                  setIsImporting(false);
+                }
+              }
+            }}
+          />
           <button
             type="button"
-            disabled
-            title="JSON 내보내기는 S08에서 제공됩니다."
+            onClick={() => {
+              const document = store.getState().document;
+              try {
+                const blob = new Blob([encodeSceneDocument(document)], {
+                  type: 'application/json',
+                });
+                const url = URL.createObjectURL(blob);
+                const anchor = window.document.createElement('a');
+                anchor.href = url;
+                anchor.download = sceneDownloadName(document.name);
+                window.document.body.append(anchor);
+                anchor.click();
+                anchor.remove();
+                window.setTimeout(() => URL.revokeObjectURL(url), 0);
+                store.getState().setStatusMessage('장면 JSON을 내보냈습니다.');
+              } catch (error) {
+                store
+                  .getState()
+                  .setStatusMessage(
+                    error instanceof Error
+                      ? error.message
+                      : '장면 JSON을 내보내지 못했습니다.',
+                  );
+              }
+            }}
           >
             JSON 내보내기
           </button>
