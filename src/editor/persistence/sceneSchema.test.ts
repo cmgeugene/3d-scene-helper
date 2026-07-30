@@ -78,7 +78,7 @@ describe('sceneDocumentSchema', () => {
     expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
   });
 
-  it('output 크기는 활성 aspect ratio와 1px 이내로 일치해야 한다', () => {
+  it('output 크기는 lock 양방향 반올림과 canonical cinematic만 허용한다', () => {
     const mismatched = createStarterSceneDocument(STARTER_IDS);
     mismatched.output = {
       aspectRatioId: '9:16',
@@ -93,9 +93,35 @@ describe('sceneDocumentSchema', () => {
       height: 804,
       mode: 'clean',
     };
+    const widthDriven = createStarterSceneDocument(STARTER_IDS);
+    widthDriven.output = {
+      aspectRatioId: '16:9',
+      width: 113,
+      height: 64,
+      mode: 'clean',
+    };
+    const heightDriven = createStarterSceneDocument(STARTER_IDS);
+    heightDriven.output = {
+      aspectRatioId: '9:16',
+      width: 64,
+      height: 113,
+      mode: 'clean',
+    };
+    const onePixelMismatches = [
+      { aspectRatioId: '1:1', width: 100, height: 99 },
+      { aspectRatioId: '16:9', width: 1280, height: 719 },
+      { aspectRatioId: '9:16', width: 1080, height: 1919 },
+    ] as const;
 
     expect(sceneDocumentSchema.safeParse(mismatched).success).toBe(false);
     expect(sceneDocumentSchema.safeParse(cinematic).success).toBe(true);
+    expect(sceneDocumentSchema.safeParse(widthDriven).success).toBe(true);
+    expect(sceneDocumentSchema.safeParse(heightDriven).success).toBe(true);
+    for (const output of onePixelMismatches) {
+      const document = createStarterSceneDocument(STARTER_IDS);
+      document.output = { ...output, mode: 'clean' };
+      expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+    }
   });
 
   it('선택적 motion guide를 허용하되 존재하지 않는 subject 참조는 거부한다', () => {

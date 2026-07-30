@@ -1,5 +1,6 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useCallback, useState } from 'react';
 import type { StoreApi } from 'zustand';
+import type { FrameExportHandler } from '../export/exportFrame';
 import type { EditorStore } from '../state/editorStore';
 import { AssetPanel } from './AssetPanel';
 import { EditorShortcuts } from './EditorShortcuts';
@@ -49,11 +50,25 @@ export function EditorShell({
   canvasEnabled = false,
   storage = window.localStorage,
 }: EditorShellProps) {
+  const [frameExporter, setFrameExporter] = useState<FrameExportHandler | null>(
+    null,
+  );
+  const handleExportReady = useCallback(
+    (nextExporter: FrameExportHandler | null) => {
+      setFrameExporter(() => nextExporter);
+    },
+    [],
+  );
+
   return (
     <main className="editor-shell">
       <EditorShortcuts store={store} />
       <div className="desktop-editor">
-        <TopToolbar store={store} storage={storage} />
+        <TopToolbar
+          store={store}
+          storage={storage}
+          frameExporter={frameExporter}
+        />
         <div className="editor-workspace">
           <aside className="left-panel" aria-label="에셋과 장면">
             <AssetPanel store={store} />
@@ -64,7 +79,10 @@ export function EditorShell({
               <Suspense
                 fallback={<ViewportPlaceholder webGLState={webGLState} />}
               >
-                <SceneViewport store={store} />
+                <SceneViewport
+                  store={store}
+                  onExportReady={handleExportReady}
+                />
               </Suspense>
             ) : (
               <ViewportPlaceholder webGLState={webGLState} />

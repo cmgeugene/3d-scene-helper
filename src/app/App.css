@@ -614,6 +614,141 @@ p {
   font-size: 0.7rem;
 }
 
+.export-dialog-backdrop {
+  position: fixed;
+  z-index: 20;
+  display: grid;
+  inset: 0;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgb(3 7 14 / 74%);
+}
+
+.export-dialog {
+  display: grid;
+  width: min(30rem, 100%);
+  gap: 0.85rem;
+  padding: 1.25rem;
+  border: 1px solid #405576;
+  border-radius: 0.8rem;
+  color: #e8edf5;
+  background: #101827;
+  box-shadow: 0 1.5rem 5rem rgb(0 0 0 / 55%);
+}
+
+.export-dialog h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.export-dialog-field,
+.export-filename-input,
+.export-custom-dimensions,
+.export-custom-dimensions label,
+.export-mode-options label,
+.export-dialog-actions {
+  display: flex;
+  align-items: center;
+}
+
+.export-dialog-field {
+  justify-content: space-between;
+  gap: 1rem;
+  color: #b9c5d8;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.export-dialog-field > select,
+.export-filename-input {
+  width: 18rem;
+  max-width: 68%;
+}
+
+.export-dialog-field select,
+.export-filename-input input,
+.export-custom-dimensions input {
+  min-height: 2rem;
+  padding: 0.35rem 0.45rem;
+}
+
+.export-filename-input {
+  gap: 0.35rem;
+}
+
+.export-filename-input input {
+  min-width: 0;
+  flex: 1;
+}
+
+.export-custom-dimensions,
+.export-mode-options {
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.7rem;
+  border: 1px solid #2d3b52;
+  border-radius: 0.55rem;
+}
+
+.export-custom-dimensions legend,
+.export-mode-options legend {
+  padding: 0 0.25rem;
+  color: #91a1b9;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.export-custom-dimensions label {
+  min-width: 0;
+  gap: 0.3rem;
+  color: #aebbd0;
+  font-size: 0.72rem;
+}
+
+.export-custom-dimensions input {
+  width: 6rem;
+  min-width: 0;
+}
+
+.export-mode-options {
+  display: flex;
+}
+
+.export-mode-options label {
+  gap: 0.3rem;
+  color: #c8d2e1;
+  font-size: 0.78rem;
+}
+
+.export-mode-options input {
+  accent-color: #6f9dff;
+}
+
+.export-summary,
+.export-error,
+.export-progress {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.export-summary {
+  color: #9fb4d2;
+}
+
+.export-error {
+  color: #ffab9c;
+}
+
+.export-progress {
+  color: #82a8ff;
+}
+
+.export-dialog-actions {
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .unsupported-notice {
   display: none;
 }

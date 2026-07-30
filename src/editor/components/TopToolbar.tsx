@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
+import type { FrameExportHandler } from '../export/exportFrame';
 import {
   encodeSceneDocument,
   importSceneDocument,
@@ -11,10 +12,12 @@ import { ASPECT_RATIO_PRESETS } from '../presets/aspectRatios';
 import { MAX_SCENE_STORAGE_BYTES } from '../constants';
 import type { EditorStore } from '../state/editorStore';
 import type { GuideVisibility } from '../types';
+import { ExportDialog } from './ExportDialog';
 
 interface TopToolbarProps {
   store: StoreApi<EditorStore>;
   storage: Storage;
+  frameExporter: FrameExportHandler | null;
 }
 
 const GUIDE_OPTIONS: ReadonlyArray<{
@@ -46,10 +49,12 @@ function sceneDownloadName(name: string) {
   return `${safeName || 'scene'}.json`;
 }
 
-export function TopToolbar({ store, storage }: TopToolbarProps) {
+export function TopToolbar({ store, storage, frameExporter }: TopToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const exportButtonRef = useRef<HTMLButtonElement>(null);
   const importGenerationRef = useRef(0);
   const [isImporting, setIsImporting] = useState(false);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const output = useStore(store, (state) => state.document.output);
   const selectedObjectId = useStore(store, (state) => state.selectedObjectId);
   const transformMode = useStore(store, (state) => state.transformMode);
@@ -67,6 +72,10 @@ export function TopToolbar({ store, storage }: TopToolbarProps) {
     window.confirm(
       '저장되지 않은 변경 사항이 있습니다. 현재 장면을 교체하시겠습니까?',
     );
+  const closeExportDialog = () => {
+    setIsExportDialogOpen(false);
+    window.requestAnimationFrame(() => exportButtonRef.current?.focus());
+  };
 
   return (
     <header className="top-toolbar">
@@ -356,14 +365,27 @@ export function TopToolbar({ store, storage }: TopToolbarProps) {
             JSON 내보내기
           </button>
           <button
+            ref={exportButtonRef}
             type="button"
-            disabled
-            title="PNG 내보내기는 S09에서 제공됩니다."
+            disabled={frameExporter === null}
+            title={
+              frameExporter === null
+                ? '3D 장면이 준비되면 PNG를 내보낼 수 있습니다.'
+                : undefined
+            }
+            onClick={() => setIsExportDialogOpen(true)}
           >
             PNG 내보내기
           </button>
         </div>
       </nav>
+      {isExportDialogOpen && frameExporter !== null ? (
+        <ExportDialog
+          store={store}
+          exportFrame={frameExporter}
+          onClose={closeExportDialog}
+        />
+      ) : null}
     </header>
   );
 }

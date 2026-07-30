@@ -70,6 +70,27 @@ const backgroundSchema = z.strictObject({
   color: z.string().regex(/^#[0-9a-f]{6}$/i),
 });
 
+export function isAspectLockedOutputSize(
+  aspectRatioId: keyof typeof ASPECT_RATIO_VALUES,
+  dimensions: { width: number; height: number },
+) {
+  const aspect = ASPECT_RATIO_VALUES[aspectRatioId];
+  const matchesWidthDrivenLock =
+    dimensions.height === Math.round(dimensions.width / aspect);
+  const matchesHeightDrivenLock =
+    dimensions.width === Math.round(dimensions.height * aspect);
+  const isCanonicalCinematicPreset =
+    aspectRatioId === '2.39:1' &&
+    dimensions.width === 1920 &&
+    dimensions.height === 804;
+
+  return (
+    matchesWidthDrivenLock ||
+    matchesHeightDrivenLock ||
+    isCanonicalCinematicPreset
+  );
+}
+
 const outputSchema = z
   .strictObject({
     aspectRatioId: z.enum(['16:9', '9:16', '1:1', '2.39:1']),
@@ -86,9 +107,7 @@ const outputSchema = z
     mode: z.enum(['clean', 'reference']),
   })
   .superRefine((output, context) => {
-    const expectedHeight =
-      output.width / ASPECT_RATIO_VALUES[output.aspectRatioId];
-    if (Math.abs(output.height - expectedHeight) > 1) {
+    if (!isAspectLockedOutputSize(output.aspectRatioId, output)) {
       context.addIssue({
         code: 'custom',
         message: 'Output dimensions must match the active aspect ratio',

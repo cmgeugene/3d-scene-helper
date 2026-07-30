@@ -12,6 +12,7 @@ import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
 import { ASPECT_RATIO_VALUES, RENDER_LAYERS } from '../constants';
+import { exportFrame, type FrameExportHandler } from '../export/exportFrame';
 import type { SceneDocument } from '../persistence/sceneSchema';
 import type { EditorStore } from '../state/editorStore';
 import { CompositionGuides } from './CompositionGuides';
@@ -24,6 +25,7 @@ import { SelectionTransformControls } from './SelectionTransformControls';
 
 interface SceneViewportProps {
   store: StoreApi<EditorStore>;
+  onExportReady?: (exportFrame: FrameExportHandler | null) => void;
 }
 
 function moveToLayer(object: Object3D | null, layer: number) {
@@ -191,7 +193,25 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
   );
 }
 
-export function SceneViewport({ store }: SceneViewportProps) {
+function ExportFrameBridge({
+  onExportReady,
+}: {
+  onExportReady: (exportFrame: FrameExportHandler | null) => void;
+}) {
+  const renderer = useThree((state) => state.gl);
+  const scene = useThree((state) => state.scene);
+
+  useLayoutEffect(() => {
+    const handler: FrameExportHandler = (request) =>
+      exportFrame({ ...request, renderer, scene });
+    onExportReady(handler);
+    return () => onExportReady(null);
+  }, [onExportReady, renderer, scene]);
+
+  return null;
+}
+
+export function SceneViewport({ store, onExportReady }: SceneViewportProps) {
   const outputAspectId = useStore(
     store,
     (state) => state.document.output.aspectRatioId,
@@ -245,7 +265,7 @@ export function SceneViewport({ store }: SceneViewportProps) {
             data-shadow-bounds={`${SHADOW_BOUNDS_M}m`}
             data-grid-size="20m"
             data-axes-origin="0,0.025,0"
-            shadows
+            shadows="percentage"
             dpr={[1, 2]}
             gl={{
               antialias: true,
@@ -263,6 +283,9 @@ export function SceneViewport({ store }: SceneViewportProps) {
             }}
           >
             <RuntimeScene store={store} />
+            {onExportReady === undefined ? null : (
+              <ExportFrameBridge onExportReady={onExportReady} />
+            )}
           </Canvas>
           <CompositionGuides visibility={guideVisibility} />
         </div>
