@@ -12,6 +12,9 @@ describe('App', () => {
         name: 'I2V 3D Scene Helper',
       }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('complementary', { name: '에셋과 장면' }),
+    ).toBeInTheDocument();
   });
 
   it('WebGL을 사용할 수 없으면 명시적인 대체 안내를 표시한다', async () => {
