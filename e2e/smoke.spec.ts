@@ -34,3 +34,15 @@ test('configured Chromium에서 앱 셸과 WebGL available 상태를 표시한�
 
   await expect(status).toHaveText('WebGL을 사용할 수 있습니다.');
 });
+
+test('지원 최소 높이 미만에서는 데스크톱 안내만 표시한다', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 719 });
+  await page.goto('/');
+
+  await expect(
+    page.getByRole('heading', { name: '데스크톱 화면이 필요합니다' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('complementary', { name: '에셋과 장면' }),
+  ).toBeHidden();
+});

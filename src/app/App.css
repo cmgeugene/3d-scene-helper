@@ -434,7 +434,7 @@ p {
   display: none;
 }
 
-@media (max-width: 1279px) {
+@media (max-width: 1279px), (max-height: 719px) {
   body {
     overflow: auto;
   }
