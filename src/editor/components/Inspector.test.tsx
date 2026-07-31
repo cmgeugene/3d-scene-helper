@@ -180,7 +180,7 @@ describe('Inspector', () => {
         ?.mannequinPose?.id,
     ).toBe('t');
 
-    await user.click(within(poseGroup).getByRole('button', { name: '손 IK' }));
+    await user.click(within(poseGroup).getByRole('button', { name: /손 IK/ }));
     expect(store.getState().mannequinTool).toBe('ik');
     await user.click(
       within(poseGroup).getByRole('button', { name: '오브젝트 변형' }),
@@ -224,7 +224,7 @@ describe('Inspector', () => {
     expect(store.getState().document.outputCamera.target).toEqual({
       x: 0,
       y: 0.85,
-      z: -0.025,
+      z: -0.047,
     });
     await user.click(screen.getByRole('button', { name: '선택 바라보기' }));
     expect(store.getState().statusMessage).toBe('Mannequin을 바라봅니다.');

@@ -180,3 +180,30 @@
 - 포함: articulated procedural mannequin, 4 poses, 6 views, v2 persistence/migration, left/right hand IK, posed bounds, existing editor/export integration.
 - 제외: external GLB, skeleton/skinning, foot IK, head look-at, animation/timeline, skin/clothing, arbitrary character assets.
 - 자격증명, API key, secret, 외부 네트워크 write를 추가하지 않았다.
+
+## Follow-up closure — studio appearance, 8-target IK, anatomical limits
+
+- 기준 commit: `46501d2384be0bdfc99913c086679ee9757fc62b` (`feat: add poseable articulated mannequin`)
+- 후속 commit 메시지: `feat: polish mannequin anatomy and expanded IK`
+- 기존 S12 commit을 amend하지 않고 별도 후속 commit으로 닫는다.
+
+### 추가 구현
+
+- block primitive 외형을 닫힌 procedural studio mannequin mesh로 교체했다. 모든 body geometry는 manifold boundary `0`, outward winding의 positive signed volume, stable shared singleton ownership을 갖는다.
+- IK target을 양손뿐 아니라 양발·양팔꿈치·양무릎까지 총 8개로 확장했다. 손/발은 two-bone end-effector, 팔꿈치/무릎은 constrained direct-joint target이다.
+- shoulder/hip directional swing, direct-target axial twist, elbow `145°`, knee `135°` 제한을 적용했다.
+- mannequin local forward `-Z`에 맞춰 positive knee flexion을 뒤쪽 `+Z`로 통일했다. FK, IK, renderer와 pose-aware bounds가 같은 negative knee quaternion convention을 사용한다.
+- persisted v2의 `kneeBendDeg > 0` 의미는 계속 “positive flexion”이다. 기존 forward-rendering은 저장 의미가 아니라 미병합 feature의 축 버그였으므로 문서 버전이나 저장값을 뒤집지 않고 FK/renderer/bounds를 계약에 맞게 수정했다.
+- exact-up/antiparallel cap은 wrapped azimuth angle을 보간하지 않는다. 연속적인 planar mapping으로 축소해 pole threshold와 `±π` branch cut에서 미세 target 변화가 limb flip으로 확대되지 않게 했다.
+- normal pointer-up은 `commit-mannequin-pose`를 정확히 한 번 기록한다. Escape, pointer-cancel, unmount는 runtime preview를 rollback하며 history를 만들지 않는다.
+
+### 후속 검증
+
+- Unit/component: **15 files, 186/186 passed**.
+- Lint, typecheck, format check, `git diff --check`: exit `0`.
+- Chromium/WebGL E2E: **56/56 passed**.
+- Ordinary production artifact 실제 pointer IK: **1/1 passed**.
+- Production build에서 E2E diagnostics가 제외됨을 확인했다.
+- 정면·측면·3/4 extreme-drag WebGL 검사에서 sideways knee hinge, hyperextension, limb inversion과 불가능한 shoulder/hip twist가 관찰되지 않았다.
+- 독립 review에서 geometry winding/shared ownership 및 anatomical antiparallel continuity/bounds 불일치를 발견해 RED → GREEN으로 수정했다.
+- 최종 anatomical/runtime closure review `deleg_9af52e81`: **APPROVED — 모든 Important가 해결됐고 새 Important/Critical 0건**.

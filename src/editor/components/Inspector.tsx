@@ -655,7 +655,7 @@ export function Inspector({ store }: InspectorProps) {
                       store.getState().setMannequinTool('ik');
                     }}
                   >
-                    손 IK
+                    손 IK · 발/팔꿈치/무릎
                   </button>
                 </div>
               </fieldset>

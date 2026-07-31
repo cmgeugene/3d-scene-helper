@@ -376,7 +376,7 @@ describe('editorStore', () => {
         .getState()
         .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
         ?.mannequinPose?.arms.left.elbowBendDeg,
-    ).toBe(150);
+    ).toBe(145);
   });
 
   it('삭제한 object의 selection, hover, in-progress transform을 정리한다', () => {
@@ -595,7 +595,7 @@ describe('editorStore', () => {
       store.getState().applyCameraShot(preset.id);
       const camera = store.getState().document.outputCamera;
       expect(camera.target.x).toBe(0);
-      expect(camera.target.z).toBe(-0.025);
+      expect(camera.target.z).toBe(-0.047);
       expect(Number.isFinite(camera.position.z)).toBe(true);
       expect(camera.rollDeg).toBe(preset.framing.rollDeg);
     }
@@ -658,7 +658,7 @@ describe('editorStore', () => {
     expect(store.getState().document.outputCamera.target).toEqual({
       x: 0,
       y: 0.85,
-      z: -0.025,
+      z: -0.047,
     });
     expect(store.getState().statusMessage).toBe(
       'Mannequin을 프레임에 맞췄습니다.',
@@ -672,7 +672,7 @@ describe('editorStore', () => {
     store.getState().lookAtSelected();
     expect(store.getState().document.outputCamera).toMatchObject({
       position: { x: 4, y: 3, z: 6 },
-      target: { x: 0, y: 0.85, z: -0.025 },
+      target: { x: 0, y: 0.85, z: -0.047 },
     });
     expect(store.getState().statusMessage).toBe('Mannequin을 바라봅니다.');
   });

@@ -1,16 +1,47 @@
 import { describe, expect, it } from 'vitest';
+import { Euler, MathUtils, Quaternion } from 'three';
 import { mannequinPoseSchema } from '../persistence/sceneSchema';
 import {
   MANNEQUIN_ARM_ANCHORS,
   MANNEQUIN_ARM_LENGTHS,
   MANNEQUIN_FORWARD_AXIS,
+  MANNEQUIN_LEG_ANCHORS,
+  MANNEQUIN_LEG_LENGTHS,
   MANNEQUIN_POSE_PRESETS,
   computeMannequinPoseBounds,
   createMannequinPose,
   getMannequinArmChain,
+  getMannequinLegChain,
   solveMannequinArmIk,
+  solveMannequinElbowIk,
+  solveMannequinKneeIk,
+  solveMannequinLegIk,
   solveTwoBoneArmIk,
 } from './mannequinRig';
+
+function vectorDistance(
+  a: { x: number; y: number; z: number },
+  b: { x: number; y: number; z: number },
+) {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function axialTwistDegrees(rotation: { x: number; y: number; z: number }) {
+  const quaternion = new Quaternion().setFromEuler(
+    new Euler(
+      MathUtils.degToRad(rotation.x),
+      MathUtils.degToRad(rotation.y),
+      MathUtils.degToRad(rotation.z),
+      'XYZ',
+    ),
+  );
+  const twistLength = Math.hypot(quaternion.y, quaternion.w);
+  if (twistLength < 1e-12) return 180;
+  const angle = MathUtils.radToDeg(
+    2 * Math.atan2(quaternion.y / twistLength, quaternion.w / twistLength),
+  );
+  return Math.abs(MathUtils.euclideanModulo(angle + 180, 360) - 180);
+}
 
 describe('mannequin pose conventions and presets', () => {
   it('documents -Z as forward and exposes four JSON-safe named poses', () => {
@@ -154,15 +185,25 @@ describe('analytic two-bone arm IK', () => {
     expect(JSON.parse(JSON.stringify(pose))).toEqual(pose);
   });
 
-  it('returns an exact schema-valid maximum bend at minimum reach', () => {
+  it('returns the exact conservative maximum bend at minimum reach', () => {
     const pose = solveMannequinArmIk(
       createMannequinPose('default'),
       'left',
       MANNEQUIN_ARM_ANCHORS.left.shoulder,
     );
 
-    expect(pose.arms.left.elbowBendDeg).toBe(150);
+    expect(pose.arms.left.elbowBendDeg).toBe(145);
     expect(mannequinPoseSchema.safeParse(pose).success).toBe(true);
+  });
+
+  it('keeps a folded elbow inside a conservative anatomical hinge limit', () => {
+    const pose = solveMannequinArmIk(
+      createMannequinPose('default'),
+      'left',
+      MANNEQUIN_ARM_ANCHORS.left.shoulder,
+    );
+
+    expect(pose.arms.left.elbowBendDeg).toBe(145);
   });
 
   it('inherits torso rotation in arm FK and IK target solving', () => {
@@ -183,7 +224,407 @@ describe('analytic two-bone arm IK', () => {
   });
 });
 
+describe('analytic two-bone leg IK', () => {
+  it('folds a positive knee bend backward along +Z', () => {
+    const bent = createMannequinPose('default');
+    bent.legs.left.kneeBendDeg = 90;
+    const chain = getMannequinLegChain(bent, 'left');
+
+    expect(chain.foot.z).toBeGreaterThan(chain.knee.z + 0.3);
+  });
+
+  it('moves the ankle target while preserving thigh and shin lengths', () => {
+    const target = { x: -0.16, y: -0.62, z: -0.25 };
+    const pose = solveMannequinLegIk(
+      createMannequinPose('default'),
+      'left',
+      target,
+    );
+    const chain = getMannequinLegChain(pose, 'left');
+
+    expect(distance(chain.foot, target)).toBeLessThan(1e-6);
+    expect(distance(chain.hip, chain.knee)).toBeCloseTo(
+      MANNEQUIN_LEG_LENGTHS.thigh,
+      10,
+    );
+    expect(distance(chain.knee, chain.foot)).toBeCloseTo(
+      MANNEQUIN_LEG_LENGTHS.shin,
+      10,
+    );
+    expect(pose.legs.left.kneeBendDeg).toBeGreaterThanOrEqual(0);
+    expect(pose.legs.left.kneeBendDeg).toBeLessThanOrEqual(150);
+    expect(mannequinPoseSchema.safeParse(pose).success).toBe(true);
+  });
+
+  it('limits lateral hip abduction and deep knee folding', () => {
+    const initial = createMannequinPose('default');
+    const sideSolved = solveMannequinLegIk(initial, 'left', {
+      x: MANNEQUIN_LEG_ANCHORS.left.hip.x - 2,
+      y: MANNEQUIN_LEG_ANCHORS.left.hip.y,
+      z: MANNEQUIN_LEG_ANCHORS.left.hip.z,
+    });
+    const sideChain = getMannequinLegChain(sideSolved, 'left');
+    const upperAngleFromDown =
+      (Math.acos(
+        Math.max(
+          -1,
+          Math.min(
+            1,
+            (sideChain.hip.y - sideChain.knee.y) / MANNEQUIN_LEG_LENGTHS.thigh,
+          ),
+        ),
+      ) *
+        180) /
+      Math.PI;
+    const footOffset = {
+      x: sideChain.foot.x - sideChain.hip.x,
+      y: sideChain.foot.y - sideChain.hip.y,
+      z: sideChain.foot.z - sideChain.hip.z,
+    };
+    const footAngleFromDown =
+      (Math.acos(
+        Math.max(
+          -1,
+          Math.min(
+            1,
+            -footOffset.y /
+              Math.hypot(footOffset.x, footOffset.y, footOffset.z),
+          ),
+        ),
+      ) *
+        180) /
+      Math.PI;
+    const folded = solveMannequinLegIk(
+      initial,
+      'left',
+      MANNEQUIN_LEG_ANCHORS.left.hip,
+    );
+    const inwardSolved = solveMannequinLegIk(initial, 'left', {
+      x: MANNEQUIN_LEG_ANCHORS.left.hip.x + 2,
+      y: MANNEQUIN_LEG_ANCHORS.left.hip.y,
+      z: MANNEQUIN_LEG_ANCHORS.left.hip.z,
+    });
+    const inwardChain = getMannequinLegChain(inwardSolved, 'left');
+    const inwardFootOffset = {
+      x: inwardChain.foot.x - inwardChain.hip.x,
+      y: inwardChain.foot.y - inwardChain.hip.y,
+      z: inwardChain.foot.z - inwardChain.hip.z,
+    };
+    const inwardFootAngle =
+      (Math.acos(
+        Math.max(
+          -1,
+          Math.min(
+            1,
+            -inwardFootOffset.y /
+              Math.hypot(
+                inwardFootOffset.x,
+                inwardFootOffset.y,
+                inwardFootOffset.z,
+              ),
+          ),
+        ),
+      ) *
+        180) /
+      Math.PI;
+
+    expect(upperAngleFromDown).toBeLessThanOrEqual(55.000001);
+    expect(footAngleFromDown).toBeLessThanOrEqual(55.000001);
+    expect(inwardFootAngle).toBeLessThanOrEqual(20.000001);
+    expect(folded.legs.left.kneeBendDeg).toBe(135);
+  });
+
+  it('keeps the constrained leg continuous near an antiparallel target', () => {
+    const initial = createMannequinPose('default');
+    const hip = MANNEQUIN_LEG_ANCHORS.left.hip;
+    const before = getMannequinLegChain(
+      solveMannequinLegIk(initial, 'left', {
+        x: hip.x - 0.0001,
+        y: hip.y + 1,
+        z: hip.z,
+      }),
+      'left',
+    );
+    const after = getMannequinLegChain(
+      solveMannequinLegIk(initial, 'left', {
+        x: hip.x + 0.0001,
+        y: hip.y + 1,
+        z: hip.z,
+      }),
+      'left',
+    );
+
+    expect(vectorDistance(before.knee, after.knee)).toBeLessThan(0.01);
+    expect(vectorDistance(before.foot, after.foot)).toBeLessThan(0.01);
+  });
+
+  it('does not flip when an antiparallel leg target crosses the pole threshold', () => {
+    const initial = createMannequinPose('default');
+    const hip = MANNEQUIN_LEG_ANCHORS.left.hip;
+    const near = getMannequinLegChain(
+      solveMannequinLegIk(initial, 'left', {
+        x: hip.x,
+        y: hip.y + 1,
+        z: hip.z + 0.0001,
+      }),
+      'left',
+    );
+    const across = getMannequinLegChain(
+      solveMannequinLegIk(initial, 'left', {
+        x: hip.x,
+        y: hip.y + 1,
+        z: hip.z + 0.001,
+      }),
+      'left',
+    );
+    const directNear = getMannequinLegChain(
+      solveMannequinKneeIk(initial, 'left', {
+        x: hip.x,
+        y: hip.y + 1,
+        z: hip.z + 0.0001,
+      }),
+      'left',
+    );
+    const directAcross = getMannequinLegChain(
+      solveMannequinKneeIk(initial, 'left', {
+        x: hip.x,
+        y: hip.y + 1,
+        z: hip.z + 0.001,
+      }),
+      'left',
+    );
+
+    expect(vectorDistance(near.knee, across.knee)).toBeLessThan(0.01);
+    expect(vectorDistance(near.foot, across.foot)).toBeLessThan(0.01);
+    expect(vectorDistance(directNear.knee, directAcross.knee)).toBeLessThan(
+      0.01,
+    );
+  });
+
+  it('stays continuous across the antiparallel azimuth branch cut', () => {
+    const initial = createMannequinPose('default');
+    const hip = MANNEQUIN_LEG_ANCHORS.left.hip;
+
+    for (const swingDeg of [166, 170, 175]) {
+      const swingRad = MathUtils.degToRad(swingDeg);
+      const target = (x: number) => ({
+        x: hip.x + x,
+        y: hip.y - Math.cos(swingRad),
+        z: hip.z + Math.sin(swingRad),
+      });
+      const endpointNegative = getMannequinLegChain(
+        solveMannequinLegIk(initial, 'left', target(-1e-8)),
+        'left',
+      );
+      const endpointPositive = getMannequinLegChain(
+        solveMannequinLegIk(initial, 'left', target(1e-8)),
+        'left',
+      );
+      const directNegative = getMannequinLegChain(
+        solveMannequinKneeIk(initial, 'left', target(-1e-8)),
+        'left',
+      );
+      const directPositive = getMannequinLegChain(
+        solveMannequinKneeIk(initial, 'left', target(1e-8)),
+        'left',
+      );
+
+      expect(
+        vectorDistance(endpointNegative.knee, endpointPositive.knee),
+      ).toBeLessThan(0.01);
+      expect(
+        vectorDistance(endpointNegative.foot, endpointPositive.foot),
+      ).toBeLessThan(0.01);
+      expect(
+        vectorDistance(directNegative.knee, directPositive.knee),
+      ).toBeLessThan(0.01);
+      expect(
+        vectorDistance(directNegative.foot, directPositive.foot),
+      ).toBeLessThan(0.01);
+    }
+  });
+
+  it('produces mirrored left and right leg solutions', () => {
+    const initial = createMannequinPose('default');
+    const left = getMannequinLegChain(
+      solveMannequinLegIk(initial, 'left', { x: -0.3, y: -0.52, z: -0.18 }),
+      'left',
+    );
+    const right = getMannequinLegChain(
+      solveMannequinLegIk(initial, 'right', { x: 0.3, y: -0.52, z: -0.18 }),
+      'right',
+    );
+
+    expect(left.knee.x).toBeCloseTo(-right.knee.x, 6);
+    expect(left.knee.y).toBeCloseTo(right.knee.y, 6);
+    expect(left.knee.z).toBeCloseTo(right.knee.z, 6);
+    expect(left.foot.x).toBeCloseTo(-right.foot.x, 6);
+    expect(left.foot.y).toBeCloseTo(right.foot.y, 6);
+    expect(left.foot.z).toBeCloseTo(right.foot.z, 6);
+  });
+});
+
+describe('direct elbow and knee targets', () => {
+  it('aims the proximal bone at a joint target without changing its length', () => {
+    const initial = createMannequinPose('default');
+    const leftArm = getMannequinArmChain(initial, 'left');
+    const leftLeg = getMannequinLegChain(initial, 'left');
+    const elbowTarget = {
+      x: leftArm.shoulder.x,
+      y: leftArm.shoulder.y,
+      z: leftArm.shoulder.z - MANNEQUIN_ARM_LENGTHS.upperArm,
+    };
+    const kneeDrop = 0.28;
+    const kneeTarget = {
+      x: leftLeg.hip.x,
+      y: leftLeg.hip.y - kneeDrop,
+      z:
+        leftLeg.hip.z -
+        Math.sqrt(MANNEQUIN_LEG_LENGTHS.thigh ** 2 - kneeDrop ** 2),
+    };
+
+    const elbowSolved = solveMannequinElbowIk(initial, 'left', elbowTarget);
+    const kneeSolved = solveMannequinKneeIk(initial, 'left', kneeTarget);
+
+    expect(
+      distance(getMannequinArmChain(elbowSolved, 'left').elbow, elbowTarget),
+    ).toBeLessThan(1e-6);
+    expect(
+      distance(getMannequinLegChain(kneeSolved, 'left').knee, kneeTarget),
+    ).toBeLessThan(1e-6);
+    expect(elbowSolved.arms.right).toEqual(initial.arms.right);
+    expect(kneeSolved.legs.right).toEqual(initial.legs.right);
+    expect(mannequinPoseSchema.safeParse(elbowSolved).success).toBe(true);
+    expect(mannequinPoseSchema.safeParse(kneeSolved).success).toBe(true);
+  });
+
+  it('stops direct joint targets before the shoulder or hip inverts', () => {
+    const initial = createMannequinPose('default');
+    const arm = getMannequinArmChain(initial, 'left');
+    const leg = getMannequinLegChain(initial, 'left');
+    const elbowSolved = solveMannequinElbowIk(initial, 'left', {
+      x: arm.shoulder.x,
+      y: arm.shoulder.y + 2,
+      z: arm.shoulder.z,
+    });
+    const kneeSolved = solveMannequinKneeIk(initial, 'left', {
+      x: leg.hip.x - 2,
+      y: leg.hip.y,
+      z: leg.hip.z,
+    });
+    const elbow = getMannequinArmChain(elbowSolved, 'left');
+    const knee = getMannequinLegChain(kneeSolved, 'left');
+    const angleFromDown = (
+      origin: { y: number },
+      joint: { y: number },
+      length: number,
+    ) =>
+      (Math.acos(Math.max(-1, Math.min(1, (origin.y - joint.y) / length))) *
+        180) /
+      Math.PI;
+
+    expect(
+      angleFromDown(
+        elbow.shoulder,
+        elbow.elbow,
+        MANNEQUIN_ARM_LENGTHS.upperArm,
+      ),
+    ).toBeLessThanOrEqual(160.000001);
+    expect(
+      angleFromDown(knee.hip, knee.knee, MANNEQUIN_LEG_LENGTHS.thigh),
+    ).toBeLessThanOrEqual(55.000001);
+  });
+
+  it('clamps inherited shoulder and hip axial twist', () => {
+    const twisted = createMannequinPose('default');
+    twisted.arms.left.shoulderRotationDeg.y = 170;
+    twisted.legs.left.hipRotationDeg.y = 170;
+    const shoulder = MANNEQUIN_ARM_ANCHORS.left.shoulder;
+    const hip = MANNEQUIN_LEG_ANCHORS.left.hip;
+
+    const armSolved = solveMannequinElbowIk(twisted, 'left', {
+      x: shoulder.x,
+      y: shoulder.y - MANNEQUIN_ARM_LENGTHS.upperArm,
+      z: shoulder.z,
+    });
+    const legSolved = solveMannequinKneeIk(twisted, 'left', {
+      x: hip.x,
+      y: hip.y - MANNEQUIN_LEG_LENGTHS.thigh,
+      z: hip.z,
+    });
+
+    expect(
+      axialTwistDegrees(armSolved.arms.left.shoulderRotationDeg),
+    ).toBeLessThanOrEqual(70.000001);
+    expect(
+      axialTwistDegrees(legSolved.legs.left.hipRotationDeg),
+    ).toBeLessThanOrEqual(45.000001);
+  });
+
+  it('clamps inherited elbow and knee flexion to anatomical hinge ranges', () => {
+    const overflexed = createMannequinPose('default');
+    overflexed.arms.left.elbowBendDeg = 150;
+    overflexed.legs.left.kneeBendDeg = 150;
+    const elbow = getMannequinArmChain(overflexed, 'left');
+    const knee = getMannequinLegChain(overflexed, 'left');
+
+    const elbowSolved = solveMannequinElbowIk(overflexed, 'left', elbow.elbow);
+    const kneeSolved = solveMannequinKneeIk(overflexed, 'left', knee.knee);
+
+    expect(elbowSolved.arms.left.elbowBendDeg).toBe(145);
+    expect(kneeSolved.legs.left.kneeBendDeg).toBe(135);
+
+    const hyperextended = createMannequinPose('default');
+    hyperextended.arms.left.elbowBendDeg = -20;
+    hyperextended.legs.left.kneeBendDeg = -20;
+    const straightElbow = getMannequinArmChain(hyperextended, 'left');
+    const straightKnee = getMannequinLegChain(hyperextended, 'left');
+
+    expect(
+      solveMannequinElbowIk(hyperextended, 'left', straightElbow.elbow).arms
+        .left.elbowBendDeg,
+    ).toBe(0);
+    expect(
+      solveMannequinKneeIk(hyperextended, 'left', straightKnee.knee).legs.left
+        .kneeBendDeg,
+    ).toBe(0);
+  });
+
+  it('treats coincident and sub-epsilon direct joint targets as no-ops', () => {
+    const initial = createMannequinPose('walk-ready');
+    const arm = getMannequinArmChain(initial, 'left');
+    const leg = getMannequinLegChain(initial, 'left');
+    const elbowSolved = solveMannequinElbowIk(initial, 'left', {
+      x: arm.shoulder.x + 1e-15,
+      y: arm.shoulder.y,
+      z: arm.shoulder.z,
+    });
+    const kneeSolved = solveMannequinKneeIk(initial, 'left', {
+      x: leg.hip.x + 1e-15,
+      y: leg.hip.y,
+      z: leg.hip.z,
+    });
+
+    expect(elbowSolved.arms.left.shoulderRotationDeg).toEqual(
+      initial.arms.left.shoulderRotationDeg,
+    );
+    expect(kneeSolved.legs.left.hipRotationDeg).toEqual(
+      initial.legs.left.hipRotationDeg,
+    );
+  });
+});
+
 describe('posed mannequin bounds', () => {
+  it('uses the same backward knee hinge direction as FK and rendering', () => {
+    const bent = createMannequinPose('default');
+    bent.legs.left.kneeBendDeg = 90;
+    const chain = getMannequinLegChain(bent, 'left');
+    const bounds = computeMannequinPoseBounds(bent);
+
+    expect(chain.foot.z).toBeGreaterThan(0.3);
+    expect(bounds.max.z).toBeGreaterThan(chain.foot.z + 0.04);
+  });
+
   it('includes articulated limbs and front-facing nose/toe cues', () => {
     const standing = computeMannequinPoseBounds(createMannequinPose('default'));
     const tPose = computeMannequinPoseBounds(createMannequinPose('t'));

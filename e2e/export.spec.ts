@@ -220,6 +220,7 @@ test('front/rear asymmetric mannequin cues remain pixel-readable in both PNG mod
   expect(frontCuePixelCount(frontClean)).toBeGreaterThan(
     frontCuePixelCount(rearClean) + 80,
   );
+  expect(frontCuePixelCount(frontClean)).toBeLessThan(2_000);
   expect(frontCuePixelCount(frontReference)).toBeGreaterThan(
     frontCuePixelCount(rearReference) + 80,
   );

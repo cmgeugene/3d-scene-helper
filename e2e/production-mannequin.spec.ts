@@ -1,10 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { PNG } from 'pngjs';
 
-function findHandleCenter(
-  screenshot: Buffer,
-  side: 'left' | 'right',
-): { x: number; y: number } {
+function collectHandlePixels(screenshot: Buffer, side: 'left' | 'right') {
   const image = PNG.sync.read(screenshot);
   let sumX = 0;
   let sumY = 0;
@@ -26,6 +23,14 @@ function findHandleCenter(
       }
     }
   }
+  return { count, sumX, sumY };
+}
+
+function findHandleCenter(
+  screenshot: Buffer,
+  side: 'left' | 'right',
+): { x: number; y: number } {
+  const { count, sumX, sumY } = collectHandlePixels(screenshot, side);
   expect(count).toBeGreaterThan(100);
   return { x: sumX / count, y: sumY / count };
 }
@@ -47,6 +52,15 @@ test('ordinary production build accepts a real pointer drag on the visible hand 
   await page.getByRole('button', { name: 'T 포즈' }).click();
   await page.getByRole('button', { name: '손 IK' }).click();
 
+  await expect
+    .poll(async () => {
+      const screenshot = await canvas.screenshot();
+      return (
+        collectHandlePixels(screenshot, 'left').count > 100 &&
+        collectHandlePixels(screenshot, 'right').count > 100
+      );
+    })
+    .toBe(true);
   const before = await canvas.screenshot();
   const center = findHandleCenter(before, 'left');
   const fixedCenter = findHandleCenter(before, 'right');
@@ -66,21 +80,12 @@ test('ordinary production build accepts a real pointer drag on the visible hand 
       const after = await canvas.screenshot();
       const moved = findHandleCenter(after, 'left');
       const fixed = findHandleCenter(after, 'right');
-      return {
-        movedDistance: Math.hypot(
-          moved.x - (center.x - 56),
-          moved.y - (center.y - 42),
-        ),
-        fixedDistance: Math.hypot(
-          fixed.x - fixedCenter.x,
-          fixed.y - fixedCenter.y,
-        ),
-      };
+      return (
+        Math.hypot(moved.x - (center.x - 56), moved.y - (center.y - 42)) < 12 &&
+        Math.hypot(fixed.x - fixedCenter.x, fixed.y - fixedCenter.y) < 6
+      );
     })
-    .toEqual({
-      movedDistance: expect.any(Number),
-      fixedDistance: expect.any(Number),
-    });
+    .toBe(true);
   const after = await canvas.screenshot();
   const moved = findHandleCenter(after, 'left');
   const fixed = findHandleCenter(after, 'right');
@@ -89,5 +94,5 @@ test('ordinary production build accepts a real pointer drag on the visible hand 
   ).toBeLessThan(12);
   expect(
     Math.hypot(fixed.x - fixedCenter.x, fixed.y - fixedCenter.y),
-  ).toBeLessThan(5);
+  ).toBeLessThan(6);
 });

@@ -14,9 +14,14 @@ import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
 import { RENDER_LAYERS } from '../constants';
 import {
   getMannequinArmChain,
+  getMannequinLegChain,
   solveMannequinArmIk,
+  solveMannequinElbowIk,
+  solveMannequinKneeIk,
+  solveMannequinLegIk,
   type MannequinPose,
   type MannequinSide,
+  type MannequinVector3,
 } from '../mannequin/mannequinRig';
 import type { SceneObject } from '../persistence/sceneSchema';
 import type { EditorStore } from '../state/editorStore';
@@ -39,30 +44,103 @@ const dragPlane = new Plane();
 const pointerNdc = new Vector2();
 const pointerRaycaster = new Raycaster();
 
+type MannequinIKJoint = 'hand' | 'foot' | 'elbow' | 'knee';
+type MannequinIKHandleId = `${MannequinSide}-${MannequinIKJoint}`;
+
+interface MannequinIKHandle {
+  id: MannequinIKHandleId;
+  side: MannequinSide;
+  joint: MannequinIKJoint;
+}
+
+const IK_HANDLES = (['left', 'right'] as const).flatMap((side) =>
+  (['hand', 'foot', 'elbow', 'knee'] as const).map((joint) => ({
+    id: `${side}-${joint}` as MannequinIKHandleId,
+    side,
+    joint,
+  })),
+);
+
+const IK_HANDLE_COLORS: Record<MannequinIKHandleId, string> = {
+  'left-hand': '#ff4fd8',
+  'right-hand': '#42e8ff',
+  'left-foot': '#ff8a3d',
+  'right-foot': '#72f08a',
+  'left-elbow': '#ffd84d',
+  'right-elbow': '#748cff',
+  'left-knee': '#ff6f7d',
+  'right-knee': '#54e6c1',
+};
+
+function getHandlePosition(
+  pose: MannequinPose,
+  handle: MannequinIKHandle,
+): MannequinVector3 {
+  if (handle.joint === 'hand' || handle.joint === 'elbow') {
+    return getMannequinArmChain(pose, handle.side)[handle.joint];
+  }
+  const leg = getMannequinLegChain(pose, handle.side);
+  return handle.joint === 'foot' ? leg.foot : leg.knee;
+}
+
+function solveHandleTarget(
+  pose: MannequinPose,
+  handle: MannequinIKHandle,
+  target: MannequinVector3,
+) {
+  if (handle.joint === 'hand') {
+    return solveMannequinArmIk(pose, handle.side, target);
+  }
+  if (handle.joint === 'foot') {
+    return solveMannequinLegIk(pose, handle.side, target);
+  }
+  if (handle.joint === 'elbow') {
+    return solveMannequinElbowIk(pose, handle.side, target);
+  }
+  return solveMannequinKneeIk(pose, handle.side, target);
+}
+
 function publishIKDiagnostics(
   canvas: HTMLCanvasElement,
   projections: Record<MannequinSide, { x: number; y: number }>,
   worldPositions: Record<MannequinSide, { x: number; y: number; z: number }>,
-  draggingSide: MannequinSide | null,
+  jointProjections: Record<
+    MannequinIKHandleId,
+    { x: number; y: number; depth: number }
+  >,
+  draggingHandle: MannequinIKHandle | null,
 ) {
   canvas.dataset.ikHandleProjections = JSON.stringify(projections);
   canvas.dataset.ikHandPositions = JSON.stringify(worldPositions);
-  if (draggingSide === null) delete canvas.dataset.ikDragging;
-  else canvas.dataset.ikDragging = draggingSide;
+  canvas.dataset.ikJointProjections = JSON.stringify(jointProjections);
+  if (draggingHandle === null) {
+    delete canvas.dataset.ikDragging;
+    delete canvas.dataset.ikActiveHandle;
+  } else {
+    canvas.dataset.ikDragging = draggingHandle.side;
+    canvas.dataset.ikActiveHandle = draggingHandle.id;
+  }
 }
 
 function clearIKDiagnostics(canvas: HTMLCanvasElement) {
   delete canvas.dataset.ikDragging;
+  delete canvas.dataset.ikActiveHandle;
   delete canvas.dataset.ikHandleProjections;
   delete canvas.dataset.ikHandPositions;
+  delete canvas.dataset.ikJointProjections;
 }
 
 function publishIKDragging(
   canvas: HTMLCanvasElement,
-  side: MannequinSide | null,
+  handle: MannequinIKHandle | null,
 ) {
-  if (side === null) delete canvas.dataset.ikDragging;
-  else canvas.dataset.ikDragging = side;
+  if (handle === null) {
+    delete canvas.dataset.ikDragging;
+    delete canvas.dataset.ikActiveHandle;
+  } else {
+    canvas.dataset.ikDragging = handle.side;
+    canvas.dataset.ikActiveHandle = handle.id;
+  }
 }
 
 function captureCanvasPointer(canvas: HTMLCanvasElement, pointerId: number) {
@@ -82,18 +160,21 @@ export function MannequinIKControls({
 }: MannequinIKControlsProps) {
   const groupRef = useRef<Group>(null);
   const rootRef = useRef<Group | null>(null);
-  const handleRefs = useRef<Record<MannequinSide, Mesh | null>>({
-    left: null,
-    right: null,
-  });
-  const draggingSideRef = useRef<MannequinSide | null>(null);
+  const handleRefs = useRef<Partial<Record<MannequinIKHandleId, Mesh | null>>>(
+    {},
+  );
+  const draggingHandleRef = useRef<MannequinIKHandle | null>(null);
   const pointerIdRef = useRef<number | null>(null);
   const projectionsRef = useRef<
-    Record<MannequinSide, { x: number; y: number; depth: number }>
-  >({
-    left: { x: 0, y: 0, depth: Infinity },
-    right: { x: 0, y: 0, depth: Infinity },
-  });
+    Record<MannequinIKHandleId, { x: number; y: number; depth: number }>
+  >(
+    Object.fromEntries(
+      IK_HANDLES.map(({ id }) => [
+        id,
+        { x: 0, y: 0, depth: Number.POSITIVE_INFINITY },
+      ]),
+    ) as Record<MannequinIKHandleId, { x: number; y: number; depth: number }>,
+  );
   const runtimePoseRef = useRef(pose);
   const initialPoseRef = useRef<MannequinPose | null>(null);
   const camera = useThree((state) => state.camera) as PerspectiveCamera;
@@ -116,7 +197,7 @@ export function MannequinIKControls({
   }, []);
 
   const finishDrag = (commit: boolean) => {
-    const side = draggingSideRef.current;
+    const side = draggingHandleRef.current;
     if (side === null) return;
     try {
       if (commit) {
@@ -128,7 +209,7 @@ export function MannequinIKControls({
       if (commit) store.getState().cancelMannequinPose();
       throw error;
     } finally {
-      draggingSideRef.current = null;
+      draggingHandleRef.current = null;
       pointerIdRef.current = null;
       initialPoseRef.current = null;
       onRuntimePoseChange(null);
@@ -139,7 +220,7 @@ export function MannequinIKControls({
 
   useEffect(() => {
     const cancelOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && draggingSideRef.current !== null) {
+      if (event.key === 'Escape' && draggingHandleRef.current !== null) {
         event.preventDefault();
         finishDrag(false);
       }
@@ -150,8 +231,8 @@ export function MannequinIKControls({
 
   useEffect(
     () => () => {
-      if (draggingSideRef.current !== null) {
-        draggingSideRef.current = null;
+      if (draggingHandleRef.current !== null) {
+        draggingHandleRef.current = null;
         store.getState().cancelMannequinPose();
         onRuntimePoseChange(null);
         onDraggingChange(false);
@@ -166,13 +247,10 @@ export function MannequinIKControls({
   useFrame(() => {
     const root = rootRef.current;
     if (root === null) return;
-    const projections: Record<
-      MannequinSide,
+    const jointProjections = {} as Record<
+      MannequinIKHandleId,
       { x: number; y: number; depth: number }
-    > = {
-      left: { x: 0, y: 0, depth: Infinity },
-      right: { x: 0, y: 0, depth: Infinity },
-    };
+    >;
     const worldPositions: Record<
       MannequinSide,
       { x: number; y: number; z: number }
@@ -180,29 +258,35 @@ export function MannequinIKControls({
       left: { x: 0, y: 0, z: 0 },
       right: { x: 0, y: 0, z: 0 },
     };
-    for (const side of ['left', 'right'] as const) {
-      const handle = handleRefs.current[side];
-      if (handle === null) continue;
+    for (const descriptor of IK_HANDLES) {
+      const handle = handleRefs.current[descriptor.id];
+      if (handle === null || handle === undefined) continue;
       handle.getWorldPosition(tempWorld);
-      worldPositions[side] = {
-        x: tempWorld.x,
-        y: tempWorld.y,
-        z: tempWorld.z,
-      };
+      if (descriptor.joint === 'hand') {
+        worldPositions[descriptor.side] = {
+          x: tempWorld.x,
+          y: tempWorld.y,
+          z: tempWorld.z,
+        };
+      }
       tempProjected.copy(tempWorld).project(camera);
-      projections[side] = {
+      jointProjections[descriptor.id] = {
         x: ((tempProjected.x + 1) / 2) * canvas.clientWidth,
         y: ((1 - tempProjected.y) / 2) * canvas.clientHeight,
         depth: tempProjected.z,
       };
     }
-    projectionsRef.current = projections;
+    projectionsRef.current = jointProjections;
     if (!IS_EDITOR_TEST_BRIDGE_ENABLED) return;
     publishIKDiagnostics(
       canvas,
-      projections,
+      {
+        left: jointProjections['left-hand'],
+        right: jointProjections['right-hand'],
+      },
       worldPositions,
-      draggingSideRef.current,
+      jointProjections,
+      draggingHandleRef.current,
     );
   });
 
@@ -216,51 +300,52 @@ export function MannequinIKControls({
       };
     };
     const begin = (event: PointerEvent) => {
-      if (draggingSideRef.current !== null || event.button !== 0) return;
+      if (draggingHandleRef.current !== null || event.button !== 0) return;
       const pointer = pointerPosition(event);
-      const side = (['left', 'right'] as const)
-        .map((candidate) => {
-          const projection = projectionsRef.current[candidate];
-          return {
-            side: candidate,
-            distance: Math.hypot(
-              pointer.x - projection.x,
-              pointer.y - projection.y,
-            ),
-            depth: projection.depth,
-          };
-        })
+      const handle = IK_HANDLES.map((candidate) => {
+        const projection = projectionsRef.current[candidate.id];
+        return {
+          handle: candidate,
+          distance: Math.hypot(
+            pointer.x - projection.x,
+            pointer.y - projection.y,
+          ),
+          depth: projection.depth,
+        };
+      })
         .filter(({ distance }) => distance <= 26)
         .sort(
           (left, right) =>
-            left.distance - right.distance || left.depth - right.depth,
-        )[0]?.side;
-      if (side === undefined) return;
+            left.distance - right.distance ||
+            left.depth - right.depth ||
+            left.handle.id.localeCompare(right.handle.id),
+        )[0]?.handle;
+      if (handle === undefined) return;
       const root = rootRef.current;
       if (root === null) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      draggingSideRef.current = side;
+      draggingHandleRef.current = handle;
       pointerIdRef.current = event.pointerId;
       runtimePoseRef.current = pose;
       initialPoseRef.current = structuredClone(pose);
       store.getState().beginMannequinPose();
       onDraggingChange(true);
       captureCanvasPointer(canvas, event.pointerId);
-      const hand = getMannequinArmChain(pose, side).hand;
+      const handlePosition = getHandlePosition(pose, handle);
       tempWorld.set(
-        hand.x * dimensionScale.x,
-        hand.y * dimensionScale.y,
-        hand.z * dimensionScale.z,
+        handlePosition.x * dimensionScale.x,
+        handlePosition.y * dimensionScale.y,
+        handlePosition.z * dimensionScale.z,
       );
       root.localToWorld(tempWorld);
       camera.getWorldDirection(tempNormal);
       dragPlane.setFromNormalAndCoplanarPoint(tempNormal, tempWorld);
-      if (IS_EDITOR_TEST_BRIDGE_ENABLED) publishIKDragging(canvas, side);
+      if (IS_EDITOR_TEST_BRIDGE_ENABLED) publishIKDragging(canvas, handle);
     };
     const move = (event: PointerEvent) => {
-      const side = draggingSideRef.current;
-      if (side === null || pointerIdRef.current !== event.pointerId) return;
+      const handle = draggingHandleRef.current;
+      if (handle === null || pointerIdRef.current !== event.pointerId) return;
       const root = rootRef.current;
       if (root === null) return;
       event.preventDefault();
@@ -277,7 +362,7 @@ export function MannequinIKControls({
       );
       if (worldTarget === null) return;
       const localTarget = root.worldToLocal(worldTarget.clone());
-      const nextPose = solveMannequinArmIk(runtimePoseRef.current, side, {
+      const nextPose = solveHandleTarget(runtimePoseRef.current, handle, {
         x: localTarget.x / dimensionScale.x,
         y: localTarget.y / dimensionScale.y,
         z: localTarget.z / dimensionScale.z,
@@ -292,39 +377,51 @@ export function MannequinIKControls({
       releaseCanvasPointer(canvas, event.pointerId);
       finishDrag(true);
     };
+    const cancel = (event: PointerEvent) => {
+      if (pointerIdRef.current !== event.pointerId) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      finishDrag(false);
+    };
     canvas.addEventListener('pointerdown', begin, true);
     canvas.addEventListener('pointermove', move, true);
     canvas.addEventListener('pointerup', end, true);
-    canvas.addEventListener('pointercancel', end, true);
+    canvas.addEventListener('pointercancel', cancel, true);
     return () => {
       canvas.removeEventListener('pointerdown', begin, true);
       canvas.removeEventListener('pointermove', move, true);
       canvas.removeEventListener('pointerup', end, true);
-      canvas.removeEventListener('pointercancel', end, true);
+      canvas.removeEventListener('pointercancel', cancel, true);
     };
   });
 
   return (
     <group ref={groupRef} name="MannequinIKHandles.layer1">
-      {(['left', 'right'] as const).map((side) => {
-        const hand = getMannequinArmChain(pose, side).hand;
+      {IK_HANDLES.map((handle) => {
+        const position = getHandlePosition(pose, handle);
+        const isEndEffector =
+          handle.joint === 'hand' || handle.joint === 'foot';
         return (
           <mesh
-            key={side}
+            key={handle.id}
             ref={(mesh) => {
-              handleRefs.current[side] = mesh;
+              handleRefs.current[handle.id] = mesh;
             }}
-            name={`Mannequin.${side}-hand-ik.layer1`}
+            name={`Mannequin.${handle.id}-ik.layer1`}
             position={[
-              hand.x * dimensionScale.x,
-              hand.y * dimensionScale.y,
-              hand.z * dimensionScale.z,
+              position.x * dimensionScale.x,
+              position.y * dimensionScale.y,
+              position.z * dimensionScale.z,
             ]}
             renderOrder={1200}
           >
-            <sphereGeometry args={[0.12, 20, 14]} />
+            {isEndEffector ? (
+              <sphereGeometry args={[0.058, 20, 14]} />
+            ) : (
+              <octahedronGeometry args={[0.052, 0]} />
+            )}
             <meshBasicMaterial
-              color={side === 'left' ? '#ff4fd8' : '#42e8ff'}
+              color={IK_HANDLE_COLORS[handle.id]}
               depthTest={false}
               toneMapped={false}
             />

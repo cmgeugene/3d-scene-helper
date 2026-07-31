@@ -1,10 +1,23 @@
-import { useLayoutEffect, useRef } from 'react';
-import { MathUtils, Box3, Vector3, type Group } from 'three';
+import { useLayoutEffect, useMemo, useRef } from 'react';
+import {
+  MathUtils,
+  Box3,
+  Color,
+  Vector3,
+  type BufferGeometry,
+  type Group,
+} from 'three';
 import { useThree } from '@react-three/fiber';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
 import {
+  getSharedStudioMannequinGeometries,
+  type StudioMannequinGeometries,
+} from '../mannequin/mannequinAppearance';
+import {
   MANNEQUIN_ARM_ANCHORS,
   MANNEQUIN_ARM_LENGTHS,
+  MANNEQUIN_LEG_ANCHORS,
+  MANNEQUIN_LEG_LENGTHS,
   type MannequinEulerDegrees,
   type MannequinPose,
   type MannequinSide,
@@ -24,8 +37,8 @@ interface MeshPartProps {
   color: string;
   castShadow: boolean;
   receiveShadow: boolean;
-  geometry: 'box' | 'sphere' | 'cylinder';
-  args:
+  geometry: 'box' | 'sphere' | 'cylinder' | BufferGeometry;
+  args?:
     | [number, number, number]
     | [number, number, number, number]
     | [number, number];
@@ -63,19 +76,28 @@ function MeshPart({
       rotation={rotation}
       scale={scale}
     >
-      {geometry === 'box' ? (
+      {geometry === 'box' && args !== undefined ? (
         <boxGeometry args={args as [number, number, number]} />
       ) : null}
-      {geometry === 'sphere' ? (
+      {geometry === 'sphere' && args !== undefined ? (
         <sphereGeometry args={args as [number, number]} />
       ) : null}
-      {geometry === 'cylinder' ? (
+      {geometry === 'cylinder' && args !== undefined ? (
         <cylinderGeometry args={args as [number, number, number, number]} />
+      ) : null}
+      {typeof geometry !== 'string' ? (
+        <primitive object={geometry} attach="geometry" />
       ) : null}
       {unlit ? (
         <meshBasicMaterial color={color} toneMapped={false} />
       ) : (
-        <meshStandardMaterial color={color} roughness={0.72} metalness={0.02} />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={0.06}
+          roughness={0.58}
+          metalness={0.015}
+        />
       )}
     </mesh>
   );
@@ -87,12 +109,16 @@ function Arm({
   color,
   castShadow,
   receiveShadow,
+  jointColor,
+  geometries,
 }: {
   side: MannequinSide;
   pose: MannequinPose;
   color: string;
   castShadow: boolean;
   receiveShadow: boolean;
+  jointColor: string;
+  geometries: StudioMannequinGeometries;
 }) {
   const arm = pose.arms[side];
   const anchor = MANNEQUIN_ARM_ANCHORS[side].shoulder;
@@ -109,16 +135,14 @@ function Arm({
         castShadow={castShadow}
         receiveShadow={receiveShadow}
         geometry="sphere"
-        args={[0.07, 18]}
+        args={[0.058, 20]}
       />
       <MeshPart
         name={`${prefix}-upper-arm`}
         color={color}
         castShadow={castShadow}
         receiveShadow={receiveShadow}
-        geometry="cylinder"
-        args={[0.052, 0.065, MANNEQUIN_ARM_LENGTHS.upperArm, 16]}
-        position={[0, -MANNEQUIN_ARM_LENGTHS.upperArm / 2, 0]}
+        geometry={geometries.upperArm}
       />
       <group
         name={`${prefix}-elbow-pivot`}
@@ -127,20 +151,18 @@ function Arm({
       >
         <MeshPart
           name={`${prefix}-elbow-joint`}
-          color={color}
+          color={jointColor}
           castShadow={castShadow}
           receiveShadow={receiveShadow}
           geometry="sphere"
-          args={[0.062, 18]}
+          args={[0.048, 20]}
         />
         <MeshPart
           name={`${prefix}-forearm`}
           color={color}
           castShadow={castShadow}
           receiveShadow={receiveShadow}
-          geometry="cylinder"
-          args={[0.043, 0.055, MANNEQUIN_ARM_LENGTHS.forearm, 16]}
-          position={[0, -MANNEQUIN_ARM_LENGTHS.forearm / 2, 0]}
+          geometry={geometries.forearm}
         />
         <group
           name={`${prefix}-wrist-pivot`}
@@ -152,10 +174,16 @@ function Arm({
             color={color}
             castShadow={castShadow}
             receiveShadow={receiveShadow}
-            geometry="box"
-            args={[0.105, 0.14, 0.075]}
-            position={[0, -0.045, -0.008]}
-            scale={[1, 1, 0.9]}
+            geometry={geometries.hand}
+          />
+          <MeshPart
+            name={`${prefix}-thumb`}
+            color={color}
+            castShadow={castShadow}
+            receiveShadow={receiveShadow}
+            geometry={geometries.thumb}
+            position={[side === 'left' ? 0.027 : -0.027, -0.05, -0.003]}
+            rotation={[0, 0, side === 'left' ? -0.42 : 0.42]}
           />
         </group>
       </group>
@@ -169,20 +197,24 @@ function Leg({
   color,
   castShadow,
   receiveShadow,
+  jointColor,
+  geometries,
 }: {
   side: MannequinSide;
   pose: MannequinPose;
   color: string;
   castShadow: boolean;
   receiveShadow: boolean;
+  jointColor: string;
+  geometries: StudioMannequinGeometries;
 }) {
   const leg = pose.legs[side];
-  const sign = side === 'left' ? -1 : 1;
+  const anchor = MANNEQUIN_LEG_ANCHORS[side].hip;
   const prefix = `Mannequin.${side}`;
   return (
     <group
       name={`${prefix}-hip-pivot`}
-      position={[sign * 0.085, -0.05, 0]}
+      position={[anchor.x, anchor.y - 0.06, anchor.z]}
       rotation={toRadians(leg.hipRotationDeg)}
     >
       <MeshPart
@@ -191,62 +223,54 @@ function Leg({
         castShadow={castShadow}
         receiveShadow={receiveShadow}
         geometry="sphere"
-        args={[0.075, 18]}
+        args={[0.06, 20]}
       />
       <MeshPart
         name={`${prefix}-thigh`}
         color={color}
         castShadow={castShadow}
         receiveShadow={receiveShadow}
-        geometry="cylinder"
-        args={[0.058, 0.075, 0.37, 18]}
-        position={[0, -0.185, 0]}
+        geometry={geometries.thigh}
       />
       <group
         name={`${prefix}-knee-pivot`}
-        position={[0, -0.37, 0]}
-        rotation={[MathUtils.degToRad(leg.kneeBendDeg), 0, 0]}
+        position={[0, -MANNEQUIN_LEG_LENGTHS.thigh, 0]}
+        rotation={[-MathUtils.degToRad(leg.kneeBendDeg), 0, 0]}
       >
         <MeshPart
           name={`${prefix}-knee-joint`}
-          color={color}
+          color={jointColor}
           castShadow={castShadow}
           receiveShadow={receiveShadow}
           geometry="sphere"
-          args={[0.068, 18]}
+          args={[0.048, 20]}
         />
         <MeshPart
           name={`${prefix}-shin`}
           color={color}
           castShadow={castShadow}
           receiveShadow={receiveShadow}
-          geometry="cylinder"
-          args={[0.047, 0.061, 0.37, 18]}
-          position={[0, -0.185, 0]}
+          geometry={geometries.shin}
         />
         <group
           name={`${prefix}-ankle-pivot`}
-          position={[0, -0.37, 0]}
+          position={[0, -MANNEQUIN_LEG_LENGTHS.shin, 0]}
           rotation={toRadians(leg.ankleRotationDeg)}
         >
+          <MeshPart
+            name={`${prefix}-ankle-joint`}
+            color={jointColor}
+            castShadow={castShadow}
+            receiveShadow={receiveShadow}
+            geometry="sphere"
+            args={[0.038, 18]}
+          />
           <MeshPart
             name={`${prefix}-foot`}
             color={color}
             castShadow={castShadow}
             receiveShadow={receiveShadow}
-            geometry="box"
-            args={[0.15, 0.13, 0.34]}
-            position={[0, -0.055, -0.055]}
-          />
-          <MeshPart
-            name={`${prefix}-toe-cue`}
-            color="#d9f4ff"
-            unlit
-            castShadow={castShadow}
-            receiveShadow={receiveShadow}
-            geometry="box"
-            args={[0.12, 0.045, 0.04]}
-            position={[0, -0.06, -0.205]}
+            geometry={geometries.foot}
           />
         </group>
       </group>
@@ -298,7 +322,13 @@ export function ArticulatedMannequin({
 }: ArticulatedMannequinProps) {
   const contentRef = useRef<Group>(null);
   const canvas = useThree((state) => state.gl.domElement);
+  const geometries = getSharedStudioMannequinGeometries();
+  const jointColor = useMemo(
+    () => `#${new Color(color).multiplyScalar(0.9).getHexString()}`,
+    [color],
+  );
   const common = { color, castShadow, receiveShadow };
+  const articulatedCommon = { ...common, jointColor, geometries };
 
   useLayoutEffect(() => {
     if (
@@ -328,9 +358,7 @@ export function ArticulatedMannequin({
         <MeshPart
           {...common}
           name="Mannequin.pelvis"
-          geometry="box"
-          args={[0.3, 0.18, 0.24]}
-          position={[0, 0, 0.01]}
+          geometry={geometries.pelvis}
         />
         <group
           name="Mannequin.spine-pivot"
@@ -339,8 +367,7 @@ export function ArticulatedMannequin({
           <MeshPart
             {...common}
             name="Mannequin.torso"
-            geometry="cylinder"
-            args={[0.13, 0.175, 0.44, 6]}
+            geometry={geometries.torso}
             position={[0, 0.28, 0]}
           />
           <MeshPart
@@ -348,18 +375,20 @@ export function ArticulatedMannequin({
             name="Mannequin.chest-front-cue"
             color="#d9f4ff"
             unlit
-            geometry="box"
-            args={[0.15, 0.21, 0.036]}
-            position={[0, 0.31, -0.125]}
+            geometry="sphere"
+            args={[0.026, 18]}
+            position={[0, 0.35, -0.142]}
+            scale={[0.54, 1.18, 0.28]}
           />
           <MeshPart
             {...common}
             name="Mannequin.back-cue"
             color="#4a5568"
             unlit
-            geometry="box"
-            args={[0.12, 0.13, 0.025]}
-            position={[0, 0.3, 0.122]}
+            geometry="sphere"
+            args={[0.025, 18]}
+            position={[0, 0.34, 0.134]}
+            scale={[0.48, 1.12, 0.25]}
           />
           <group
             name="Mannequin.neck-head-pivot"
@@ -369,42 +398,26 @@ export function ArticulatedMannequin({
             <MeshPart
               {...common}
               name="Mannequin.neck"
-              geometry="cylinder"
-              args={[0.055, 0.065, 0.1, 16]}
-              position={[0, -0.08, 0]}
+              geometry={geometries.neck}
             />
             <MeshPart
               {...common}
               name="Mannequin.head"
-              geometry="sphere"
-              args={[0.13, 24]}
-              scale={[0.92, 1, 0.88]}
-            />
-            <MeshPart
-              {...common}
-              name="Mannequin.face-plate"
-              color="#d9f4ff"
-              unlit
-              geometry="box"
-              args={[0.13, 0.13, 0.018]}
-              position={[0, 0, -0.117]}
+              geometry={geometries.head}
             />
             <MeshPart
               {...common}
               name="Mannequin.nose-cue"
-              color="#d9f4ff"
-              unlit
-              geometry="sphere"
-              args={[0.036, 14]}
-              position={[0, -0.005, -0.16]}
-              scale={[0.72, 0.72, 1.3]}
+              color={color}
+              geometry={geometries.nose}
+              position={[0, -0.012, -0.09]}
             />
           </group>
-          <Arm side="left" pose={pose} {...common} />
-          <Arm side="right" pose={pose} {...common} />
+          <Arm side="left" pose={pose} {...articulatedCommon} />
+          <Arm side="right" pose={pose} {...articulatedCommon} />
         </group>
-        <Leg side="left" pose={pose} {...common} />
-        <Leg side="right" pose={pose} {...common} />
+        <Leg side="left" pose={pose} {...articulatedCommon} />
+        <Leg side="right" pose={pose} {...articulatedCommon} />
       </group>
     </group>
   );
