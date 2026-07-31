@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
+import { ASPECT_RATIO_VALUES } from '../constants';
 import type { EditorStore } from '../state/editorStore';
 
 interface EditorNavigationProps {
@@ -18,6 +19,7 @@ function publishRuntimeCamera(
   camera: Camera,
   target: Vector3,
   domElement: HTMLCanvasElement,
+  outputAspect: number,
 ) {
   if (
     !IS_EDITOR_TEST_BRIDGE_ENABLED ||
@@ -40,6 +42,8 @@ function publishRuntimeCamera(
     focalLengthMm: roundDiagnosticValue(camera.getFocalLength()),
     filmGaugeMm: roundDiagnosticValue(camera.filmGauge),
     aspect: roundDiagnosticValue(camera.aspect),
+    outputAspect: roundDiagnosticValue(outputAspect),
+    zoom: roundDiagnosticValue(camera.zoom),
     rotationZDeg: roundDiagnosticValue(MathUtils.radToDeg(camera.rotation.z)),
   });
 }
@@ -49,11 +53,12 @@ function applyCameraRoll(
   target: Vector3,
   rollDeg: number,
   domElement: HTMLCanvasElement,
+  outputAspect: number,
 ) {
   camera.up.set(0, 1, 0);
   camera.lookAt(target);
   camera.rotateZ(MathUtils.degToRad(rollDeg));
-  publishRuntimeCamera(camera, target, domElement);
+  publishRuntimeCamera(camera, target, domElement, outputAspect);
 }
 
 function setNavigationEnabled(
@@ -72,6 +77,10 @@ export function EditorNavigation({ store, enabled }: EditorNavigationProps) {
   const camera = useThree((state) => state.camera);
   const domElement = useThree((state) => state.gl.domElement);
   const cameraData = useStore(store, (state) => state.document.outputCamera);
+  const outputAspectId = useStore(
+    store,
+    (state) => state.document.output.aspectRatioId,
+  );
   const isInteracting = useStore(
     store,
     (state) => state.navigation.isInteracting,
@@ -89,7 +98,13 @@ export function EditorNavigation({ store, enabled }: EditorNavigationProps) {
       cameraData.target.z,
     );
     controls.update();
-    applyCameraRoll(camera, controls.target, cameraData.rollDeg, domElement);
+    applyCameraRoll(
+      camera,
+      controls.target,
+      cameraData.rollDeg,
+      domElement,
+      ASPECT_RATIO_VALUES[outputAspectId],
+    );
 
     const updateTransientNavigation = (interacting: boolean) => {
       store.getState().setNavigation({
@@ -111,11 +126,13 @@ export function EditorNavigation({ store, enabled }: EditorNavigationProps) {
       updateTransientNavigation(true);
     };
     const handleChange = () => {
+      const document = store.getState().document;
       applyCameraRoll(
         camera,
         controls.target,
-        store.getState().document.outputCamera.rollDeg,
+        document.outputCamera.rollDeg,
         domElement,
+        ASPECT_RATIO_VALUES[document.output.aspectRatioId],
       );
       if (store.getState().navigation.isInteracting) {
         updateTransientNavigation(true);
@@ -159,7 +176,14 @@ export function EditorNavigation({ store, enabled }: EditorNavigationProps) {
       controls.dispose();
       if (controlsRef.current === controls) controlsRef.current = null;
     };
-  }, [camera, cameraData.rollDeg, cameraData.target, domElement, store]);
+  }, [
+    camera,
+    cameraData.rollDeg,
+    cameraData.target,
+    domElement,
+    outputAspectId,
+    store,
+  ]);
 
   useEffect(() => {
     setNavigationEnabled(controlsRef.current, domElement, enabled);
@@ -175,13 +199,20 @@ export function EditorNavigation({ store, enabled }: EditorNavigationProps) {
       cameraData.target.z,
     );
     controls.update();
-    applyCameraRoll(camera, controls.target, cameraData.rollDeg, domElement);
+    applyCameraRoll(
+      camera,
+      controls.target,
+      cameraData.rollDeg,
+      domElement,
+      ASPECT_RATIO_VALUES[outputAspectId],
+    );
   }, [
     camera,
     cameraData.rollDeg,
     cameraData.target,
     domElement,
     isInteracting,
+    outputAspectId,
   ]);
 
   return null;

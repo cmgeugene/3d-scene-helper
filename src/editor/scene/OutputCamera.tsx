@@ -9,7 +9,7 @@ import type { StoreApi } from 'zustand/vanilla';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
 import { ASPECT_RATIO_VALUES, RENDER_LAYERS } from '../constants';
 import type { EditorStore } from '../state/editorStore';
-import { applyOutputCameraProjection } from './cameraMath';
+import { applyViewportCameraProjection } from './cameraMath';
 
 interface OutputCameraProps {
   store: StoreApi<EditorStore>;
@@ -21,6 +21,7 @@ function publishRuntimeCamera(
   camera: PerspectiveCameraImpl,
   target: EditorStore['document']['outputCamera']['target'],
   domElement: HTMLCanvasElement,
+  outputAspect: number,
 ) {
   if (!IS_EDITOR_TEST_BRIDGE_ENABLED) return;
 
@@ -34,6 +35,8 @@ function publishRuntimeCamera(
     focalLengthMm: roundDiagnosticValue(camera.getFocalLength()),
     filmGaugeMm: roundDiagnosticValue(camera.filmGauge),
     aspect: roundDiagnosticValue(camera.aspect),
+    outputAspect: roundDiagnosticValue(outputAspect),
+    zoom: roundDiagnosticValue(camera.zoom),
     rotationZDeg: roundDiagnosticValue(MathUtils.radToDeg(camera.rotation.z)),
   });
 }
@@ -51,6 +54,8 @@ export function OutputCamera({ store }: OutputCameraProps) {
   );
   const domElement = useThree((state) => state.gl.domElement);
   const setThree = useThree((state) => state.set);
+  const viewportWidth = useThree((state) => state.size.width);
+  const viewportHeight = useThree((state) => state.size.height);
 
   useLayoutEffect(() => {
     const camera = ref.current;
@@ -75,14 +80,24 @@ export function OutputCamera({ store }: OutputCameraProps) {
       cameraData.target.z,
     );
     camera.rotateZ(MathUtils.degToRad(cameraData.rollDeg));
-    applyOutputCameraProjection(
+    const outputAspect = ASPECT_RATIO_VALUES[outputAspectId];
+    applyViewportCameraProjection(
       camera,
-      ASPECT_RATIO_VALUES[outputAspectId],
+      viewportWidth,
+      viewportHeight,
+      outputAspect,
       cameraData.focalLengthMm,
     );
     camera.layers.enable(RENDER_LAYERS.editor);
-    publishRuntimeCamera(camera, cameraData.target, domElement);
-  }, [cameraData, domElement, isInteracting, outputAspectId]);
+    publishRuntimeCamera(camera, cameraData.target, domElement, outputAspect);
+  }, [
+    cameraData,
+    domElement,
+    isInteracting,
+    outputAspectId,
+    viewportHeight,
+    viewportWidth,
+  ]);
 
   return (
     <perspectiveCamera

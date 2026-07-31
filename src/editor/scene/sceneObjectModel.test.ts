@@ -14,6 +14,7 @@ describe('sceneObjectModel', () => {
     ['cylinder', 'cylinder'],
     ['plane', 'plane'],
     ['mannequin', 'mannequin'],
+    ['room', 'room'],
   ] as const)('%s 문서 종류를 %s runtime model로 매핑한다', (kind, model) => {
     const object = createSceneObject(`object-${kind}`, { kind });
 

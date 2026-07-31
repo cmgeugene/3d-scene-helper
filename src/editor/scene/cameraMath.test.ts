@@ -4,6 +4,7 @@ import { FILM_GAUGE_MM } from '../constants';
 import { CAMERA_SHOT_PRESETS } from '../presets/cameras';
 import {
   applyOutputCameraProjection,
+  applyViewportCameraProjection,
   computeCameraShot,
   computeFrameSelectedCamera,
   computeLetterbox,
@@ -89,6 +90,51 @@ describe('applyOutputCameraProjection', () => {
       expect(camera.filmGauge).toBe(FILM_GAUGE_MM);
       expect(camera.aspect).toBeCloseTo(9 / 16, 12);
       expect(camera.getFocalLength()).toBeCloseTo(focalLengthMm, 10);
+    },
+  );
+});
+
+describe('applyViewportCameraProjection', () => {
+  it.each([16 / 9, 9 / 16, 1, 2.39])(
+    '전체 viewport에서 %f 출력 gate 내부가 output projection과 정확히 일치한다',
+    (outputAspect) => {
+      const viewportWidth = 1280;
+      const viewportHeight = 720;
+      const frame = computeLetterbox(
+        viewportWidth,
+        viewportHeight,
+        outputAspect,
+      );
+      const outputCamera = new PerspectiveCamera();
+      const viewportCamera = new PerspectiveCamera();
+
+      applyOutputCameraProjection(outputCamera, outputAspect, 50);
+      applyViewportCameraProjection(
+        viewportCamera,
+        viewportWidth,
+        viewportHeight,
+        outputAspect,
+        50,
+      );
+
+      const frameScaleX = frame.width / viewportWidth;
+      const frameScaleY = frame.height / viewportHeight;
+      for (const point of [
+        new Vector3(-0.8, -0.5, -5),
+        new Vector3(0, 0, -5),
+        new Vector3(0.9, 0.7, -5),
+      ]) {
+        const outputNdc = point.clone().project(outputCamera);
+        const viewportNdc = point.clone().project(viewportCamera);
+        expect(viewportNdc.x / frameScaleX).toBeCloseTo(outputNdc.x, 10);
+        expect(viewportNdc.y / frameScaleY).toBeCloseTo(outputNdc.y, 10);
+      }
+
+      expect(viewportCamera.aspect).toBeCloseTo(
+        viewportWidth / viewportHeight,
+        12,
+      );
+      expect(viewportCamera.getFocalLength()).toBeCloseTo(50, 10);
     },
   );
 });

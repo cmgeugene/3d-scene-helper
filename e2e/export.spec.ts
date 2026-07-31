@@ -147,6 +147,37 @@ test('clean and reference exports use separate pixel paths without editor layer 
   expect(mismatchRatio(selectedClean, selectedReference)).toBeGreaterThan(0);
 });
 
+test('room set transform persists and changes the clean exported frame', async ({
+  page,
+}) => {
+  await openExportEditor(page);
+  const baseline = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+
+  await page.getByRole('button', { name: '방 세트 추가' }).click();
+  await page.getByLabel('위치 X').fill('0.25');
+  await page.getByLabel('위치 X').press('Enter');
+  await page.getByRole('button', { name: '로컬 저장' }).click();
+  await page.reload();
+
+  await expect(page.getByRole('status')).toHaveAttribute(
+    'data-webgl-state',
+    'available',
+  );
+  await expect(
+    page.getByRole('button', { name: 'Room Set', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Room Set', exact: true }).click();
+  await expect(page.getByLabel('위치 X')).toHaveValue('0.25');
+  await page.keyboard.press('Escape');
+
+  const withRoom = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+  expect(mismatchRatio(baseline, withRoom)).toBeGreaterThan(0.02);
+});
+
 test('static offscreen export is viewport-resize deterministic within 0.1%', async ({
   page,
 }) => {

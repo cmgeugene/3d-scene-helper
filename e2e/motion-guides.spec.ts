@@ -70,17 +70,10 @@ test('motion guides render one selected-subject arrow and one camera arrow while
   const baselineClean = await downloadFrame(page, 'clean');
 
   await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
-  await page.getByLabel('피사체 모션 방향').selectOption('right');
-  await page.getByLabel('피사체 모션 강도').fill('0.8');
-  await page
-    .getByLabel('장면 노트')
-    .fill(
-      'Subject moves right while camera dollies in; clean start frame stays unaffected.',
-    );
+  await page.getByLabel('피사체 이동 방향').selectOption('right');
 
   await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByLabel('카메라 모션', { exact: true }).selectOption('dolly');
-  await page.getByLabel('카메라 모션 강도').fill('0.7');
+  await page.getByLabel('카메라 이동 방향').selectOption('dolly');
 
   const motionVisibility = page.getByRole('checkbox', { name: '모션 가이드' });
   await expect(motionVisibility).toBeChecked();
@@ -102,6 +95,15 @@ test('motion guides render one selected-subject arrow and one camera arrow while
     originNdc?: { x: number; y: number };
     tipNdc?: { x: number; y: number };
   }>;
+  const canvasBounds = await runtimeCanvas.boundingBox();
+  const frameBounds = await page.locator('[data-camera-frame]').boundingBox();
+  expect(canvasBounds).not.toBeNull();
+  expect(frameBounds).not.toBeNull();
+  if (canvasBounds === null || frameBounds === null) {
+    throw new Error('Motion guide frame bounds가 없습니다.');
+  }
+  const frameScaleX = frameBounds.width / canvasBounds.width;
+  const frameScaleY = frameBounds.height / canvasBounds.height;
   for (const guide of diagnostics) {
     expect(guide.originNdc).toBeDefined();
     expect(
@@ -120,10 +122,12 @@ test('motion guides render one selected-subject arrow and one camera arrow while
     ).toBeLessThan(0.4);
     expect(
       Math.hypot(
-        (guide.tipNdc?.x ?? Number.POSITIVE_INFINITY) -
-          (guide.originNdc?.x ?? 0),
-        (guide.tipNdc?.y ?? Number.POSITIVE_INFINITY) -
-          (guide.originNdc?.y ?? 0),
+        ((guide.tipNdc?.x ?? Number.POSITIVE_INFINITY) -
+          (guide.originNdc?.x ?? 0)) /
+          frameScaleX,
+        ((guide.tipNdc?.y ?? Number.POSITIVE_INFINITY) -
+          (guide.originNdc?.y ?? 0)) /
+          frameScaleY,
       ),
     ).toBeGreaterThan(0.08);
   }

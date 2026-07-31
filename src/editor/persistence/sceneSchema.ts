@@ -47,7 +47,15 @@ const transformSchema = z.strictObject({
 
 const sceneObjectSchema = z.strictObject({
   id: stableIdSchema,
-  kind: z.enum(['floor', 'cube', 'sphere', 'cylinder', 'plane', 'mannequin']),
+  kind: z.enum([
+    'floor',
+    'cube',
+    'sphere',
+    'cylinder',
+    'plane',
+    'mannequin',
+    'room',
+  ]),
   name: z.string().trim().min(1),
   transform: transformSchema,
   dimensions: positiveVector3Schema,
@@ -254,6 +262,12 @@ const OBJECT_DEFAULTS: Record<
     dimensions: { x: 2, y: 0.02, z: 2 },
     color: '#b8b8b8',
     positionY: 0.01,
+  },
+  room: {
+    name: 'Room Set',
+    dimensions: { x: 4, y: 2.7, z: 4 },
+    color: '#d0cbc2',
+    positionY: 1.35,
   },
 };
 

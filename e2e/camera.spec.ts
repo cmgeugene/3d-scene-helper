@@ -6,6 +6,8 @@ interface RuntimeCameraDiagnostic {
   focalLengthMm: number;
   filmGaugeMm: number;
   aspect: number;
+  outputAspect: number;
+  zoom: number;
   rotationZDeg: number;
 }
 
@@ -93,12 +95,55 @@ test('camera framing contains every output aspect without stretching at 1280×72
     expect(frameBox.height).toBeLessThanOrEqual(viewportBox.height + 0.5);
 
     await expect
-      .poll(async () => (await readRuntimeCamera(runtimeCanvas))?.aspect)
+      .poll(async () => (await readRuntimeCamera(runtimeCanvas))?.outputAspect)
       .toBeCloseTo(aspect, 5);
+    const canvasBox = await runtimeCanvas.boundingBox();
+    expect(canvasBox).not.toBeNull();
+    if (canvasBox === null) throw new Error('Canvas bounds가 없습니다.');
+    await expect
+      .poll(async () => (await readRuntimeCamera(runtimeCanvas))?.aspect)
+      .toBeCloseTo(canvasBox.width / canvasBox.height, 3);
     await expect
       .poll(async () => (await readRuntimeCamera(runtimeCanvas))?.filmGaugeMm)
       .toBe(36);
   }
+});
+
+test('full viewport remains interactive while a dimmed output gate marks the PNG crop', async ({
+  page,
+}) => {
+  const runtimeCanvas = await openCameraEditor(page);
+  const frame = page.locator('[data-camera-frame]');
+
+  await page.getByLabel('화면비').selectOption('9:16');
+  const canvasBox = await runtimeCanvas.boundingBox();
+  const frameBox = await frame.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  expect(frameBox).not.toBeNull();
+  if (canvasBox === null || frameBox === null) {
+    throw new Error('Viewport/output gate bounds가 없습니다.');
+  }
+
+  expect(canvasBox.width).toBeGreaterThan(frameBox.width * 2);
+  expect(canvasBox.height).toBeGreaterThanOrEqual(frameBox.height);
+
+  const gateStyle = await frame.evaluate((element) => {
+    const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+    return {
+      boxShadow: style?.boxShadow ?? 'none',
+      pointerEvents: style?.pointerEvents ?? '',
+    };
+  });
+  expect(gateStyle.boxShadow).not.toBe('none');
+  expect(gateStyle.boxShadow).toContain('rgba');
+  expect(gateStyle.pointerEvents).toBe('none');
+
+  await expect
+    .poll(async () => readRuntimeCamera(runtimeCanvas))
+    .toMatchObject({ outputAspect: 9 / 16 });
+  const runtime = await readRuntimeCamera(runtimeCanvas);
+  expect(runtime?.aspect).toBeCloseTo(canvasBox.width / canvasBox.height, 3);
+  expect(runtime?.zoom).toBeLessThan(1);
 });
 
 test('camera lens, shot actions, selected helper, and no-selection status use explicit commits', async ({
@@ -343,6 +388,10 @@ test('camera resize preserves crop projection and orbit commits only on pointer 
     ),
   );
   const runtimeBeforeResize = await readRuntimeCamera(runtimeCanvas);
+  expect(runtimeBeforeResize).not.toBeNull();
+  if (runtimeBeforeResize === null) {
+    throw new Error('Resize 전 runtime camera가 없습니다.');
+  }
 
   await page.setViewportSize({ width: 1440, height: 900 });
   const frame = page.locator('[data-camera-frame]');
@@ -362,11 +411,24 @@ test('camera resize preserves crop projection and orbit commits only on pointer 
   ).toEqual(documentBeforeResize);
   await expect
     .poll(() => readRuntimeCamera(runtimeCanvas))
-    .toEqual(runtimeBeforeResize);
+    .toMatchObject({
+      position: runtimeBeforeResize.position,
+      target: runtimeBeforeResize.target,
+      focalLengthMm: runtimeBeforeResize.focalLengthMm,
+      outputAspect: 9 / 16,
+    });
+  const resizedCanvasBox = await runtimeCanvas.boundingBox();
+  expect(resizedCanvasBox).not.toBeNull();
+  if (resizedCanvasBox === null) {
+    throw new Error('Resize 후 Canvas bounds가 없습니다.');
+  }
+  await expect
+    .poll(async () => (await readRuntimeCamera(runtimeCanvas))?.aspect)
+    .toBeCloseTo(resizedCanvasBox.width / resizedCanvasBox.height, 3);
 
   await page.getByLabel('화면비').selectOption('16:9');
   await expect
-    .poll(async () => (await readRuntimeCamera(runtimeCanvas))?.aspect)
+    .poll(async () => (await readRuntimeCamera(runtimeCanvas))?.outputAspect)
     .toBeCloseTo(16 / 9, 5);
   const cameraBeforeOrbit = await page.evaluate(() =>
     structuredClone(

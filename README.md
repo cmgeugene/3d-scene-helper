@@ -1,6 +1,6 @@
 # I2V 3D Scene Helper
 
-I2V 시작 프레임을 빠르게 구성하는 로컬 우선 React/TypeScript/Vite 3D 편집기입니다. 기본 바닥·1.7m 마네킹·OutputCamera가 있는 starter scene에서 primitive, 카메라/조명 preset, 구도·motion guide를 설정하고 clean/reference PNG 또는 scene JSON을 내보낼 수 있습니다.
+I2V 시작 프레임을 빠르게 구성하는 로컬 우선 React/TypeScript/Vite 3D 편집기입니다. 기본 바닥·1.7m 마네킹·OutputCamera가 있는 starter scene에서 primitive와 천장·앞·오른쪽이 열린 코너형 방 세트, 카메라/조명 preset, 구도·motion guide를 설정하고 clean/reference PNG 또는 scene JSON을 내보낼 수 있습니다.
 
 ## 요구 환경
 
@@ -25,7 +25,7 @@ npm ci
 ## 3분 starter scene 흐름
 
 1. 데스크톱 Chromium에서 앱을 열고 기본 scene의 바닥과 마네킹을 확인합니다.
-2. 필요하면 cube, sphere, cylinder, plane 또는 mannequin을 추가하고 inspector나 transform gizmo로 배치합니다.
+2. 필요하면 cube, sphere, cylinder, plane, mannequin 또는 코너형 방 세트를 추가하고 inspector나 transform gizmo로 배치합니다. 방 세트는 바닥·뒤쪽 벽·왼쪽 벽으로 구성되어 천장과 카메라 쪽 두 면이 열려 있습니다.
 3. toolbar에서 `9:16`을 선택하고 thirds/safe-area/motion guide를 필요한 만큼 켭니다.
 4. `카메라`에서 lens와 shot preset, `조명`에서 background/lighting preset을 선택합니다.
 5. `로컬 저장`으로 현재 scene을 저장합니다. 자동 저장과 최근 장면 열기도 같은 validated scene document를 사용합니다.

@@ -57,6 +57,28 @@ export function applyOutputCameraProjection(
   camera.updateProjectionMatrix();
 }
 
+export function applyViewportCameraProjection(
+  camera: PerspectiveCamera,
+  viewportWidth: number,
+  viewportHeight: number,
+  outputAspect: number,
+  focalLengthMm: number,
+) {
+  const frame = computeLetterbox(viewportWidth, viewportHeight, outputAspect);
+  requirePositiveFinite(focalLengthMm, 'focalLengthMm');
+
+  const viewportAspect = viewportWidth / viewportHeight;
+  const viewportFilmHeight = FILM_GAUGE_MM / Math.max(viewportAspect, 1);
+  const outputFilmHeight = FILM_GAUGE_MM / Math.max(outputAspect, 1);
+
+  camera.filmGauge = FILM_GAUGE_MM;
+  camera.aspect = viewportAspect;
+  camera.setFocalLength(focalLengthMm);
+  camera.zoom =
+    (frame.height / viewportHeight) * (viewportFilmHeight / outputFilmHeight);
+  camera.updateProjectionMatrix();
+}
+
 type OutputCameraData = SceneDocument['outputCamera'];
 
 const REFERENCE_SUBJECT_BOUNDS: SceneObjectBounds = {

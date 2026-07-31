@@ -2,7 +2,7 @@ import { MathUtils } from 'three';
 import type { SceneObject, SceneObjectKind } from '../persistence/sceneSchema';
 
 export type RuntimeGeometry =
-  'box' | 'sphere' | 'cylinder' | 'plane' | 'mannequin';
+  'box' | 'sphere' | 'cylinder' | 'plane' | 'mannequin' | 'room';
 
 export interface SceneObjectModel {
   geometry: RuntimeGeometry;
@@ -26,6 +26,7 @@ const GEOMETRY_BY_KIND: Record<SceneObjectKind, RuntimeGeometry> = {
   cylinder: 'cylinder',
   plane: 'plane',
   mannequin: 'mannequin',
+  room: 'room',
 };
 
 const ASSET_PLACEMENT_SLOTS = [

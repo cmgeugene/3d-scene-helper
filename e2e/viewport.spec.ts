@@ -105,12 +105,35 @@ test('viewport Canvas가 실제 WebGL 장면과 bounded shadow renderer를 시�
   await waitForCanvasChange(canvas, renderedWithShadows);
 });
 
-test('viewport asset 다섯 종류를 deterministic meter 위치에 추가한다', async ({
+test('viewport 방 세트는 바닥과 두 벽을 렌더링하고 천장·앞·오른쪽을 연다', async ({
+  page,
+}) => {
+  const canvas = await openViewport(page);
+  await page.getByRole('button', { name: 'Floor', exact: true }).click();
+  const beforeRoom = await canvas.screenshot();
+
+  await page.getByRole('button', { name: '방 세트 추가' }).click();
+  await page.getByRole('button', { name: 'Floor', exact: true }).click();
+
+  const runtimeCanvas = page.locator(
+    'canvas[data-room-set-parts="floor,back-wall,left-wall"]',
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-room-set-openings',
+    'ceiling,front,right',
+  );
+  await waitForCanvasChange(canvas, beforeRoom);
+  await expect(
+    page.getByRole('button', { name: 'Room Set', exact: true }),
+  ).toBeVisible();
+});
+
+test('viewport asset 여섯 종류를 deterministic meter 위치에 추가한다', async ({
   page,
 }) => {
   await openViewport(page);
 
-  for (const label of ['큐브', '구', '원기둥', '평면', '마네킹']) {
+  for (const label of ['큐브', '구', '원기둥', '평면', '마네킹', '방 세트']) {
     await page.getByRole('button', { name: `${label} 추가` }).click();
   }
 
@@ -139,6 +162,7 @@ test('viewport asset 다섯 종류를 deterministic meter 위치에 추가한다
       position: { x: 1.35, y: 0.85, z: -1.2 },
       visible: true,
     },
+    { kind: 'room', position: { x: 0, y: 1.35, z: 0 }, visible: true },
   ]);
   await expect(
     page.getByRole('button', { name: 'Cube', exact: true }),
@@ -151,6 +175,9 @@ test('viewport asset 다섯 종류를 deterministic meter 위치에 추가한다
   ).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Plane', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Room Set', exact: true }),
   ).toBeVisible();
 });
 

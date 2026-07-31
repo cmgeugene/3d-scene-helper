@@ -90,12 +90,12 @@ test('golden path completes starter scene to saved 1080×1920 clean PNG without 
   await page.getByLabel('화면비').selectOption('9:16');
   await page.getByRole('checkbox', { name: '3분할선' }).check();
   await page.getByRole('checkbox', { name: '모션 가이드' }).check();
-  await page.getByLabel('피사체 모션 방향').selectOption('right');
+  await page.getByLabel('피사체 이동 방향').selectOption('right');
 
   await page.getByRole('button', { name: '카메라', exact: true }).click();
   await page.getByLabel('렌즈').selectOption('35');
   await page.getByRole('button', { name: '전신', exact: true }).click();
-  await page.getByLabel('카메라 모션', { exact: true }).selectOption('dolly');
+  await page.getByLabel('카메라 이동 방향').selectOption('dolly');
 
   await page.getByRole('button', { name: '조명', exact: true }).click();
   await page.getByLabel('조명 프리셋').selectOption('sunset');
@@ -266,19 +266,6 @@ test('keyboard-only flow, focus guards, labels, contrast, modal trap, and live f
   await page.keyboard.type('2');
   await page.keyboard.press('Enter');
   await expect(positionX).toHaveValue('2');
-
-  const notes = page.getByLabel('장면 노트');
-  await tabTo(page, notes);
-  const notesFocusStyle = await notes.evaluate((element) => {
-    const style = element.ownerDocument.defaultView?.getComputedStyle(element);
-    if (style === undefined)
-      throw new Error('computed focus style이 없습니다.');
-    return { style: style.outlineStyle, width: style.outlineWidth };
-  });
-  expect(notesFocusStyle).toEqual({ style: 'solid', width: '3px' });
-  await page.keyboard.type('focus guard');
-  await page.keyboard.press('Delete');
-  await expect(cubeRow).toHaveCount(1);
 
   await page.locator('body').evaluate((body) => {
     const editable = body.ownerDocument.createElement('div');

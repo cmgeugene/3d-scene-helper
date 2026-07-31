@@ -31,6 +31,50 @@ describe('Inspector', () => {
     store.getState().selectObject(MANNEQUIN_ID);
   });
 
+  it('움직임 구도 가이드는 메모와 모호한 강도 입력 없이 방향만 설정한다', async () => {
+    const user = userEvent.setup();
+    render(<Inspector store={store} />);
+
+    const subjectGuide = screen.getByRole('group', {
+      name: '움직임 구도 가이드',
+    });
+    expect(
+      within(subjectGuide).queryByLabelText('장면 노트'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(subjectGuide).queryByLabelText('피사체 모션 강도'),
+    ).not.toBeInTheDocument();
+
+    await user.selectOptions(
+      within(subjectGuide).getByLabelText('피사체 이동 방향'),
+      'right',
+    );
+    expect(store.getState().document.subjectMotionGuide).toMatchObject({
+      subjectId: MANNEQUIN_ID,
+      label: '오른쪽',
+      direction: { x: 1, y: 0, z: 0 },
+      strength: 0.5,
+    });
+
+    await user.click(screen.getByRole('button', { name: '카메라' }));
+    const cameraGuide = screen.getByRole('group', {
+      name: '카메라 이동 가이드',
+    });
+    expect(
+      within(cameraGuide).queryByLabelText('카메라 모션 강도'),
+    ).not.toBeInTheDocument();
+    await user.selectOptions(
+      within(cameraGuide).getByLabelText('카메라 이동 방향'),
+      'dolly',
+    );
+    expect(store.getState().document.cameraMotionGuide).toMatchObject({
+      motionType: 'dolly',
+      label: '돌리 인',
+      direction: { x: 0, y: 0, z: -1 },
+      strength: 0.5,
+    });
+  });
+
   it('숫자 transform을 local draft로 편집하고 blur에서 한 번 commit한다', async () => {
     const user = userEvent.setup();
     render(<Inspector store={store} />);

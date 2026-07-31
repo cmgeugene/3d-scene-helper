@@ -17,6 +17,7 @@ const ASSETS: ReadonlyArray<{
   { kind: 'cylinder', label: '원기둥' },
   { kind: 'plane', label: '평면' },
   { kind: 'mannequin', label: '마네킹' },
+  { kind: 'room', label: '방 세트' },
 ];
 
 export function AssetPanel({ store }: AssetPanelProps) {
@@ -34,7 +35,13 @@ export function AssetPanel({ store }: AssetPanelProps) {
             type="button"
             aria-label={`${label} 추가`}
             onClick={() => {
-              addObject({ kind, position: getNextAssetPosition(objects) });
+              addObject({
+                kind,
+                position:
+                  kind === 'room'
+                    ? { x: 0, z: 0 }
+                    : getNextAssetPosition(objects),
+              });
             }}
           >
             {label}

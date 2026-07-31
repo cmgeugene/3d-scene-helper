@@ -3,6 +3,7 @@ import { DoubleSide, MathUtils, type Group, type Mesh } from 'three';
 import { RENDER_LAYERS } from '../constants';
 import type { SceneObject as SceneObjectData } from '../persistence/sceneSchema';
 import { Mannequin } from './Mannequin';
+import { RoomSet } from './RoomSet';
 import { getSceneObjectModel } from './sceneObjectModel';
 
 interface SceneObjectProps {
@@ -80,6 +81,15 @@ function Primitive({ object, castShadow, receiveShadow }: PrimitiveProps) {
     case 'mannequin':
       return (
         <Mannequin
+          color={object.color}
+          dimensions={dimensions}
+          castShadow={castShadow}
+          receiveShadow={receiveShadow}
+        />
+      );
+    case 'room':
+      return (
+        <RoomSet
           color={object.color}
           dimensions={dimensions}
           castShadow={castShadow}

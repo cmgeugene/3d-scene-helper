@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
-import { MAX_SCENE_NOTES_LENGTH } from '../constants';
 import type { SceneObject } from '../persistence/sceneSchema';
 import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
@@ -80,7 +79,6 @@ function SubjectMotionControls({
   selectedObject,
 }: InspectorProps & { selectedObject: SceneObject | undefined }) {
   const guide = useStore(store, (state) => state.document.subjectMotionGuide);
-  const sceneNotes = useStore(store, (state) => state.document.sceneNotes);
   const selectedPreset = SUBJECT_MOTION_PRESETS.find(
     ({ label }) => label === guide?.label,
   );
@@ -89,11 +87,11 @@ function SubjectMotionControls({
 
   return (
     <fieldset className="object-controls">
-      <legend>I2V 모션 메모</legend>
+      <legend>움직임 구도 가이드</legend>
       <label>
-        <span>피사체 방향</span>
+        <span>피사체 이동 방향</span>
         <select
-          aria-label="피사체 모션 방향"
+          aria-label="피사체 이동 방향"
           value={ownedGuide === undefined ? '' : (selectedPreset?.id ?? '')}
           disabled={selectedObject === undefined}
           onChange={(event) => {
@@ -122,41 +120,6 @@ function SubjectMotionControls({
           ))}
         </select>
       </label>
-      <label>
-        <span>피사체 강도</span>
-        <input
-          aria-label="피사체 모션 강도"
-          type="range"
-          min="0"
-          max="1"
-          step="0.1"
-          value={ownedGuide?.strength ?? 0.5}
-          disabled={ownedGuide === undefined}
-          onChange={(event) => {
-            if (ownedGuide !== undefined) {
-              store.getState().setSubjectMotionGuide({
-                ...ownedGuide,
-                strength: Number(event.currentTarget.value),
-              });
-            }
-          }}
-        />
-      </label>
-      <label>
-        <span>장면 노트</span>
-        <textarea
-          aria-label="장면 노트"
-          maxLength={MAX_SCENE_NOTES_LENGTH}
-          rows={3}
-          value={sceneNotes}
-          onChange={(event) => {
-            store.getState().setSceneNotes(event.currentTarget.value);
-          }}
-        />
-      </label>
-      <small>
-        {sceneNotes.length}/{MAX_SCENE_NOTES_LENGTH}
-      </small>
     </fieldset>
   );
 }
@@ -230,11 +193,11 @@ function CameraControls({ store }: InspectorProps) {
         </button>
       </div>
       <fieldset>
-        <legend>I2V 카메라 모션</legend>
+        <legend>카메라 이동 가이드</legend>
         <label className="camera-field">
-          <span>유형과 방향</span>
+          <span>이동 유형과 방향</span>
           <select
-            aria-label="카메라 모션"
+            aria-label="카메라 이동 방향"
             value={selectedMotionPreset?.id ?? ''}
             onChange={(event) => {
               if (event.currentTarget.value === '') {
@@ -261,26 +224,6 @@ function CameraControls({ store }: InspectorProps) {
               </option>
             ))}
           </select>
-        </label>
-        <label className="camera-field">
-          <span>강도</span>
-          <input
-            aria-label="카메라 모션 강도"
-            type="range"
-            min="0"
-            max="1"
-            step="0.1"
-            value={motionGuide?.strength ?? 0.5}
-            disabled={motionGuide === undefined}
-            onChange={(event) => {
-              if (motionGuide !== undefined) {
-                store.getState().setCameraMotionGuide({
-                  ...motionGuide,
-                  strength: Number(event.currentTarget.value),
-                });
-              }
-            }}
-          />
         </label>
       </fieldset>
     </div>

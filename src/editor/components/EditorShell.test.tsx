@@ -193,12 +193,15 @@ describe('EditorShell', () => {
     expect(screen.getByRole('button', { name: '원기둥 추가' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '평면 추가' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '마네킹 추가' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '방 세트 추가' })).toBeEnabled();
 
-    await user.click(screen.getByRole('button', { name: '큐브 추가' }));
+    await user.click(screen.getByRole('button', { name: '방 세트 추가' }));
     expect(store.getState().document.objects.at(-1)).toMatchObject({
       id: 'generated-test',
-      kind: 'cube',
-      transform: { position: { x: -1.1, y: 0.5, z: 0 } },
+      kind: 'room',
+      name: 'Room Set',
+      dimensions: { x: 4, y: 2.7, z: 4 },
+      transform: { position: { x: 0, y: 1.35, z: 0 } },
     });
     expect(store.getState().selectedObjectId).toBe('generated-test');
     expect(screen.getByRole('button', { name: 'PNG 내보내기' })).toBeDisabled();

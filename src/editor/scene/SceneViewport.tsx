@@ -286,6 +286,38 @@ export function SceneViewport({
 
   return (
     <div ref={surfaceRef} className="scene-viewport-surface">
+      <Canvas
+        className="scene-canvas"
+        role="img"
+        aria-label="3D 장면 캔버스"
+        data-color-space="srgb"
+        data-shadow-bounds={`${SHADOW_BOUNDS_M}m`}
+        data-grid-size="20m"
+        data-axes-origin="0,0.025,0"
+        shadows="percentage"
+        dpr={[1, 2]}
+        gl={{
+          antialias: true,
+          alpha: false,
+          powerPreference: 'high-performance',
+        }}
+        onCreated={({ gl, camera }) => {
+          gl.outputColorSpace = SRGBColorSpace;
+          gl.shadowMap.enabled = true;
+          gl.shadowMap.type = PCFShadowMap;
+          camera.layers.enable(RENDER_LAYERS.editor);
+          camera.layers.enable(RENDER_LAYERS.reference);
+        }}
+        onPointerMissed={() => {
+          store.getState().selectObject(null);
+        }}
+      >
+        <WebGLContextMonitor onRuntimeFailure={onRuntimeFailure} />
+        <RuntimeScene store={store} />
+        {onExportReady === undefined ? null : (
+          <ExportFrameBridge onExportReady={onExportReady} />
+        )}
+      </Canvas>
       {frame === null ? null : (
         <div
           className="camera-frame"
@@ -298,38 +330,6 @@ export function SceneViewport({
             height: frame.height,
           }}
         >
-          <Canvas
-            className="scene-canvas"
-            role="img"
-            aria-label="3D 장면 캔버스"
-            data-color-space="srgb"
-            data-shadow-bounds={`${SHADOW_BOUNDS_M}m`}
-            data-grid-size="20m"
-            data-axes-origin="0,0.025,0"
-            shadows="percentage"
-            dpr={[1, 2]}
-            gl={{
-              antialias: true,
-              alpha: false,
-              powerPreference: 'high-performance',
-            }}
-            onCreated={({ gl, camera }) => {
-              gl.outputColorSpace = SRGBColorSpace;
-              gl.shadowMap.enabled = true;
-              gl.shadowMap.type = PCFShadowMap;
-              camera.layers.enable(RENDER_LAYERS.editor);
-              camera.layers.enable(RENDER_LAYERS.reference);
-            }}
-            onPointerMissed={() => {
-              store.getState().selectObject(null);
-            }}
-          >
-            <WebGLContextMonitor onRuntimeFailure={onRuntimeFailure} />
-            <RuntimeScene store={store} />
-            {onExportReady === undefined ? null : (
-              <ExportFrameBridge onExportReady={onExportReady} />
-            )}
-          </Canvas>
           <CompositionGuides visibility={guideVisibility} />
         </div>
       )}
