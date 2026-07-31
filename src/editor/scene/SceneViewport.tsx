@@ -20,6 +20,7 @@ import type { StoreApi } from 'zustand/vanilla';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
 import { ASPECT_RATIO_VALUES, RENDER_LAYERS } from '../constants';
 import { exportFrame, type FrameExportHandler } from '../export/exportFrame';
+import type { MannequinPose } from '../mannequin/mannequinRig';
 import type { SceneDocument } from '../persistence/sceneSchema';
 import type { EditorStore } from '../state/editorStore';
 import { CompositionGuides } from './CompositionGuides';
@@ -159,6 +160,7 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
   const lighting = useStore(store, (state) => state.document.lighting);
   const selectObject = useStore(store, (state) => state.selectObject);
   const transformMode = useStore(store, (state) => state.transformMode);
+  const mannequinTool = useStore(store, (state) => state.mannequinTool);
   const motionGuidesVisible = useStore(
     store,
     (state) => state.guideVisibility.motion,
@@ -167,6 +169,31 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
     () => new Map<string, Group>(),
   );
   const [transformDragging, setTransformDragging] = useState(false);
+  const [runtimeMannequinPoses, setRuntimeMannequinPoses] = useState(
+    () => new Map<string, MannequinPose>(),
+  );
+  const setRuntimeMannequinPose = useCallback(
+    (id: string, pose: MannequinPose | null) => {
+      setRuntimeMannequinPoses((current) => {
+        const previous = current.get(id);
+        if (pose === null && previous === undefined) return current;
+        if (pose !== null && previous === pose) return current;
+        const next = new Map(current);
+        if (pose === null) next.delete(id);
+        else next.set(id, pose);
+        return next;
+      });
+    },
+    [],
+  );
+  const handleSelectedRuntimePoseChange = useCallback(
+    (pose: MannequinPose | null) => {
+      if (selectedObjectId !== null) {
+        setRuntimeMannequinPose(selectedObjectId, pose);
+      }
+    },
+    [selectedObjectId, setRuntimeMannequinPose],
+  );
   const handleRootReady = useCallback((id: string, root: Group | null) => {
     setObjectRoots((current) => {
       const previous = current.get(id);
@@ -206,18 +233,35 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
             selected={selectedObjectId === object.id}
             onSelect={selectObject}
             onRootReady={handleRootReady}
+            runtimeMannequinPose={runtimeMannequinPoses.get(object.id)}
+            mannequinIK={
+              selectedObjectId === object.id &&
+              object.kind === 'mannequin' &&
+              mannequinTool === 'ik'
+                ? {
+                    store,
+                    pose:
+                      runtimeMannequinPoses.get(object.id) ??
+                      object.mannequinPose!,
+                    onRuntimePoseChange: handleSelectedRuntimePoseChange,
+                    onDraggingChange: setTransformDragging,
+                  }
+                : undefined
+            }
           />
         ))}
       </group>
       {selectedObject !== undefined && validSelectedRoot !== undefined ? (
         <>
-          <SelectionTransformControls
-            key={`${selectedObject.id}:${transformMode}`}
-            store={store}
-            object={validSelectedRoot}
-            objectData={selectedObject}
-            onDraggingChange={setTransformDragging}
-          />
+          {selectedObject.kind !== 'mannequin' || mannequinTool !== 'ik' ? (
+            <SelectionTransformControls
+              key={`${selectedObject.id}:${transformMode}`}
+              store={store}
+              object={validSelectedRoot}
+              objectData={selectedObject}
+              onDraggingChange={setTransformDragging}
+            />
+          ) : null}
           <SelectedSubjectFacingHelper
             root={validSelectedRoot}
             object={selectedObject}

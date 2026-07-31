@@ -2,7 +2,11 @@ import { useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { SceneObject } from '../persistence/sceneSchema';
-import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
+import {
+  CAMERA_SHOT_PRESETS,
+  CAMERA_VIEW_PRESETS,
+  LENS_PRESETS,
+} from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
 import type { EditorStore } from '../state/editorStore';
 import type { EditorPanel } from '../types';
@@ -30,6 +34,13 @@ const PANEL_OPTIONS: ReadonlyArray<{
   { id: 'lighting', label: '조명' },
   { id: 'output', label: '출력' },
 ];
+
+const MANNEQUIN_POSE_OPTIONS = [
+  { id: 'default', label: '기본 서기' },
+  { id: 'a', label: 'A 포즈' },
+  { id: 't', label: 'T 포즈' },
+  { id: 'walk-ready', label: '걷기 준비' },
+] as const;
 
 const SUBJECT_MOTION_PRESETS = [
   { id: 'left', label: '왼쪽', direction: { x: -1, y: 0, z: 0 } },
@@ -167,6 +178,22 @@ function CameraControls({ store }: InspectorProps) {
               type="button"
               onClick={() => {
                 store.getState().applyCameraShot(preset.id);
+              }}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>방향 뷰</legend>
+        <div className="shot-grid">
+          {CAMERA_VIEW_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => {
+                store.getState().applyCameraView(preset.id);
               }}
             >
               {preset.label}
@@ -415,6 +442,7 @@ export function Inspector({ store }: InspectorProps) {
     state.document.objects.find(({ id }) => id === state.selectedObjectId),
   );
   const activePanel = useStore(store, (state) => state.activePanel);
+  const mannequinTool = useStore(store, (state) => state.mannequinTool);
   const setActivePanel = useStore(store, (state) => state.setActivePanel);
   const [draftObject, setDraftObject] = useState(selectedObject);
   const [draft, setDraft] = useState<Record<string, string>>(() =>
@@ -591,6 +619,47 @@ export function Inspector({ store }: InspectorProps) {
                 </button>
               </div>
             </fieldset>
+            {selectedObject?.kind === 'mannequin' ? (
+              <fieldset className="object-controls">
+                <legend>마네킹 포즈</legend>
+                <div className="shot-grid">
+                  {MANNEQUIN_POSE_OPTIONS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      aria-pressed={
+                        selectedObject.mannequinPose?.id === preset.id
+                      }
+                      onClick={() => {
+                        store.getState().applyMannequinPosePreset(preset.id);
+                      }}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="object-actions">
+                  <button
+                    type="button"
+                    aria-pressed={mannequinTool === 'object'}
+                    onClick={() => {
+                      store.getState().setMannequinTool('object');
+                    }}
+                  >
+                    오브젝트 변형
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={mannequinTool === 'ik'}
+                    onClick={() => {
+                      store.getState().setMannequinTool('ik');
+                    }}
+                  >
+                    손 IK
+                  </button>
+                </div>
+              </fieldset>
+            ) : null}
             <SubjectMotionControls
               store={store}
               selectedObject={selectedObject}

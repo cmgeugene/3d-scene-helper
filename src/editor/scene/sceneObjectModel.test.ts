@@ -53,6 +53,27 @@ describe('sceneObjectModel', () => {
     expect(getSceneObjectBounds(mannequin).max.y).toBeCloseTo(1.7);
   });
 
+  it('마네킹 pose의 비대칭 local envelope를 root transform한 world bounds로 사용한다', () => {
+    const mannequin = createSceneObject('posed-mannequin-bounds', {
+      kind: 'mannequin',
+    });
+    if (mannequin.mannequinPose === undefined) throw new Error('pose required');
+    mannequin.mannequinPose.id = 't';
+    mannequin.mannequinPose.arms.left.shoulderRotationDeg.z = -90;
+    mannequin.mannequinPose.arms.right.shoulderRotationDeg.z = 90;
+    mannequin.mannequinPose.arms.left.elbowBendDeg = 0;
+    mannequin.mannequinPose.arms.right.elbowBendDeg = 0;
+    mannequin.transform.position = { x: 2, y: 1, z: -3 };
+    mannequin.transform.scale = { x: 1.5, y: 1, z: 1 };
+
+    const bounds = getSceneObjectBounds(mannequin);
+
+    expect(bounds.size.x).toBeGreaterThan(2.2);
+    expect(bounds.min.x).toBeLessThan(0.9);
+    expect(bounds.max.x).toBeGreaterThan(3.1);
+    expect(bounds.center.z).toBeLessThan(-3);
+  });
+
   it('occupied meter positions를 피해 deterministic visible slot을 고른다', () => {
     const mannequin = createSceneObject('starter-mannequin', {
       kind: 'mannequin',

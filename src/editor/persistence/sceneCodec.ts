@@ -1,8 +1,10 @@
 import {
+  LEGACY_SCENE_STORAGE_KEYS,
   MAX_SCENE_STORAGE_BYTES,
   SCENE_DOCUMENT_VERSION,
   SCENE_STORAGE_KEY,
 } from '../constants';
+import { createMannequinPose } from '../mannequin/mannequinRig';
 import { sceneDocumentSchema, type SceneDocument } from './sceneSchema';
 
 export class SceneCodecError extends Error {
@@ -35,8 +37,31 @@ function migrateSceneDocument(value: unknown): unknown {
 
   if (value.version === SCENE_DOCUMENT_VERSION) return value;
 
-  // Placeholder migration boundary: add an explicit prior-version branch here
-  // when the document schema is first bumped.
+  if (value.version === 1) {
+    const legacy = value as Record<string, unknown>;
+    const objects = Array.isArray(legacy.objects)
+      ? legacy.objects.map((object) => {
+          if (
+            typeof object !== 'object' ||
+            object === null ||
+            !('kind' in object) ||
+            object.kind !== 'mannequin'
+          ) {
+            return object;
+          }
+          return {
+            ...object,
+            mannequinPose: createMannequinPose('default'),
+          };
+        })
+      : legacy.objects;
+    return {
+      ...legacy,
+      version: SCENE_DOCUMENT_VERSION,
+      objects,
+    };
+  }
+
   throw new UnsupportedSceneVersionError(value.version);
 }
 
@@ -116,7 +141,12 @@ export function saveSceneDocument(
 }
 
 export function loadSceneDocument(storage: Storage): SceneDocument | null {
-  const serialized = storage.getItem(SCENE_STORAGE_KEY);
+  const serialized =
+    storage.getItem(SCENE_STORAGE_KEY) ??
+    LEGACY_SCENE_STORAGE_KEYS.map((key) => storage.getItem(key)).find(
+      (candidate): candidate is string => candidate !== null,
+    ) ??
+    null;
   return serialized === null ? null : parseSceneDocument(serialized);
 }
 

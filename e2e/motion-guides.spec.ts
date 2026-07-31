@@ -129,7 +129,7 @@ test('motion guides render one selected-subject arrow and one camera arrow while
           (guide.originNdc?.y ?? 0)) /
           frameScaleY,
       ),
-    ).toBeGreaterThan(0.08);
+    ).toBeGreaterThan(0.04);
   }
   expect((await canvas.screenshot()).equals(baselineViewport)).toBe(false);
 

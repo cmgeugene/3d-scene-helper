@@ -7,6 +7,7 @@ import {
   OUTPUT_DIMENSION_RANGE,
   SCENE_DOCUMENT_VERSION,
 } from '../constants';
+import { createMannequinPose } from '../mannequin/mannequinRig';
 
 const stableIdSchema = z.string().trim().min(1);
 
@@ -45,24 +46,74 @@ const transformSchema = z.strictObject({
   scale: positiveVector3Schema,
 });
 
-const sceneObjectSchema = z.strictObject({
-  id: stableIdSchema,
-  kind: z.enum([
-    'floor',
-    'cube',
-    'sphere',
-    'cylinder',
-    'plane',
-    'mannequin',
-    'room',
-  ]),
-  name: z.string().trim().min(1),
-  transform: transformSchema,
-  dimensions: positiveVector3Schema,
-  color: z.string().regex(/^#[0-9a-f]{6}$/i),
-  visible: z.boolean(),
-  exportable: z.boolean(),
+const mannequinEulerSchema = z.strictObject({
+  x: z.number().min(-180).max(180),
+  y: z.number().min(-180).max(180),
+  z: z.number().min(-180).max(180),
 });
+
+const mannequinArmPoseSchema = z.strictObject({
+  shoulderRotationDeg: mannequinEulerSchema,
+  elbowBendDeg: z.number().min(0).max(150),
+  wristRotationDeg: mannequinEulerSchema,
+});
+
+const mannequinLegPoseSchema = z.strictObject({
+  hipRotationDeg: mannequinEulerSchema,
+  kneeBendDeg: z.number().min(0).max(150),
+  ankleRotationDeg: mannequinEulerSchema,
+});
+
+export const mannequinPoseSchema = z.strictObject({
+  id: z.enum(['default', 'a', 't', 'walk-ready', 'custom']),
+  torsoRotationDeg: mannequinEulerSchema,
+  headRotationDeg: mannequinEulerSchema,
+  arms: z.strictObject({
+    left: mannequinArmPoseSchema,
+    right: mannequinArmPoseSchema,
+  }),
+  legs: z.strictObject({
+    left: mannequinLegPoseSchema,
+    right: mannequinLegPoseSchema,
+  }),
+});
+
+const sceneObjectSchema = z
+  .strictObject({
+    id: stableIdSchema,
+    kind: z.enum([
+      'floor',
+      'cube',
+      'sphere',
+      'cylinder',
+      'plane',
+      'mannequin',
+      'room',
+    ]),
+    name: z.string().trim().min(1),
+    transform: transformSchema,
+    dimensions: positiveVector3Schema,
+    color: z.string().regex(/^#[0-9a-f]{6}$/i),
+    visible: z.boolean(),
+    exportable: z.boolean(),
+    mannequinPose: mannequinPoseSchema.optional(),
+  })
+  .superRefine((object, context) => {
+    if (object.kind === 'mannequin' && object.mannequinPose === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Mannequin objects require a validated pose',
+        path: ['mannequinPose'],
+      });
+    }
+    if (object.kind !== 'mannequin' && object.mannequinPose !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Only mannequin objects may contain a mannequin pose',
+        path: ['mannequinPose'],
+      });
+    }
+  });
 
 const outputCameraSchema = z.strictObject({
   position: vector3Schema,
@@ -197,6 +248,7 @@ export const sceneDocumentSchema = z
 
 export type SceneDocument = z.infer<typeof sceneDocumentSchema>;
 export type SceneObject = SceneDocument['objects'][number];
+export type MannequinPose = z.infer<typeof mannequinPoseSchema>;
 
 export interface StarterSceneIds {
   documentId: string;
@@ -297,6 +349,9 @@ export function createSceneObject(
     color: defaults.color,
     visible: true,
     exportable: true,
+    ...(input.kind === 'mannequin'
+      ? { mannequinPose: createMannequinPose('default') }
+      : {}),
   });
 }
 
@@ -312,7 +367,7 @@ export function createStarterSceneDocument(
       createSceneObject(ids.mannequinId, { kind: 'mannequin' }),
     ],
     outputCamera: {
-      position: { x: 0, y: 1.6, z: 5 },
+      position: { x: 0, y: 1.6, z: -5 },
       target: { x: 0, y: 1.6, z: 0 },
       focalLengthMm: 50,
       rollDeg: 0,

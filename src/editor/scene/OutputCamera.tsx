@@ -20,6 +20,7 @@ const roundDiagnosticValue = (value: number) => Number(value.toFixed(6));
 function publishRuntimeCamera(
   camera: PerspectiveCameraImpl,
   target: EditorStore['document']['outputCamera']['target'],
+  rollDeg: number,
   domElement: HTMLCanvasElement,
   outputAspect: number,
 ) {
@@ -37,7 +38,7 @@ function publishRuntimeCamera(
     aspect: roundDiagnosticValue(camera.aspect),
     outputAspect: roundDiagnosticValue(outputAspect),
     zoom: roundDiagnosticValue(camera.zoom),
-    rotationZDeg: roundDiagnosticValue(MathUtils.radToDeg(camera.rotation.z)),
+    rotationZDeg: roundDiagnosticValue(rollDeg),
   });
 }
 
@@ -89,7 +90,13 @@ export function OutputCamera({ store }: OutputCameraProps) {
       cameraData.focalLengthMm,
     );
     camera.layers.enable(RENDER_LAYERS.editor);
-    publishRuntimeCamera(camera, cameraData.target, domElement, outputAspect);
+    publishRuntimeCamera(
+      camera,
+      cameraData.target,
+      cameraData.rollDeg,
+      domElement,
+      outputAspect,
+    );
   }, [
     cameraData,
     domElement,

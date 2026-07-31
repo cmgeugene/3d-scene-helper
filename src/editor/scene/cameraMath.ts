@@ -1,7 +1,7 @@
-import type { PerspectiveCamera } from 'three';
+import { Euler, MathUtils, Vector3, type PerspectiveCamera } from 'three';
 import { FILM_GAUGE_MM, MANNEQUIN_REFERENCE_HEIGHT_M } from '../constants';
 import type { SceneDocument } from '../persistence/sceneSchema';
-import type { CameraShotPreset } from '../presets/cameras';
+import type { CameraShotPreset, CameraViewPreset } from '../presets/cameras';
 import type { SceneObjectBounds } from './sceneObjectModel';
 
 export interface LetterboxRectangle {
@@ -286,6 +286,51 @@ export function computeFrameSelectedCamera(
     SHOT_FRAME_OCCUPANCY,
   );
 
+  return {
+    ...camera,
+    position: positionFromBackward(target, backward, distance),
+    target,
+  };
+}
+
+export function computeCameraView(
+  bounds: SceneObjectBounds,
+  camera: OutputCameraData,
+  outputAspect: number,
+  preset: CameraViewPreset,
+  subjectRotationDeg: VectorData = { x: 0, y: 0, z: 0 },
+): OutputCameraData {
+  const rotatedDirection = new Vector3(
+    preset.cameraDirection.x,
+    preset.cameraDirection.y,
+    preset.cameraDirection.z,
+  ).applyEuler(
+    new Euler(
+      MathUtils.degToRad(subjectRotationDeg.x),
+      MathUtils.degToRad(subjectRotationDeg.y),
+      MathUtils.degToRad(subjectRotationDeg.z),
+      'XYZ',
+    ),
+  );
+  const backward = normalize(rotatedDirection, { x: 0, y: 0, z: -1 });
+  const target = { ...camera.target };
+  const currentDistance = Math.hypot(
+    camera.position.x - camera.target.x,
+    camera.position.y - camera.target.y,
+    camera.position.z - camera.target.z,
+  );
+  const distance =
+    currentDistance > 1e-9
+      ? currentDistance
+      : cameraDistanceForFrame(
+          bounds,
+          target,
+          backward,
+          camera.rollDeg,
+          camera.focalLengthMm,
+          outputAspect,
+          SHOT_FRAME_OCCUPANCY,
+        );
   return {
     ...camera,
     position: positionFromBackward(target, backward, distance),

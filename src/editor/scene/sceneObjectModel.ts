@@ -1,4 +1,5 @@
-import { MathUtils } from 'three';
+import { Euler, MathUtils, Vector3 } from 'three';
+import { computeMannequinPoseBounds } from '../mannequin/mannequinRig';
 import type { SceneObject, SceneObjectKind } from '../persistence/sceneSchema';
 
 export type RuntimeGeometry =
@@ -69,63 +70,81 @@ export function getSceneObjectModel(object: SceneObject): SceneObjectModel {
 }
 
 export function getSceneObjectBounds(object: SceneObject): SceneObjectBounds {
-  const localSize = {
-    x: object.dimensions.x * object.transform.scale.x,
-    y: object.dimensions.y * object.transform.scale.y,
-    z: object.dimensions.z * object.transform.scale.z,
-  };
-  const x = MathUtils.degToRad(object.transform.rotationDeg.x);
-  const y = MathUtils.degToRad(object.transform.rotationDeg.y);
-  const z = MathUtils.degToRad(object.transform.rotationDeg.z);
-  const a = Math.cos(x);
-  const b = Math.sin(x);
-  const c = Math.cos(y);
-  const d = Math.sin(y);
-  const e = Math.cos(z);
-  const f = Math.sin(z);
-  const matrix = {
-    m11: c * e,
-    m12: -c * f,
-    m13: d,
-    m21: a * f + b * e * d,
-    m22: a * e - b * f * d,
-    m23: -b * c,
-    m31: b * f - a * e * d,
-    m32: b * e + a * f * d,
-    m33: a * c,
-  };
-  const size = {
-    x: roundBoundsValue(
-      Math.abs(matrix.m11) * localSize.x +
-        Math.abs(matrix.m12) * localSize.y +
-        Math.abs(matrix.m13) * localSize.z,
-    ),
-    y: roundBoundsValue(
-      Math.abs(matrix.m21) * localSize.x +
-        Math.abs(matrix.m22) * localSize.y +
-        Math.abs(matrix.m23) * localSize.z,
-    ),
-    z: roundBoundsValue(
-      Math.abs(matrix.m31) * localSize.x +
-        Math.abs(matrix.m32) * localSize.y +
-        Math.abs(matrix.m33) * localSize.z,
-    ),
-  };
-  const center = { ...object.transform.position };
-
+  const localBounds =
+    object.kind === 'mannequin' && object.mannequinPose !== undefined
+      ? computeMannequinPoseBounds(object.mannequinPose)
+      : {
+          min: {
+            x: -object.dimensions.x / 2,
+            y: -object.dimensions.y / 2,
+            z: -object.dimensions.z / 2,
+          },
+          max: {
+            x: object.dimensions.x / 2,
+            y: object.dimensions.y / 2,
+            z: object.dimensions.z / 2,
+          },
+        };
+  const dimensionScale =
+    object.kind === 'mannequin'
+      ? {
+          x: object.dimensions.x / 0.5,
+          y: object.dimensions.y / 1.7,
+          z: object.dimensions.z / 0.3,
+        }
+      : { x: 1, y: 1, z: 1 };
+  const rotation = new Euler(
+    MathUtils.degToRad(object.transform.rotationDeg.x),
+    MathUtils.degToRad(object.transform.rotationDeg.y),
+    MathUtils.degToRad(object.transform.rotationDeg.z),
+    'XYZ',
+  );
+  const worldMin = new Vector3(Infinity, Infinity, Infinity);
+  const worldMax = new Vector3(-Infinity, -Infinity, -Infinity);
+  for (const x of [localBounds.min.x, localBounds.max.x]) {
+    for (const y of [localBounds.min.y, localBounds.max.y]) {
+      for (const z of [localBounds.min.z, localBounds.max.z]) {
+        const point = new Vector3(
+          x * dimensionScale.x * object.transform.scale.x,
+          y * dimensionScale.y * object.transform.scale.y,
+          z * dimensionScale.z * object.transform.scale.z,
+        )
+          .applyEuler(rotation)
+          .add(
+            new Vector3(
+              object.transform.position.x,
+              object.transform.position.y,
+              object.transform.position.z,
+            ),
+          );
+        worldMin.min(point);
+        worldMax.max(point);
+      }
+    }
+  }
+  const size = worldMax.clone().sub(worldMin);
+  const center = worldMin.clone().add(worldMax).multiplyScalar(0.5);
   return {
     min: {
-      x: roundBoundsValue(center.x - size.x / 2),
-      y: roundBoundsValue(center.y - size.y / 2),
-      z: roundBoundsValue(center.z - size.z / 2),
+      x: roundBoundsValue(worldMin.x),
+      y: roundBoundsValue(worldMin.y),
+      z: roundBoundsValue(worldMin.z),
     },
     max: {
-      x: roundBoundsValue(center.x + size.x / 2),
-      y: roundBoundsValue(center.y + size.y / 2),
-      z: roundBoundsValue(center.z + size.z / 2),
+      x: roundBoundsValue(worldMax.x),
+      y: roundBoundsValue(worldMax.y),
+      z: roundBoundsValue(worldMax.z),
     },
-    size,
-    center,
+    size: {
+      x: roundBoundsValue(size.x),
+      y: roundBoundsValue(size.y),
+      z: roundBoundsValue(size.z),
+    },
+    center: {
+      x: roundBoundsValue(center.x),
+      y: roundBoundsValue(center.y),
+      z: roundBoundsValue(center.z),
+    },
   };
 }
 

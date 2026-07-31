@@ -19,6 +19,12 @@ const forbiddenMarkers = [
   'facingHelper',
   'runtimeLighting',
   'motionGuides',
+  'mannequinRig',
+  'mannequinPivots',
+  'mannequinBounds',
+  'ikDragging',
+  'ikHandleProjections',
+  'ikHandPositions',
 ];
 
 async function collectFiles(directory) {

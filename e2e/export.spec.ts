@@ -77,6 +77,17 @@ function readablePixelRatio(image: PNG) {
   return readable / (image.width * image.height);
 }
 
+function frontCuePixelCount(image: PNG) {
+  let count = 0;
+  for (let index = 0; index < image.data.length; index += 4) {
+    const red = image.data[index];
+    const green = image.data[index + 1];
+    const blue = image.data[index + 2];
+    if (red > 145 && green > 175 && blue > 185 && blue > red) count += 1;
+  }
+  return count;
+}
+
 test('export presets produce sanitized, exact-resolution PNG downloads', async ({
   page,
 }) => {
@@ -145,6 +156,73 @@ test('clean and reference exports use separate pixel paths without editor layer 
 
   expect(mismatchRatio(selectedReference, deselectedReference)).toBe(0);
   expect(mismatchRatio(selectedClean, selectedReference)).toBeGreaterThan(0);
+});
+
+test('hand IK handles stay out of clean and reference PNG exports', async ({
+  page,
+}) => {
+  await openExportEditor(page);
+  await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
+  await page.getByRole('button', { name: '손 IK' }).click();
+  await expect(
+    page.locator('canvas[data-ik-handle-projections]'),
+  ).toBeVisible();
+  const ikClean = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+  const ikReference = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'reference' }))
+      .buffer,
+  );
+
+  await page.getByRole('button', { name: '오브젝트 변형' }).click();
+  await expect(page.locator('canvas[data-ik-handle-projections]')).toHaveCount(
+    0,
+  );
+  const objectClean = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+  const objectReference = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'reference' }))
+      .buffer,
+  );
+
+  expect(mismatchRatio(ikClean, objectClean)).toBe(0);
+  expect(mismatchRatio(ikReference, objectReference)).toBe(0);
+});
+
+test('front/rear asymmetric mannequin cues remain pixel-readable in both PNG modes', async ({
+  page,
+}) => {
+  await openExportEditor(page);
+  await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
+  await page.getByRole('button', { name: '카메라' }).click();
+  await page.getByRole('button', { name: '정면', exact: true }).click();
+  const frontClean = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+  const frontReference = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'reference' }))
+      .buffer,
+  );
+
+  await page.getByRole('button', { name: '후면', exact: true }).click();
+  const rearClean = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+  const rearReference = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'reference' }))
+      .buffer,
+  );
+
+  expect(mismatchRatio(frontClean, rearClean)).toBeGreaterThan(0.002);
+  expect(mismatchRatio(frontReference, rearReference)).toBeGreaterThan(0.002);
+  expect(frontCuePixelCount(frontClean)).toBeGreaterThan(
+    frontCuePixelCount(rearClean) + 80,
+  );
+  expect(frontCuePixelCount(frontReference)).toBeGreaterThan(
+    frontCuePixelCount(rearReference) + 80,
+  );
 });
 
 test('room set transform persists and changes the clean exported frame', async ({

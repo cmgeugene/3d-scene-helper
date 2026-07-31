@@ -2,7 +2,11 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
-import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
+import {
+  CAMERA_SHOT_PRESETS,
+  CAMERA_VIEW_PRESETS,
+  LENS_PRESETS,
+} from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
 import { createEditorStore } from '../state/editorStore';
 import { EditorShortcuts } from './EditorShortcuts';
@@ -160,7 +164,31 @@ describe('Inspector', () => {
     expect(store.getState().document.objects).toHaveLength(2);
   });
 
-  it('camera panel에서 5개 lens와 6개 bounds 기반 shot/action을 적용한다', async () => {
+  it('selected mannequin에 4개 pose preset과 object/hand IK tool을 제공한다', async () => {
+    const user = userEvent.setup();
+    render(<Inspector store={store} />);
+
+    const poseGroup = screen.getByRole('group', { name: '마네킹 포즈' });
+    for (const label of ['기본 서기', 'A 포즈', 'T 포즈', '걷기 준비']) {
+      expect(
+        within(poseGroup).getByRole('button', { name: label }),
+      ).toBeVisible();
+    }
+    await user.click(within(poseGroup).getByRole('button', { name: 'T 포즈' }));
+    expect(
+      store.getState().document.objects.find(({ id }) => id === MANNEQUIN_ID)
+        ?.mannequinPose?.id,
+    ).toBe('t');
+
+    await user.click(within(poseGroup).getByRole('button', { name: '손 IK' }));
+    expect(store.getState().mannequinTool).toBe('ik');
+    await user.click(
+      within(poseGroup).getByRole('button', { name: '오브젝트 변형' }),
+    );
+    expect(store.getState().mannequinTool).toBe('object');
+  });
+
+  it('camera panel에서 5개 lens, 6개 shot, 6개 방향 view를 독립적으로 적용한다', async () => {
     const user = userEvent.setup();
     render(<Inspector store={store} />);
     await user.click(screen.getByRole('button', { name: '카메라' }));
@@ -181,11 +209,22 @@ describe('Inspector', () => {
     await user.click(within(shotGroup).getByRole('button', { name: '전신' }));
     expect(store.getState().statusMessage).toBe('전신 샷을 적용했습니다.');
 
+    const viewGroup = screen.getByRole('group', { name: '방향 뷰' });
+    for (const preset of CAMERA_VIEW_PRESETS) {
+      expect(
+        within(viewGroup).getByRole('button', { name: preset.label }),
+      ).toBeVisible();
+    }
+    await user.click(within(viewGroup).getByRole('button', { name: '정면' }));
+    expect(store.getState().document.outputCamera.position.z).toBeLessThan(0);
+    expect(store.getState().document.outputCamera.focalLengthMm).toBe(35);
+    expect(store.getState().statusMessage).toBe('정면 방향 뷰를 적용했습니다.');
+
     await user.click(screen.getByRole('button', { name: '선택 프레임 맞춤' }));
     expect(store.getState().document.outputCamera.target).toEqual({
       x: 0,
       y: 0.85,
-      z: 0,
+      z: -0.025,
     });
     await user.click(screen.getByRole('button', { name: '선택 바라보기' }));
     expect(store.getState().statusMessage).toBe('Mannequin을 바라봅니다.');

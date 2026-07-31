@@ -30,7 +30,7 @@ describe('sceneDocumentSchema', () => {
 
     expect(parsed).toEqual(document);
     expect(parsed.id).toBe('scene-starter');
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     expect(parsed.objects).toHaveLength(2);
     expect(parsed.objects.find(({ kind }) => kind === 'floor')).toMatchObject({
       id: 'object-floor',
@@ -42,12 +42,19 @@ describe('sceneDocumentSchema', () => {
     ).toMatchObject({
       id: 'object-mannequin',
       dimensions: { x: 0.5, y: 1.7, z: 0.3 },
+      mannequinPose: {
+        id: 'default',
+        arms: {
+          left: { shoulderRotationDeg: { z: -6 } },
+          right: { shoulderRotationDeg: { z: 6 } },
+        },
+      },
       visible: true,
     });
     expect(parsed.background).toEqual({ color: '#d8d8d8' });
     expect(parsed.lighting.presetId).toBe('neutral-studio');
     expect(parsed.outputCamera).toMatchObject({
-      position: { x: 0, y: 1.6, z: 5 },
+      position: { x: 0, y: 1.6, z: -5 },
       target: { x: 0, y: 1.6, z: 0 },
       focalLengthMm: 50,
       rollDeg: 0,
@@ -124,7 +131,7 @@ describe('sceneDocumentSchema', () => {
     }
   });
 
-  it('reserved scene notes와 optional motion guide를 version bump 없이 JSON 왕복한다', () => {
+  it('reserved scene notes와 optional motion guide를 v2 JSON으로 왕복한다', () => {
     const document = createStarterSceneDocument(STARTER_IDS);
     document.sceneNotes =
       'Subject moves right while the camera dollies in. Keep the clean start frame free of guides.';
@@ -146,7 +153,7 @@ describe('sceneDocumentSchema', () => {
     );
 
     expect(parsed).toEqual(document);
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
 
     if (parsed.subjectMotionGuide === undefined) {
       throw new Error('subject motion guide was not restored');
@@ -181,7 +188,7 @@ describe('sceneDocumentSchema', () => {
 
     const withUnsupportedVersion = {
       ...createStarterSceneDocument(STARTER_IDS),
-      version: 2,
+      version: 999,
     };
     const withRuntimeField = {
       ...createStarterSceneDocument(STARTER_IDS),

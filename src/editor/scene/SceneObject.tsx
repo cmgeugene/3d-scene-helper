@@ -1,8 +1,17 @@
-import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { DoubleSide, MathUtils, type Group, type Mesh } from 'three';
 import { RENDER_LAYERS } from '../constants';
+import {
+  computeMannequinPoseBounds,
+  createMannequinPose,
+  type MannequinPose,
+} from '../mannequin/mannequinRig';
 import type { SceneObject as SceneObjectData } from '../persistence/sceneSchema';
-import { Mannequin } from './Mannequin';
+import { ArticulatedMannequin } from './ArticulatedMannequin';
+import {
+  MannequinIKControls,
+  type MannequinIKBinding,
+} from './MannequinIKControls';
 import { RoomSet } from './RoomSet';
 import { getSceneObjectModel } from './sceneObjectModel';
 
@@ -11,15 +20,25 @@ interface SceneObjectProps {
   selected: boolean;
   onSelect: (id: string) => void;
   onRootReady: (id: string, root: Group | null) => void;
+  runtimeMannequinPose?: MannequinPose;
+  mannequinIK?: MannequinIKBinding;
 }
 
 interface PrimitiveProps {
   object: SceneObjectData;
+  selected: boolean;
+  runtimeMannequinPose?: MannequinPose;
   castShadow: boolean;
   receiveShadow: boolean;
 }
 
-function Primitive({ object, castShadow, receiveShadow }: PrimitiveProps) {
+function Primitive({
+  object,
+  selected,
+  runtimeMannequinPose,
+  castShadow,
+  receiveShadow,
+}: PrimitiveProps) {
   const { dimensions, kind } = object;
   const material = (
     <meshStandardMaterial
@@ -80,9 +99,15 @@ function Primitive({ object, castShadow, receiveShadow }: PrimitiveProps) {
       );
     case 'mannequin':
       return (
-        <Mannequin
+        <ArticulatedMannequin
           color={object.color}
           dimensions={dimensions}
+          pose={
+            runtimeMannequinPose ??
+            object.mannequinPose ??
+            createMannequinPose('default')
+          }
+          selected={selected}
           castShadow={castShadow}
           receiveShadow={receiveShadow}
         />
@@ -101,6 +126,27 @@ function Primitive({ object, castShadow, receiveShadow }: PrimitiveProps) {
 
 function SelectionHelper({ object }: { object: SceneObjectData }) {
   const ref = useRef<Mesh>(null);
+  const localBounds = useMemo(() => {
+    if (object.kind !== 'mannequin' || object.mannequinPose === undefined) {
+      return {
+        center: { x: 0, y: 0, z: 0 },
+        size: object.dimensions,
+      };
+    }
+    const bounds = computeMannequinPoseBounds(object.mannequinPose);
+    return {
+      center: {
+        x: bounds.center.x * (object.dimensions.x / 0.5),
+        y: bounds.center.y * (object.dimensions.y / 1.7),
+        z: bounds.center.z * (object.dimensions.z / 0.3),
+      },
+      size: {
+        x: bounds.size.x * (object.dimensions.x / 0.5),
+        y: bounds.size.y * (object.dimensions.y / 1.7),
+        z: bounds.size.z * (object.dimensions.z / 0.3),
+      },
+    };
+  }, [object]);
 
   useLayoutEffect(() => {
     ref.current?.layers.set(RENDER_LAYERS.editor);
@@ -110,12 +156,17 @@ function SelectionHelper({ object }: { object: SceneObjectData }) {
     <mesh
       ref={ref}
       name={`selection-helper:${object.id}`}
+      position={[
+        localBounds.center.x,
+        localBounds.center.y,
+        localBounds.center.z,
+      ]}
       scale={1.025}
       renderOrder={1000}
       raycast={() => undefined}
     >
       <boxGeometry
-        args={[object.dimensions.x, object.dimensions.y, object.dimensions.z]}
+        args={[localBounds.size.x, localBounds.size.y, localBounds.size.z]}
       />
       <meshBasicMaterial
         color="#ffd166"
@@ -134,6 +185,8 @@ export function SceneObject({
   selected,
   onSelect,
   onRootReady,
+  runtimeMannequinPose,
+  mannequinIK,
 }: SceneObjectProps) {
   const model = getSceneObjectModel(object);
   const { position, rotationDeg, scale } = object.transform;
@@ -164,9 +217,14 @@ export function SceneObject({
     >
       <Primitive
         object={object}
+        selected={selected}
+        runtimeMannequinPose={runtimeMannequinPose}
         castShadow={model.castShadow}
         receiveShadow={model.receiveShadow}
       />
+      {object.kind === 'mannequin' && mannequinIK !== undefined ? (
+        <MannequinIKControls object={object} {...mannequinIK} />
+      ) : null}
       {selected ? <SelectionHelper object={object} /> : null}
     </group>
   );

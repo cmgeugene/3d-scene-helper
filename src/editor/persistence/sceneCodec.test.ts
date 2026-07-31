@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MAX_SCENE_STORAGE_BYTES, SCENE_STORAGE_KEY } from '../constants';
+import {
+  LEGACY_SCENE_STORAGE_KEYS,
+  MAX_SCENE_STORAGE_BYTES,
+  SCENE_STORAGE_KEY,
+} from '../constants';
 import { createStarterSceneDocument } from './sceneSchema';
 import {
   encodeSceneDocument,
@@ -32,9 +36,30 @@ function createMemoryStorage(initial: Record<string, string> = {}): Storage {
   };
 }
 
+function createLegacyV1Scene() {
+  const legacy = structuredClone(
+    createStarterSceneDocument(SCENE_IDS),
+  ) as unknown as {
+    version: number;
+    objects: Array<{ kind: string; mannequinPose?: unknown }>;
+    outputCamera: { position: { x: number; y: number; z: number } };
+    [key: string]: unknown;
+  };
+  legacy.version = 1;
+  legacy.outputCamera.position.z = 5;
+  for (const object of legacy.objects) delete object.mannequinPose;
+  return legacy;
+}
+
 describe('sceneCodec', () => {
   it('versioned Zod SceneDocument를 JSON으로 round-trip한다', () => {
     const document = createStarterSceneDocument(SCENE_IDS);
+    const mannequin = document.objects.find(({ kind }) => kind === 'mannequin');
+    if (mannequin?.mannequinPose === undefined) {
+      throw new Error('starter mannequin pose가 필요합니다.');
+    }
+    mannequin.mannequinPose.id = 'custom';
+    mannequin.mannequinPose.arms.left.elbowBendDeg = 74;
 
     const encoded = encodeSceneDocument(document);
     const decoded = parseSceneDocument(encoded);
@@ -42,6 +67,39 @@ describe('sceneCodec', () => {
     expect(JSON.parse(encoded)).toEqual(document);
     expect(decoded).toEqual(document);
     expect(decoded).not.toBe(document);
+    expect(
+      decoded.objects.find(({ kind }) => kind === 'mannequin'),
+    ).toHaveProperty('mannequinPose.arms.left.elbowBendDeg', 74);
+  });
+
+  it('v1 scene을 v2 default mannequin pose로 안전하게 migration한다', () => {
+    const legacy = createLegacyV1Scene();
+
+    const migrated = parseSceneDocument(JSON.stringify(legacy));
+
+    expect(migrated.version).toBe(2);
+    expect(migrated.outputCamera.position.z).toBe(5);
+    expect(
+      migrated.objects.find(({ kind }) => kind === 'mannequin'),
+    ).toMatchObject({
+      mannequinPose: { id: 'default' },
+    });
+    expect(
+      migrated.objects.find(({ kind }) => kind === 'floor'),
+    ).not.toHaveProperty('mannequinPose');
+  });
+
+  it('v2 key가 없으면 legacy v1 localStorage key를 읽어 migration한다', () => {
+    const storage = createMemoryStorage({
+      [LEGACY_SCENE_STORAGE_KEYS[0]]: JSON.stringify(createLegacyV1Scene()),
+    });
+
+    const migrated = loadSceneDocument(storage);
+
+    expect(migrated).toMatchObject({ version: 2 });
+    expect(
+      migrated?.objects.find(({ kind }) => kind === 'mannequin'),
+    ).toHaveProperty('mannequinPose.id', 'default');
   });
 
   it('malformed JSON과 current-version schema 위반을 actionable codec error로 거부한다', () => {
@@ -78,7 +136,7 @@ describe('sceneCodec', () => {
 
     saveSceneDocument(storage, document);
 
-    expect(SCENE_STORAGE_KEY).toMatch(/^i2v-3d-scene-helper:scene:v1$/);
+    expect(SCENE_STORAGE_KEY).toMatch(/^i2v-3d-scene-helper:scene:v2$/);
     expect(storage.getItem(SCENE_STORAGE_KEY)).toBe(
       encodeSceneDocument(document),
     );

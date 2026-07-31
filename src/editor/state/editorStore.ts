@@ -2,15 +2,23 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import { ASPECT_RATIO_VALUES, MAX_SCENE_NOTES_LENGTH } from '../constants';
 import {
   createSceneObject,
+  mannequinPoseSchema,
   sceneDocumentSchema,
   type AddSceneObjectInput,
+  type MannequinPose,
   type SceneDocument,
   type SceneObject,
 } from '../persistence/sceneSchema';
 import {
+  createMannequinPose,
+  type MannequinPosePresetId,
+} from '../mannequin/mannequinRig';
+import {
   CAMERA_SHOT_PRESETS,
+  CAMERA_VIEW_PRESETS,
   LENS_PRESETS,
   type CameraShotPreset,
+  type CameraViewPreset,
   type LensPreset,
 } from '../presets/cameras';
 import {
@@ -20,6 +28,7 @@ import {
 } from '../presets/lighting';
 import {
   computeCameraShot,
+  computeCameraView,
   computeFrameSelectedCamera,
   computeLookAtSelectedCamera,
 } from '../scene/cameraMath';
@@ -50,9 +59,11 @@ export const DOCUMENT_MUTATION_KINDS = [
   'update-lighting-background',
   'update-output',
   'update-motion-metadata',
+  'commit-mannequin-pose',
 ] as const;
 
 export type DocumentMutationKind = (typeof DOCUMENT_MUTATION_KINDS)[number];
+export type MannequinTool = 'object' | 'ik';
 
 export interface EditorStoreOptions {
   initialDocument: SceneDocument;
@@ -67,11 +78,16 @@ export interface EditorStore {
   selectedObjectId: string | null;
   hoveredObjectId: string | null;
   transformMode: TransformMode;
+  mannequinTool: MannequinTool;
   guideVisibility: GuideVisibility;
   isDirty: boolean;
   activePanel: EditorPanel;
   navigation: EditorNavigation;
   inProgressTransform: InProgressTransform | null;
+  inProgressMannequinPose: {
+    objectId: string;
+    initialPose: MannequinPose;
+  } | null;
   exportState: ExportState;
   statusMessage: string | null;
   addObject: (input: AddSceneObjectInput) => string;
@@ -80,6 +96,10 @@ export interface EditorStore {
   renameObject: (id: string, name: string) => void;
   setObjectColor: (id: string, color: string) => void;
   setObjectVisibility: (id: string, visible: boolean) => void;
+  applyMannequinPosePreset: (presetId: MannequinPosePresetId) => void;
+  beginMannequinPose: () => void;
+  cancelMannequinPose: () => void;
+  commitMannequinPose: (pose: MannequinPose) => void;
   beginTransform: () => void;
   cancelTransform: () => void;
   commitTransform: (transform: SceneObject['transform']) => void;
@@ -89,6 +109,7 @@ export interface EditorStore {
   commitCamera: (camera: SceneDocument['outputCamera']) => void;
   setCameraLens: (focalLengthMm: LensPreset['focalLengthMm']) => void;
   applyCameraShot: (presetId: CameraShotPreset['id']) => void;
+  applyCameraView: (presetId: CameraViewPreset['id']) => void;
   frameSelected: () => void;
   lookAtSelected: () => void;
   applyLightingPreset: (presetId: LightingPresetId) => void;
@@ -104,6 +125,7 @@ export interface EditorStore {
   ) => void;
   setSceneNotes: (notes: string) => void;
   setTransformMode: (mode: TransformMode) => void;
+  setMannequinTool: (tool: MannequinTool) => void;
   setGuideVisibility: (visibility: Partial<GuideVisibility>) => void;
   setActivePanel: (panel: EditorPanel) => void;
   setNavigation: (navigation: EditorNavigation) => void;
@@ -183,6 +205,7 @@ export function createEditorStore(options: EditorStoreOptions) {
     selectedObjectId: null,
     hoveredObjectId: null,
     transformMode: 'translate',
+    mannequinTool: 'object',
     guideVisibility: {
       thirds: false,
       center: false,
@@ -198,6 +221,7 @@ export function createEditorStore(options: EditorStoreOptions) {
       isInteracting: false,
     },
     inProgressTransform: null,
+    inProgressMannequinPose: null,
     exportState: {
       status: 'idle',
       progress: 0,
@@ -253,6 +277,72 @@ export function createEditorStore(options: EditorStoreOptions) {
     },
     setObjectVisibility: (id, visible) => {
       updateObject(set, id, { visible });
+    },
+    applyMannequinPosePreset: (presetId) => {
+      set((state) => {
+        const selected = state.document.objects.find(
+          ({ id }) => id === state.selectedObjectId,
+        );
+        if (selected?.kind !== 'mannequin') return state;
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          objects: state.document.objects.map((object) =>
+            object.id === selected.id
+              ? { ...object, mannequinPose: createMannequinPose(presetId) }
+              : object,
+          ),
+        });
+        return {
+          ...recordMutation(state, nextDocument, 'commit-mannequin-pose'),
+          inProgressMannequinPose: null,
+          statusMessage: `${selected.name}에 ${presetId} 포즈를 적용했습니다.`,
+        };
+      });
+    },
+    beginMannequinPose: () => {
+      set((state) => {
+        const selected = state.document.objects.find(
+          ({ id }) => id === state.selectedObjectId,
+        );
+        if (
+          selected?.kind !== 'mannequin' ||
+          selected.mannequinPose === undefined
+        ) {
+          return state;
+        }
+        return {
+          inProgressMannequinPose: {
+            objectId: selected.id,
+            initialPose: structuredClone(selected.mannequinPose),
+          },
+        };
+      });
+    },
+    cancelMannequinPose: () => {
+      set((state) =>
+        state.inProgressMannequinPose === null
+          ? state
+          : { inProgressMannequinPose: null },
+      );
+    },
+    commitMannequinPose: (pose) => {
+      set((state) => {
+        const inProgress = state.inProgressMannequinPose;
+        if (inProgress === null) return state;
+        const validatedPose = mannequinPoseSchema.parse(pose);
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          objects: state.document.objects.map((object) =>
+            object.id === inProgress.objectId
+              ? { ...object, mannequinPose: validatedPose }
+              : object,
+          ),
+        });
+        return {
+          ...recordMutation(state, nextDocument, 'commit-mannequin-pose'),
+          inProgressMannequinPose: null,
+        };
+      });
     },
     beginTransform: () => {
       set((state) => {
@@ -355,6 +445,10 @@ export function createEditorStore(options: EditorStoreOptions) {
             state.inProgressTransform?.objectId === id
               ? null
               : state.inProgressTransform,
+          inProgressMannequinPose:
+            state.inProgressMannequinPose?.objectId === id
+              ? null
+              : state.inProgressMannequinPose,
           statusMessage: null,
         };
       });
@@ -370,6 +464,7 @@ export function createEditorStore(options: EditorStoreOptions) {
           selectedObjectId: null,
           hoveredObjectId: null,
           inProgressTransform: null,
+          inProgressMannequinPose: null,
           navigation: {
             position: structuredClone(initialDocument.outputCamera.position),
             target: structuredClone(initialDocument.outputCamera.target),
@@ -425,6 +520,32 @@ export function createEditorStore(options: EditorStoreOptions) {
       );
       get().commitCamera(camera);
       set({ statusMessage: `${preset.label} 샷을 적용했습니다.` });
+    },
+    applyCameraView: (presetId) => {
+      const preset = CAMERA_VIEW_PRESETS.find(({ id }) => id === presetId);
+      if (preset === undefined) return;
+      const state = get();
+      const selected = state.document.objects.find(
+        ({ id }) => id === state.selectedObjectId,
+      );
+      const fallback = state.document.objects.find(
+        ({ kind, visible }) => kind === 'mannequin' && visible,
+      );
+      const subject = selected ?? fallback;
+      if (subject === undefined) {
+        set({ statusMessage: '방향 뷰를 적용할 오브젝트가 없습니다.' });
+        return;
+      }
+      get().commitCamera(
+        computeCameraView(
+          getSceneObjectBounds(subject),
+          state.document.outputCamera,
+          ASPECT_RATIO_VALUES[state.document.output.aspectRatioId],
+          preset,
+          subject.transform.rotationDeg,
+        ),
+      );
+      set({ statusMessage: `${preset.label} 방향 뷰를 적용했습니다.` });
     },
     frameSelected: () => {
       const state = get();
@@ -580,6 +701,9 @@ export function createEditorStore(options: EditorStoreOptions) {
     setTransformMode: (transformMode) => {
       set({ transformMode, statusMessage: null });
     },
+    setMannequinTool: (mannequinTool) => {
+      set({ mannequinTool, statusMessage: null });
+    },
     setGuideVisibility: (visibility) => {
       set((state) => ({
         guideVisibility: { ...state.guideVisibility, ...visibility },
@@ -608,6 +732,7 @@ export function createEditorStore(options: EditorStoreOptions) {
         selectedObjectId: null,
         hoveredObjectId: null,
         inProgressTransform: null,
+        inProgressMannequinPose: null,
         navigation: {
           position: structuredClone(nextDocument.outputCamera.position),
           target: structuredClone(nextDocument.outputCamera.target),
@@ -654,6 +779,7 @@ export function createEditorStore(options: EditorStoreOptions) {
             ? state.hoveredObjectId
             : null,
           inProgressTransform: null,
+          inProgressMannequinPose: null,
           isDirty: !documentsEqual(nextDocument, persistedDocument),
           statusMessage: '실행을 취소했습니다.',
         };
@@ -690,6 +816,7 @@ export function createEditorStore(options: EditorStoreOptions) {
             ? state.hoveredObjectId
             : null,
           inProgressTransform: null,
+          inProgressMannequinPose: null,
           isDirty: !documentsEqual(nextDocument, persistedDocument),
           statusMessage: '다시 실행했습니다.',
         };

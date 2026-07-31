@@ -234,18 +234,21 @@ test('manipulation gizmo drag mutates runtime only, disables orbit, then commits
     return structuredClone(selected.transform);
   });
 
-  const origin = JSON.parse(
-    (await canvas.getAttribute('data-gizmo-origin')) ?? 'null',
-  ) as { x: number; y: number };
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
   if (box === null) return;
+  const xAxis = await findGizmoAxis(page, canvas, 'X');
+  const origin = JSON.parse(
+    (await canvas.getAttribute('data-gizmo-origin')) ?? 'null',
+  ) as { x: number; y: number };
 
-  await page.mouse.move(box.x + origin.x + 48, box.y + origin.y);
+  await page.mouse.move(box.x + origin.x + xAxis.x, box.y + origin.y + xAxis.y);
   await page.mouse.down();
-  await page.mouse.move(box.x + origin.x + 108, box.y + origin.y, {
-    steps: 10,
-  });
+  await page.mouse.move(
+    box.x + origin.x + xAxis.x + 60,
+    box.y + origin.y + xAxis.y,
+    { steps: 10 },
+  );
 
   await expect(canvas).toHaveAttribute('data-transform-dragging', 'true');
   await expect(canvas).toHaveAttribute('data-orbit-enabled', 'false');
@@ -327,16 +330,21 @@ test('manipulation Escape cancels an active gizmo drag and restores orbit', asyn
   await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
   await expect(canvas).toHaveAttribute('data-gizmo-origin', /\d/);
   const before = await selectedTransform(page);
-  const origin = JSON.parse(
-    (await canvas.getAttribute('data-gizmo-origin')) ?? 'null',
-  ) as { x: number; y: number };
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
   if (box === null) return;
+  const xAxis = await findGizmoAxis(page, canvas, 'X');
+  const origin = JSON.parse(
+    (await canvas.getAttribute('data-gizmo-origin')) ?? 'null',
+  ) as { x: number; y: number };
 
-  await page.mouse.move(box.x + origin.x + 48, box.y + origin.y);
+  await page.mouse.move(box.x + origin.x + xAxis.x, box.y + origin.y + xAxis.y);
   await page.mouse.down();
-  await page.mouse.move(box.x + origin.x + 88, box.y + origin.y, { steps: 6 });
+  await page.mouse.move(
+    box.x + origin.x + xAxis.x + 40,
+    box.y + origin.y + xAxis.y,
+    { steps: 6 },
+  );
   await expect(canvas).toHaveAttribute('data-transform-dragging', 'true');
   await expect.poll(() => runtimeTransform(canvas)).not.toEqual(before);
   await page.keyboard.press('Escape');

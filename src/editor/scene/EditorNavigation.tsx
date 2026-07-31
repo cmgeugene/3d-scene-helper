@@ -18,6 +18,7 @@ const roundDiagnosticValue = (value: number) => Number(value.toFixed(6));
 function publishRuntimeCamera(
   camera: Camera,
   target: Vector3,
+  rollDeg: number,
   domElement: HTMLCanvasElement,
   outputAspect: number,
 ) {
@@ -44,7 +45,7 @@ function publishRuntimeCamera(
     aspect: roundDiagnosticValue(camera.aspect),
     outputAspect: roundDiagnosticValue(outputAspect),
     zoom: roundDiagnosticValue(camera.zoom),
-    rotationZDeg: roundDiagnosticValue(MathUtils.radToDeg(camera.rotation.z)),
+    rotationZDeg: roundDiagnosticValue(rollDeg),
   });
 }
 
@@ -58,7 +59,7 @@ function applyCameraRoll(
   camera.up.set(0, 1, 0);
   camera.lookAt(target);
   camera.rotateZ(MathUtils.degToRad(rollDeg));
-  publishRuntimeCamera(camera, target, domElement, outputAspect);
+  publishRuntimeCamera(camera, target, rollDeg, domElement, outputAspect);
 }
 
 function setNavigationEnabled(

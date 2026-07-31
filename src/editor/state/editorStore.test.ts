@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
-import { CAMERA_SHOT_PRESETS } from '../presets/cameras';
+import {
+  MANNEQUIN_ARM_ANCHORS,
+  createMannequinPose,
+  solveMannequinArmIk,
+} from '../mannequin/mannequinRig';
+import { CAMERA_SHOT_PRESETS, CAMERA_VIEW_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
 import {
   createEditorStore,
@@ -54,7 +59,7 @@ describe('editorStore', () => {
     expect(state.isDirty).toBe(false);
     expect(state.activePanel).toBe('scene');
     expect(state.navigation).toEqual({
-      position: { x: 0, y: 1.6, z: 5 },
+      position: { x: 0, y: 1.6, z: -5 },
       target: { x: 0, y: 1.6, z: 0 },
       isInteracting: false,
     });
@@ -274,7 +279,104 @@ describe('editorStore', () => {
     });
     expect(duplicate?.id).not.toBe(original?.id);
     expect(duplicate?.transform).not.toBe(original?.transform);
+    expect(duplicate?.mannequinPose).toEqual(original?.mannequinPose);
+    expect(duplicate?.mannequinPose).not.toBe(original?.mannequinPose);
     expect(state.selectedObjectId).toBe(duplicateId);
+  });
+
+  it('4개 mannequin pose preset을 한 번 commit하고 undo/redo로 보존한다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    let documentChanges = 0;
+    const unsubscribe = store.subscribe((state, previousState) => {
+      if (state.document !== previousState.document) documentChanges += 1;
+    });
+
+    for (const presetId of ['default', 'a', 't', 'walk-ready'] as const) {
+      documentChanges = 0;
+      store.getState().applyMannequinPosePreset(presetId);
+      const mannequin = store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId);
+      expect(mannequin?.mannequinPose).toEqual(createMannequinPose(presetId));
+      expect(documentChanges).toBe(presetId === 'default' ? 0 : 1);
+    }
+
+    store.getState().undo();
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.mannequinPose?.id,
+    ).toBe('t');
+    store.getState().redo();
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.mannequinPose?.id,
+    ).toBe('walk-ready');
+    unsubscribe();
+  });
+
+  it('hand IK pose는 drag 중 runtime-only이고 종료 시 document/history에 정확히 한 번 commit된다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    const documentBeforeDrag = store.getState().document;
+    const customPose = createMannequinPose(
+      'default',
+    ) as (typeof documentBeforeDrag.objects)[number]['mannequinPose'];
+    if (customPose === undefined) throw new Error('custom pose가 필요합니다.');
+    customPose.id = 'custom';
+    customPose.arms.left.elbowBendDeg = 72;
+    let documentChanges = 0;
+    const unsubscribe = store.subscribe((state, previousState) => {
+      if (state.document !== previousState.document) documentChanges += 1;
+    });
+
+    store.getState().beginMannequinPose();
+    expect(store.getState().document).toBe(documentBeforeDrag);
+    expect(store.getState().inProgressMannequinPose).toMatchObject({
+      objectId: STARTER_IDS.mannequinId,
+    });
+
+    store.getState().commitMannequinPose(customPose);
+    store.getState().commitMannequinPose(customPose);
+
+    expect(documentChanges).toBe(1);
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'commit-mannequin-pose',
+    );
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.mannequinPose,
+    ).toEqual(customPose);
+    expect(store.getState().inProgressMannequinPose).toBeNull();
+    unsubscribe();
+  });
+
+  it('minimum-reach hand IK pose를 schema 오류 없이 정확히 한 번 commit한다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    const nearReachPose = solveMannequinArmIk(
+      createMannequinPose('default'),
+      'left',
+      MANNEQUIN_ARM_ANCHORS.left.shoulder,
+    );
+    const historyBefore = store.getState().history.past.length;
+
+    store.getState().beginMannequinPose();
+    expect(() =>
+      store.getState().commitMannequinPose(nearReachPose),
+    ).not.toThrow();
+
+    expect(store.getState().history.past).toHaveLength(historyBefore + 1);
+    expect(store.getState().inProgressMannequinPose).toBeNull();
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.mannequinPose?.arms.left.elbowBendDeg,
+    ).toBe(150);
   });
 
   it('삭제한 object의 selection, hover, in-progress transform을 정리한다', () => {
@@ -332,7 +434,7 @@ describe('editorStore', () => {
       inProgressTransform: null,
       isDirty: false,
       navigation: {
-        position: { x: 0, y: 1.6, z: 5 },
+        position: { x: 0, y: 1.6, z: -5 },
         target: { x: 0, y: 1.6, z: 0 },
         isInteracting: false,
       },
@@ -350,6 +452,7 @@ describe('editorStore', () => {
       'update-lighting-background',
       'update-output',
       'update-motion-metadata',
+      'commit-mannequin-pose',
     ]);
   });
 
@@ -492,10 +595,47 @@ describe('editorStore', () => {
       store.getState().applyCameraShot(preset.id);
       const camera = store.getState().document.outputCamera;
       expect(camera.target.x).toBe(0);
-      expect(camera.target.z).toBe(0);
+      expect(camera.target.z).toBe(-0.025);
       expect(Number.isFinite(camera.position.z)).toBe(true);
       expect(camera.rollDeg).toBe(preset.framing.rollDeg);
     }
+  });
+
+  it('6개 방향 view를 shot/lens와 독립된 explicit camera commit으로 적용한다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    store.getState().setCameraLens(35);
+    store.getState().applyCameraShot('dutch-angle');
+    const activeShot = structuredClone(store.getState().document.outputCamera);
+    const activeDistance = Math.hypot(
+      activeShot.position.x - activeShot.target.x,
+      activeShot.position.y - activeShot.target.y,
+      activeShot.position.z - activeShot.target.z,
+    );
+    let documentChanges = 0;
+    const unsubscribe = store.subscribe((state, previousState) => {
+      if (state.document.outputCamera !== previousState.document.outputCamera) {
+        documentChanges += 1;
+      }
+    });
+
+    for (const preset of CAMERA_VIEW_PRESETS) {
+      documentChanges = 0;
+      store.getState().applyCameraView(preset.id);
+      const camera = store.getState().document.outputCamera;
+      expect(camera.target).toEqual(activeShot.target);
+      expect(camera.focalLengthMm).toBe(35);
+      expect(camera.rollDeg).toBe(12);
+      expect(
+        Math.hypot(
+          camera.position.x - camera.target.x,
+          camera.position.y - camera.target.y,
+          camera.position.z - camera.target.z,
+        ),
+      ).toBeCloseTo(activeDistance, 10);
+      expect(documentChanges).toBe(1);
+      expect(store.getState().statusMessage).toContain(preset.label);
+    }
+    unsubscribe();
   });
 
   it('frame/look at selected는 bounds를 사용하고 selection이 없으면 camera를 보존해 status를 알린다', () => {
@@ -518,7 +658,7 @@ describe('editorStore', () => {
     expect(store.getState().document.outputCamera.target).toEqual({
       x: 0,
       y: 0.85,
-      z: 0,
+      z: -0.025,
     });
     expect(store.getState().statusMessage).toBe(
       'Mannequin을 프레임에 맞췄습니다.',
@@ -532,7 +672,7 @@ describe('editorStore', () => {
     store.getState().lookAtSelected();
     expect(store.getState().document.outputCamera).toMatchObject({
       position: { x: 4, y: 3, z: 6 },
-      target: { x: 0, y: 0.85, z: 0 },
+      target: { x: 0, y: 0.85, z: -0.025 },
     });
     expect(store.getState().statusMessage).toBe('Mannequin을 바라봅니다.');
   });

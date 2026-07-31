@@ -94,6 +94,7 @@ export function SelectionTransformControls({
 }: SelectionTransformControlsProps) {
   const controlsRef = useRef<TransformControlsImpl | null>(null);
   const draggingRef = useRef(false);
+  const interactionLockedRef = useRef(false);
   const initialRuntimeTransformRef = useRef<SceneObject['transform'] | null>(
     null,
   );
@@ -127,8 +128,15 @@ export function SelectionTransformControls({
 
   useEffect(
     () => () => {
-      if (!draggingRef.current) return;
+      if (!draggingRef.current) {
+        if (interactionLockedRef.current) {
+          interactionLockedRef.current = false;
+          onDraggingChange(false);
+        }
+        return;
+      }
       draggingRef.current = false;
+      interactionLockedRef.current = false;
       const initialRuntimeTransform = initialRuntimeTransformRef.current;
       initialRuntimeTransformRef.current = null;
       if (initialRuntimeTransform !== null) {
@@ -152,6 +160,7 @@ export function SelectionTransformControls({
       onMouseDown={() => {
         if (draggingRef.current) return;
         draggingRef.current = true;
+        interactionLockedRef.current = true;
         initialRuntimeTransformRef.current = runtimeTransform(object);
         store.getState().beginTransform();
         onDraggingChange(true);
@@ -165,6 +174,14 @@ export function SelectionTransformControls({
         );
       }}
       onChange={() => {
+        const controls =
+          controlsRef.current as unknown as TransformControlsInternals | null;
+        const hovering =
+          controls?.axis !== null && controls?.axis !== undefined;
+        if (!draggingRef.current && interactionLockedRef.current !== hovering) {
+          interactionLockedRef.current = hovering;
+          onDraggingChange(hovering);
+        }
         publishDiagnostics(
           object,
           mode,
@@ -187,6 +204,7 @@ export function SelectionTransformControls({
       onMouseUp={() => {
         if (!draggingRef.current) return;
         draggingRef.current = false;
+        interactionLockedRef.current = false;
         const inProgress = store.getState().inProgressTransform;
         if (inProgress?.objectId !== objectData.id) {
           const initialRuntimeTransform = initialRuntimeTransformRef.current;
