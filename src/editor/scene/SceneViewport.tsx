@@ -1,5 +1,12 @@
 import { Canvas, useThree } from '@react-three/fiber';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ArrowHelper,
   PCFShadowMap,
@@ -27,6 +34,29 @@ import { SelectionTransformControls } from './SelectionTransformControls';
 interface SceneViewportProps {
   store: StoreApi<EditorStore>;
   onExportReady?: (exportFrame: FrameExportHandler | null) => void;
+  onRuntimeFailure?: (message: string) => void;
+}
+
+function WebGLContextMonitor({
+  onRuntimeFailure,
+}: {
+  onRuntimeFailure?: (message: string) => void;
+}) {
+  const canvas = useThree((state) => state.gl.domElement);
+
+  useEffect(() => {
+    const handleContextLost = (event: Event) => {
+      event.preventDefault();
+      onRuntimeFailure?.(
+        'WebGL context가 손실되었습니다. 직렬화된 장면 데이터는 보존되었습니다. 페이지를 새로고침해 3D 표시를 복구하세요.',
+      );
+    };
+    canvas.addEventListener('webglcontextlost', handleContextLost);
+    return () =>
+      canvas.removeEventListener('webglcontextlost', handleContextLost);
+  }, [canvas, onRuntimeFailure]);
+
+  return null;
 }
 
 function moveToLayer(object: Object3D | null, layer: number) {
@@ -218,7 +248,11 @@ function ExportFrameBridge({
   return null;
 }
 
-export function SceneViewport({ store, onExportReady }: SceneViewportProps) {
+export function SceneViewport({
+  store,
+  onExportReady,
+  onRuntimeFailure,
+}: SceneViewportProps) {
   const outputAspectId = useStore(
     store,
     (state) => state.document.output.aspectRatioId,
@@ -290,6 +324,7 @@ export function SceneViewport({ store, onExportReady }: SceneViewportProps) {
               store.getState().selectObject(null);
             }}
           >
+            <WebGLContextMonitor onRuntimeFailure={onRuntimeFailure} />
             <RuntimeScene store={store} />
             {onExportReady === undefined ? null : (
               <ExportFrameBridge onExportReady={onExportReady} />

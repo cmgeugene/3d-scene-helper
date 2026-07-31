@@ -18,6 +18,7 @@ interface TopToolbarProps {
   store: StoreApi<EditorStore>;
   storage: Storage;
   frameExporter: FrameExportHandler | null;
+  exportUnavailable?: boolean;
 }
 
 const GUIDE_OPTIONS: ReadonlyArray<{
@@ -51,7 +52,12 @@ function sceneDownloadName(name: string) {
   return `${safeName || 'scene'}.json`;
 }
 
-export function TopToolbar({ store, storage, frameExporter }: TopToolbarProps) {
+export function TopToolbar({
+  store,
+  storage,
+  frameExporter,
+  exportUnavailable = false,
+}: TopToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportButtonRef = useRef<HTMLButtonElement>(null);
   const importGenerationRef = useRef(0);
@@ -370,9 +376,9 @@ export function TopToolbar({ store, storage, frameExporter }: TopToolbarProps) {
           <button
             ref={exportButtonRef}
             type="button"
-            disabled={frameExporter === null}
+            disabled={frameExporter === null || exportUnavailable}
             title={
-              frameExporter === null
+              frameExporter === null || exportUnavailable
                 ? '3D 장면이 준비되면 PNG를 내보낼 수 있습니다.'
                 : undefined
             }
@@ -382,7 +388,7 @@ export function TopToolbar({ store, storage, frameExporter }: TopToolbarProps) {
           </button>
         </div>
       </nav>
-      {isExportDialogOpen && frameExporter !== null ? (
+      {isExportDialogOpen && frameExporter !== null && !exportUnavailable ? (
         <ExportDialog
           store={store}
           exportFrame={frameExporter}

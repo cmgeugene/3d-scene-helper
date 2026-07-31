@@ -6,6 +6,7 @@ import { AssetPanel } from './AssetPanel';
 import { EditorShortcuts } from './EditorShortcuts';
 import { Inspector } from './Inspector';
 import { Outliner } from './Outliner';
+import { SceneErrorBoundary } from './SceneErrorBoundary';
 import { StatusBar } from './StatusBar';
 import { TopToolbar } from './TopToolbar';
 
@@ -24,6 +25,11 @@ interface EditorShellProps {
   storage?: Storage;
 }
 
+interface RuntimeFailure {
+  kind: 'context-loss' | 'render-error';
+  message: string;
+}
+
 const WEBGL_MESSAGES: Record<WebGLState, string> = {
   checking: 'WebGL 지원 여부를 확인하고 있습니다.',
   available: 'WebGL을 사용할 수 있습니다.',
@@ -32,7 +38,10 @@ const WEBGL_MESSAGES: Record<WebGLState, string> = {
 
 function ViewportPlaceholder({ webGLState }: { webGLState: WebGLState }) {
   return (
-    <div className="viewport-placeholder">
+    <div
+      className="viewport-placeholder"
+      role={webGLState === 'fallback' ? 'alert' : undefined}
+    >
       <p className="eyebrow">기본 장면 준비 완료</p>
       <h2>구도를 시작해 보세요</h2>
       <p>
@@ -53,12 +62,27 @@ export function EditorShell({
   const [frameExporter, setFrameExporter] = useState<FrameExportHandler | null>(
     null,
   );
+  const [runtimeFailure, setRuntimeFailure] = useState<RuntimeFailure | null>(
+    null,
+  );
   const handleExportReady = useCallback(
     (nextExporter: FrameExportHandler | null) => {
       setFrameExporter(() => nextExporter);
     },
     [],
   );
+  const handleRuntimeFailure = useCallback((message: string) => {
+    setRuntimeFailure({ kind: 'context-loss', message });
+  }, []);
+  const handleViewportError = useCallback(() => {
+    setRuntimeFailure({
+      kind: 'render-error',
+      message:
+        '3D 뷰포트를 표시하지 못했습니다. 직렬화된 장면 데이터는 보존되었습니다.',
+    });
+  }, []);
+  const effectiveWebGLState: WebGLState =
+    runtimeFailure === null ? webGLState : 'fallback';
 
   return (
     <main className="editor-shell">
@@ -68,6 +92,7 @@ export function EditorShell({
           store={store}
           storage={storage}
           frameExporter={frameExporter}
+          exportUnavailable={runtimeFailure !== null}
         />
         <div className="editor-workspace">
           <aside className="left-panel" aria-label="에셋과 장면">
@@ -76,23 +101,33 @@ export function EditorShell({
           </aside>
           <section className="viewport-panel" aria-label="장면 뷰포트">
             {canvasEnabled && webGLState === 'available' ? (
-              <Suspense
-                fallback={<ViewportPlaceholder webGLState={webGLState} />}
-              >
-                <SceneViewport
-                  store={store}
-                  onExportReady={handleExportReady}
-                />
-              </Suspense>
+              <SceneErrorBoundary onError={handleViewportError}>
+                <Suspense
+                  fallback={<ViewportPlaceholder webGLState={webGLState} />}
+                >
+                  <SceneViewport
+                    store={store}
+                    onExportReady={handleExportReady}
+                    onRuntimeFailure={handleRuntimeFailure}
+                  />
+                </Suspense>
+              </SceneErrorBoundary>
             ) : (
               <ViewportPlaceholder webGLState={webGLState} />
             )}
+            {runtimeFailure?.kind !== 'context-loss' ? null : (
+              <div className="viewport-placeholder" role="alert">
+                <p className="eyebrow">WebGL 연결 오류</p>
+                <h2>장면 데이터는 안전합니다</h2>
+                <p>{runtimeFailure.message}</p>
+              </div>
+            )}
             <p
-              className={`webgl-status webgl-status--${webGLState}`}
+              className={`webgl-status webgl-status--${effectiveWebGLState}`}
               role="status"
-              data-webgl-state={webGLState}
+              data-webgl-state={effectiveWebGLState}
             >
-              {WEBGL_MESSAGES[webGLState]}
+              {WEBGL_MESSAGES[effectiveWebGLState]}
             </p>
           </section>
           <aside className="inspector-panel" aria-label="속성">

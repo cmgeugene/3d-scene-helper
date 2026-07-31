@@ -151,6 +151,10 @@ test('static offscreen export is viewport-resize deterministic within 0.1%', asy
   page,
 }) => {
   await openExportEditor(page);
+  await page.getByRole('button', { name: '로컬 저장' }).click();
+  await expect(page.locator('.status-bar')).toContainText(
+    '장면을 로컬에 저장했습니다.',
+  );
   const before = decodePng(
     (await downloadFrame(page, { preset: '1280x720' })).buffer,
   );
@@ -167,7 +171,7 @@ test('static offscreen export is viewport-resize deterministic within 0.1%', asy
   expect(mismatchRatio(before, after)).toBeLessThanOrEqual(0.001);
 });
 
-test('export reports context loss instead of downloading a successful black PNG', async ({
+test('an open export dialog closes when WebGL context is lost', async ({
   page,
 }) => {
   await openExportEditor(page);
@@ -191,12 +195,11 @@ test('export reports context loss instead of downloading a successful black PNG'
       extension.loseContext();
     });
 
-  const unexpectedDownload = page.waitForEvent('download', { timeout: 1_000 });
-  await dialog.getByRole('button', { name: 'PNG 내보내기' }).click();
-
-  await expect(dialog.getByRole('alert')).toContainText(/WebGL context.*손실/);
-  await expect(dialog).toBeVisible();
-  await expect(unexpectedDownload).rejects.toThrow();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('alert')).toContainText(/WebGL context.*손실/);
+  await expect(
+    page.getByRole('button', { name: 'PNG 내보내기' }),
+  ).toBeDisabled();
 });
 
 test('export dialog traps destructive editor shortcuts until it closes', async ({

@@ -38,7 +38,8 @@ select {
 
 button,
 select,
-input {
+input,
+textarea {
   border: 1px solid #334155;
   border-radius: 0.45rem;
   color: #e8edf5;
@@ -63,7 +64,8 @@ button:disabled {
 
 button:focus-visible,
 select:focus-visible,
-input:focus-visible {
+input:focus-visible,
+textarea:focus-visible {
   outline: 3px solid #7ca8ff;
   outline-offset: 2px;
 }

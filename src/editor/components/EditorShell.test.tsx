@@ -15,10 +15,19 @@ import { createEditorStore } from '../state/editorStore';
 import { EditorShell } from './EditorShell';
 
 const sceneViewportModuleLoaded = vi.hoisted(() => vi.fn());
+const sceneViewportFailure = vi.hoisted(() => ({
+  current: null as Error | null,
+}));
 
 vi.mock('../scene/SceneViewport', () => {
   sceneViewportModuleLoaded();
-  return { SceneViewport: () => null };
+  return {
+    SceneViewport: () => {
+      if (sceneViewportFailure.current !== null)
+        throw sceneViewportFailure.current;
+      return null;
+    },
+  };
 });
 
 function createTestStore() {
@@ -50,6 +59,7 @@ describe('EditorShell', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     sceneViewportModuleLoaded.mockClear();
+    sceneViewportFailure.current = null;
   });
 
   it('WebGL fallback에서는 viewport chunk를 불러오지 않는다', async () => {
@@ -67,6 +77,33 @@ describe('EditorShell', () => {
       ),
     ).toBeVisible();
     expect(sceneViewportModuleLoaded).not.toHaveBeenCalled();
+  });
+
+  it('viewport render 오류가 나도 serialized scene을 보존하고 복구 안내를 표시한다', async () => {
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const store = createTestStore();
+    store.getState().addObject({ kind: 'cube', name: 'Preserved cube' });
+    const preservedDocument = structuredClone(store.getState().document);
+    sceneViewportFailure.current = new Error('forced viewport failure');
+
+    render(<EditorShell store={store} webGLState="available" canvasEnabled />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '3D 뷰포트를 표시하지 못했습니다. 직렬화된 장면 데이터는 보존되었습니다.',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Preserved cube' }),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'JSON 내보내기' })).toBeEnabled();
+    expect(screen.getByRole('status')).toHaveAttribute(
+      'data-webgl-state',
+      'fallback',
+    );
+    expect(screen.getByRole('button', { name: 'PNG 내보내기' })).toBeDisabled();
+    expect(store.getState().document).toEqual(preservedDocument);
+    expect(consoleError).toHaveBeenCalled();
   });
 
   it('에셋, 뷰포트, 속성의 3열 편집 작업 영역을 표시한다', () => {
