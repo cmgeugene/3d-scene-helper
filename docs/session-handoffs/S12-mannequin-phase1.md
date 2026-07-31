@@ -207,3 +207,13 @@
 - 정면·측면·3/4 extreme-drag WebGL 검사에서 sideways knee hinge, hyperextension, limb inversion과 불가능한 shoulder/hip twist가 관찰되지 않았다.
 - 독립 review에서 geometry winding/shared ownership 및 anatomical antiparallel continuity/bounds 불일치를 발견해 RED → GREEN으로 수정했다.
 - 최종 anatomical/runtime closure review `deleg_9af52e81`: **APPROVED — 모든 Important가 해결됐고 새 Important/Critical 0건**.
+
+## PNG export quality follow-up — MSAA and supersampling
+
+- viewport는 Retina 환경에서 DPR 최대 `2`와 default framebuffer MSAA를 사용하지만, 기존 PNG `WebGLRenderTarget`은 `samples: 0`이라 같은 크기에서도 silhouette edge가 더 거칠게 보였다.
+- 모든 canonical output preset은 `2×` offscreen resolution에서 `4× MSAA`로 render/readback한 뒤, `imageSmoothingQuality = 'high'`인 exact-size output canvas로 downsample한다. PNG의 최종 width/height 계약은 바뀌지 않는다.
+- Three.js가 extension 없는 GPU에서도 multisampled framebuffer를 resolve하도록 render 직후 이전 render target으로 전환한 뒤 readback한다.
+- supersampled target은 최대 4K-equivalent `3840×2160` pixel budget을 넘지 않는다. 더 큰 custom 출력 또는 GPU dimension limit에서는 native `1×`로 fallback하며, budget을 넘는 target은 MSAA를 끄고 exact-size canvas 하나만 encode해 4096² 출력의 GPU/CPU peak를 제한한다.
+- Focused export unit: **21/21 passed**. Chromium actual-download export E2E: **8/8 passed**, 모든 preset exact dimensions, clean/reference isolation, helper exclusion 및 viewport-resize determinism 유지.
+- 전체 unit/component: **189/189 passed**. 전체 Chromium/WebGL E2E: **56/56 passed**.
+- Ordinary production build는 E2E-only diagnostics가 없음을 다시 확인했고, production-compatible export/pointer E2E **7/7 passed**. 단독 Full HD actual-download는 **2128ms**였다.

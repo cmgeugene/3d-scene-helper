@@ -10,6 +10,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
 import {
   calculateAspectLockedDimensions,
+  calculateExportSampleCount,
+  calculateExportRenderSize,
   createExportCamera,
   createPngFilename,
   exportFrame,
@@ -20,6 +22,31 @@ import {
 } from './exportFrame';
 
 describe('exportFrame pure output model', () => {
+  it('기본 preset은 2배 supersampling하고 대형 출력 또는 GPU dimension limit에서는 1배로 fallback한다', () => {
+    expect(calculateExportRenderSize(1920, 1080, 8192)).toEqual({
+      width: 3840,
+      height: 2160,
+      scale: 2,
+    });
+    expect(calculateExportRenderSize(1080, 1920, 8192)).toEqual({
+      width: 2160,
+      height: 3840,
+      scale: 2,
+    });
+    expect(calculateExportRenderSize(2048, 2048, 8192)).toEqual({
+      width: 2048,
+      height: 2048,
+      scale: 1,
+    });
+    expect(calculateExportRenderSize(1920, 1080, 2048)).toEqual({
+      width: 1920,
+      height: 1080,
+      scale: 1,
+    });
+    expect(calculateExportSampleCount(3840, 2160)).toBe(4);
+    expect(calculateExportSampleCount(4096, 4096)).toBe(0);
+  });
+
   it('canonical landscape, portrait, square, cinematic presets을 제공한다', () => {
     expect(
       OUTPUT_PRESETS.map(({ id, aspectRatioId, width, height }) => ({
@@ -238,6 +265,9 @@ function createRendererDouble(throwDuringReadback = false) {
   const setPixelRatio = vi.fn((value: number) => {
     pixelRatio = value;
   });
+  const setRenderTarget = vi.fn((value: unknown) => {
+    target = value;
+  });
   const render = vi.fn();
   const readRenderTargetPixels = vi.fn(
     (
@@ -266,9 +296,7 @@ function createRendererDouble(throwDuringReadback = false) {
     outputColorSpace: LinearSRGBColorSpace,
     toneMappingExposure: 0.75,
     getRenderTarget: () => target,
-    setRenderTarget: (value: unknown) => {
-      target = value;
-    },
+    setRenderTarget,
     getPixelRatio: () => pixelRatio,
     setPixelRatio,
     getViewport: (result: Vector4) => result.copy(viewport),
@@ -293,6 +321,7 @@ function createRendererDouble(throwDuringReadback = false) {
     originalTarget,
     render,
     readRenderTargetPixels,
+    setRenderTarget,
     setPixelRatio,
     setContextLost: (value: boolean) => {
       contextLost = value;
@@ -316,8 +345,11 @@ function createRendererDouble(throwDuringReadback = false) {
 function createCanvasDouble(blob = new Blob(['png'], { type: 'image/png' })) {
   const imageData = { data: new Uint8ClampedArray(64 * 64 * 4) };
   const context = {
-    createImageData: vi.fn(() => imageData),
+    createImageData: vi.fn((width: number, height: number) => ({
+      data: new Uint8ClampedArray(width * height * 4),
+    })),
     putImageData: vi.fn(),
+    drawImage: vi.fn(),
     beginPath: vi.fn(),
     moveTo: vi.fn(),
     lineTo: vi.fn(),
@@ -375,7 +407,12 @@ describe('exportFrame offscreen runtime', () => {
       dispose: vi.fn(),
     } as unknown as WebGLRenderTarget;
     const createRenderTarget = vi.fn(() => target);
-    const canvas = createCanvasDouble();
+    const source = createCanvasDouble();
+    const output = createCanvasDouble();
+    const createCanvas = vi
+      .fn<() => HTMLCanvasElement>()
+      .mockReturnValueOnce(source.canvas)
+      .mockReturnValueOnce(output.canvas);
     const result = await exportFrame(
       {
         renderer: runtime.renderer,
@@ -389,17 +426,25 @@ describe('exportFrame offscreen runtime', () => {
           motion: true,
         },
       },
-      { createRenderTarget, createCanvas: () => canvas.canvas },
+      { createRenderTarget, createCanvas },
     );
 
-    expect(result).toBe(canvas.blob);
-    expect(createRenderTarget).toHaveBeenCalledWith(64, 64);
+    expect(result).toBe(output.blob);
+    expect(createRenderTarget).toHaveBeenCalledWith(128, 128, 4);
     expect(runtime.setPixelRatio).toHaveBeenNthCalledWith(1, 1);
     expect(runtime.render).toHaveBeenCalledOnce();
     expect(runtime.readRenderTargetPixels).toHaveBeenCalledOnce();
-    expect(canvas.context.putImageData).toHaveBeenCalledOnce();
-    expect(canvas.context.stroke).toHaveBeenCalled();
-    expect(canvas.context.strokeRect).toHaveBeenCalledTimes(2);
+    expect(runtime.setRenderTarget).toHaveBeenNthCalledWith(1, target);
+    expect(runtime.setRenderTarget).toHaveBeenNthCalledWith(
+      2,
+      runtime.originalTarget,
+    );
+    expect(runtime.setRenderTarget.mock.invocationCallOrder[1]).toBeLessThan(
+      runtime.readRenderTargetPixels.mock.invocationCallOrder[0],
+    );
+    expect(source.context.putImageData).toHaveBeenCalledOnce();
+    expect(output.context.stroke).toHaveBeenCalled();
+    expect(output.context.strokeRect).toHaveBeenCalledTimes(2);
     expect(target.dispose).toHaveBeenCalledOnce();
     expect(runtime.readState()).toEqual({
       target: runtime.originalTarget,
@@ -410,8 +455,101 @@ describe('exportFrame offscreen runtime', () => {
       outputColorSpace: LinearSRGBColorSpace,
       toneMappingExposure: 0.75,
     });
-    expect(canvas.canvas.width).toBe(0);
-    expect(canvas.canvas.height).toBe(0);
+    expect(source.canvas.width).toBe(0);
+    expect(source.canvas.height).toBe(0);
+    expect(output.canvas.width).toBe(0);
+    expect(output.canvas.height).toBe(0);
+  });
+
+  it('2배 해상도로 render/readback한 뒤 요청한 정확한 PNG 크기로 downsample한다', async () => {
+    const runtime = createRendererDouble();
+    const target = {
+      texture: { colorSpace: LinearSRGBColorSpace },
+      dispose: vi.fn(),
+    } as unknown as WebGLRenderTarget;
+    const createRenderTarget = vi.fn(() => target);
+    const source = createCanvasDouble();
+    const output = createCanvasDouble();
+    const createCanvas = vi
+      .fn<() => HTMLCanvasElement>()
+      .mockReturnValueOnce(source.canvas)
+      .mockReturnValueOnce(output.canvas);
+
+    const result = await exportFrame(
+      {
+        renderer: runtime.renderer,
+        scene: new Scene(),
+        document: createExportDocument(),
+        guideVisibility: {
+          thirds: false,
+          center: false,
+          actionSafe: false,
+          titleSafe: false,
+          motion: false,
+        },
+      },
+      { createRenderTarget, createCanvas },
+    );
+
+    expect(result).toBe(output.blob);
+    expect(createRenderTarget).toHaveBeenCalledWith(128, 128, 4);
+    expect(runtime.readRenderTargetPixels).toHaveBeenCalledWith(
+      target,
+      0,
+      0,
+      128,
+      128,
+      expect.any(Uint8Array),
+    );
+    expect(source.context.createImageData).toHaveBeenCalledWith(128, 128);
+    expect(output.context.drawImage).toHaveBeenCalledWith(
+      source.canvas,
+      0,
+      0,
+      64,
+      64,
+    );
+    expect(output.canvas.toBlob).toHaveBeenCalledOnce();
+    expect(source.canvas.remove).toHaveBeenCalledOnce();
+    expect(output.canvas.remove).toHaveBeenCalledOnce();
+  });
+
+  it('1배 fallback은 두 번째 full-size canvas 없이 source를 바로 encode한다', async () => {
+    const runtime = createRendererDouble();
+    runtime.setRenderLimits(64, 64);
+    const target = {
+      texture: { colorSpace: LinearSRGBColorSpace },
+      dispose: vi.fn(),
+    } as unknown as WebGLRenderTarget;
+    const createRenderTarget = vi.fn(() => target);
+    const source = createCanvasDouble();
+    const createCanvas = vi
+      .fn<() => HTMLCanvasElement>()
+      .mockReturnValueOnce(source.canvas);
+
+    const result = await exportFrame(
+      {
+        renderer: runtime.renderer,
+        scene: new Scene(),
+        document: createExportDocument(),
+        guideVisibility: {
+          thirds: false,
+          center: false,
+          actionSafe: false,
+          titleSafe: false,
+          motion: false,
+        },
+      },
+      { createRenderTarget, createCanvas },
+    );
+
+    expect(result).toBe(source.blob);
+    expect(createRenderTarget).toHaveBeenCalledWith(64, 64, 4);
+    expect(createCanvas).toHaveBeenCalledOnce();
+    expect(source.context.putImageData).toHaveBeenCalledOnce();
+    expect(source.context.drawImage).not.toHaveBeenCalled();
+    expect(source.canvas.toBlob).toHaveBeenCalledOnce();
+    expect(source.canvas.remove).toHaveBeenCalledOnce();
   });
 
   it('mid-capture readback 예외에서도 renderer state를 복구하고 GPU target을 dispose한다', async () => {

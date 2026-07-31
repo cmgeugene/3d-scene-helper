@@ -56,8 +56,39 @@ interface FrameExportRuntimeRequest extends FrameExportRequest {
 }
 
 interface ExportFrameDependencies {
-  createRenderTarget: (width: number, height: number) => WebGLRenderTarget;
+  createRenderTarget: (
+    width: number,
+    height: number,
+    samples: number,
+  ) => WebGLRenderTarget;
   createCanvas: () => HTMLCanvasElement;
+}
+
+const EXPORT_SUPERSAMPLE_SCALE = 2;
+const MAX_SUPERSAMPLED_RENDER_PIXELS = 3840 * 2160;
+
+export function calculateExportRenderSize(
+  width: number,
+  height: number,
+  maxRenderTargetSize: number,
+): { width: number; height: number; scale: 1 | 2 } {
+  const supersampledWidth = width * EXPORT_SUPERSAMPLE_SCALE;
+  const supersampledHeight = height * EXPORT_SUPERSAMPLE_SCALE;
+  const canSupersample =
+    supersampledWidth <= maxRenderTargetSize &&
+    supersampledHeight <= maxRenderTargetSize &&
+    supersampledWidth * supersampledHeight <= MAX_SUPERSAMPLED_RENDER_PIXELS;
+
+  return canSupersample
+    ? { width: supersampledWidth, height: supersampledHeight, scale: 2 }
+    : { width, height, scale: 1 };
+}
+
+export function calculateExportSampleCount(
+  width: number,
+  height: number,
+): 0 | 4 {
+  return width * height <= MAX_SUPERSAMPLED_RENDER_PIXELS ? 4 : 0;
 }
 
 export function shouldIncludeMotionGuides(
@@ -248,7 +279,7 @@ function assertRendererCanExport(
     );
   }
 
-  return context;
+  return { context, maxRenderTargetSize };
 }
 
 function drawCompositionGuides(
@@ -324,13 +355,13 @@ function encodeCanvasPng(canvas: HTMLCanvasElement): Promise<Blob> {
 }
 
 const DEFAULT_EXPORT_DEPENDENCIES: ExportFrameDependencies = {
-  createRenderTarget: (width, height) =>
+  createRenderTarget: (width, height, samples) =>
     new WebGLRenderTarget(width, height, {
       format: RGBAFormat,
       type: UnsignedByteType,
       depthBuffer: true,
       stencilBuffer: false,
-      samples: 0,
+      samples,
     }),
   createCanvas: () => document.createElement('canvas'),
 };
@@ -348,14 +379,30 @@ export async function exportFrame(
     document.output.mode,
     guideVisibility,
   );
-  const context = assertRendererCanExport(renderer, width, height);
+  const { context, maxRenderTargetSize } = assertRendererCanExport(
+    renderer,
+    width,
+    height,
+  );
+  const renderSize = calculateExportRenderSize(
+    width,
+    height,
+    maxRenderTargetSize,
+  );
+  const renderWidth = renderSize.width;
+  const renderHeight = renderSize.height;
+  const sampleCount = calculateExportSampleCount(renderWidth, renderHeight);
   const camera = createExportCamera(document, policy.layerMask);
   const pixels = (() => {
     let target: WebGLRenderTarget | null = null;
     try {
-      target = dependencies.createRenderTarget(width, height);
+      target = dependencies.createRenderTarget(
+        renderWidth,
+        renderHeight,
+        sampleCount,
+      );
       target.texture.colorSpace = SRGBColorSpace;
-      const targetPixels = new Uint8Array(width * height * 4);
+      const targetPixels = new Uint8Array(renderWidth * renderHeight * 4);
       const previousTarget = renderer.getRenderTarget();
       const previousPixelRatio = renderer.getPixelRatio();
       const previousViewport = renderer.getViewport(new Vector4());
@@ -369,16 +416,17 @@ export async function exportFrame(
         renderer.outputColorSpace = SRGBColorSpace;
         renderer.toneMappingExposure = document.lighting.exposure;
         renderer.setRenderTarget(target);
-        renderer.setViewport(new Vector4(0, 0, width, height));
-        renderer.setScissor(new Vector4(0, 0, width, height));
+        renderer.setViewport(new Vector4(0, 0, renderWidth, renderHeight));
+        renderer.setScissor(new Vector4(0, 0, renderWidth, renderHeight));
         renderer.setScissorTest(false);
         renderer.render(scene, camera);
+        renderer.setRenderTarget(previousTarget);
         renderer.readRenderTargetPixels(
           target,
           0,
           0,
-          width,
-          height,
+          renderWidth,
+          renderHeight,
           targetPixels,
         );
         if (context.isContextLost()) {
@@ -402,23 +450,55 @@ export async function exportFrame(
     }
   })();
 
-  const canvas = dependencies.createCanvas();
+  const sourceCanvas = dependencies.createCanvas();
+  let outputCanvas: HTMLCanvasElement | null = null;
   try {
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (context === null) {
+    sourceCanvas.width = renderWidth;
+    sourceCanvas.height = renderHeight;
+    const sourceContext = sourceCanvas.getContext('2d');
+    if (sourceContext === null) {
       throw new Error('PNG 인코딩을 위한 2D Canvas를 만들지 못했습니다.');
     }
-    const imageData = context.createImageData(width, height);
-    imageData.data.set(flipPixelRows(pixels, width, height));
-    context.putImageData(imageData, 0, 0);
-    drawCompositionGuides(context, width, height, policy.compositionGuides);
-    return await encodeCanvasPng(canvas);
+    const imageData = sourceContext.createImageData(renderWidth, renderHeight);
+    imageData.data.set(flipPixelRows(pixels, renderWidth, renderHeight));
+    sourceContext.putImageData(imageData, 0, 0);
+
+    if (renderSize.scale === 1) {
+      drawCompositionGuides(
+        sourceContext,
+        width,
+        height,
+        policy.compositionGuides,
+      );
+      return await encodeCanvasPng(sourceCanvas);
+    }
+
+    outputCanvas = dependencies.createCanvas();
+    outputCanvas.width = width;
+    outputCanvas.height = height;
+    const outputContext = outputCanvas.getContext('2d');
+    if (outputContext === null) {
+      throw new Error('PNG 인코딩을 위한 2D Canvas를 만들지 못했습니다.');
+    }
+    outputContext.imageSmoothingEnabled = true;
+    outputContext.imageSmoothingQuality = 'high';
+    outputContext.drawImage(sourceCanvas, 0, 0, width, height);
+    drawCompositionGuides(
+      outputContext,
+      width,
+      height,
+      policy.compositionGuides,
+    );
+    return await encodeCanvasPng(outputCanvas);
   } finally {
-    canvas.width = 0;
-    canvas.height = 0;
-    canvas.remove();
+    sourceCanvas.width = 0;
+    sourceCanvas.height = 0;
+    sourceCanvas.remove();
+    if (outputCanvas !== null) {
+      outputCanvas.width = 0;
+      outputCanvas.height = 0;
+      outputCanvas.remove();
+    }
   }
 }
 
