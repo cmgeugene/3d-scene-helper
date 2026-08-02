@@ -67,6 +67,8 @@ export type MannequinTool = 'object' | 'ik';
 
 export interface EditorStoreOptions {
   initialDocument: SceneDocument;
+  createNewDocument?: () => SceneDocument;
+  createStarterDocument?: () => SceneDocument;
   idFactory: () => string;
 }
 
@@ -105,6 +107,7 @@ export interface EditorStore {
   commitTransform: (transform: SceneObject['transform']) => void;
   duplicateObject: (id: string) => string | null;
   deleteObject: (id: string) => void;
+  newScene: () => void;
   resetScene: () => void;
   commitCamera: (camera: SceneDocument['outputCamera']) => void;
   setCameraLens: (focalLengthMm: LensPreset['focalLengthMm']) => void;
@@ -143,6 +146,23 @@ export function createEditorStore(options: EditorStoreOptions) {
   let persistedDocument = structuredClone(document);
   const documentsEqual = (left: SceneDocument, right: SceneDocument) =>
     JSON.stringify(left) === JSON.stringify(right);
+  const createResetState = (nextDocument: SceneDocument) => ({
+    document: nextDocument,
+    history: createDocumentHistory<SceneDocument, DocumentMutationKind>(),
+    canUndo: false,
+    canRedo: false,
+    selectedObjectId: null,
+    hoveredObjectId: null,
+    inProgressTransform: null,
+    inProgressMannequinPose: null,
+    navigation: {
+      position: structuredClone(nextDocument.outputCamera.position),
+      target: structuredClone(nextDocument.outputCamera.target),
+      isInteracting: false,
+    },
+    isDirty: !documentsEqual(nextDocument, persistedDocument),
+    statusMessage: null,
+  });
 
   const recordMutation = (
     state: EditorStore,
@@ -453,27 +473,17 @@ export function createEditorStore(options: EditorStoreOptions) {
         };
       });
     },
+    newScene: () => {
+      const nextDocument = sceneDocumentSchema.parse(
+        options.createNewDocument?.() ?? structuredClone(initialDocument),
+      );
+      set(createResetState(nextDocument));
+    },
     resetScene: () => {
-      set(() => {
-        const nextDocument = structuredClone(initialDocument);
-        return {
-          document: nextDocument,
-          history: createDocumentHistory(),
-          canUndo: false,
-          canRedo: false,
-          selectedObjectId: null,
-          hoveredObjectId: null,
-          inProgressTransform: null,
-          inProgressMannequinPose: null,
-          navigation: {
-            position: structuredClone(initialDocument.outputCamera.position),
-            target: structuredClone(initialDocument.outputCamera.target),
-            isInteracting: false,
-          },
-          isDirty: !documentsEqual(nextDocument, persistedDocument),
-          statusMessage: null,
-        };
-      });
+      const nextDocument = sceneDocumentSchema.parse(
+        options.createStarterDocument?.() ?? structuredClone(initialDocument),
+      );
+      set(createResetState(nextDocument));
     },
     commitCamera: (camera) => {
       set((state) => {

@@ -11,6 +11,14 @@ function createStarterDocument(): SceneDocument {
   });
 }
 
+function createNewDocument(): SceneDocument {
+  return {
+    ...createStarterDocument(),
+    id: 'new-scene',
+    objects: [],
+  };
+}
+
 export function createAppEditorStore(
   storage: Storage,
   idFactory: () => string = () => globalThis.crypto.randomUUID(),
@@ -26,7 +34,12 @@ export function createAppEditorStore(
     }`;
   }
 
-  const store = createEditorStore({ initialDocument, idFactory });
+  const store = createEditorStore({
+    initialDocument,
+    createNewDocument,
+    createStarterDocument,
+    idFactory,
+  });
   if (restoreError !== null) store.getState().setStatusMessage(restoreError);
   return store;
 }

@@ -2,7 +2,10 @@ import { act, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AUTOSAVE_DEBOUNCE_MS, SCENE_STORAGE_KEY } from '../editor/constants';
 import { encodeSceneDocument } from '../editor/persistence/sceneCodec';
-import { createStarterSceneDocument } from '../editor/persistence/sceneSchema';
+import {
+  createSceneObject,
+  createStarterSceneDocument,
+} from '../editor/persistence/sceneSchema';
 import { App } from './App';
 import { createAppEditorStore } from './createAppEditorStore';
 
@@ -92,6 +95,58 @@ describe('App', () => {
       /자동 저장 장면을 복원하지 못했습니다/,
     );
     expect(invalidStorage.getItem(SCENE_STORAGE_KEY)).toBe(malformed);
+  });
+
+  it('복원된 autosave를 새 장면과 기본 장면 초기화 기준으로 재사용하지 않는다', () => {
+    const runReset = (
+      buttonName: '새 장면' | '기본 장면으로 초기화',
+    ) => {
+      const saved = createStarterSceneDocument({
+        documentId: 'saved-scene',
+        floorId: 'saved-floor',
+        mannequinId: 'saved-mannequin',
+      });
+      saved.objects.push(createSceneObject('saved-cube', { kind: 'cube' }));
+      const savedJson = encodeSceneDocument(saved);
+      const storage = createMemoryStorage({ [SCENE_STORAGE_KEY]: savedJson });
+      const store = createAppEditorStore(storage, () => 'unsaved-sphere');
+      store.getState().selectObject('saved-cube');
+      store.getState().setHoveredObject('saved-cube');
+      store.getState().beginTransform();
+      store.getState().addObject({ kind: 'sphere' });
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const view = render(
+        <App canvasEnabled={false} store={store} storage={storage} />,
+      );
+
+      act(() => screen.getByRole('button', { name: buttonName }).click());
+
+      const state = store.getState();
+      expect(confirm).toHaveBeenCalledOnce();
+      expect(state.document.objects.some(({ kind }) => kind === 'cube')).toBe(
+        false,
+      );
+      expect(state).toMatchObject({
+        history: { past: [], future: [] },
+        canUndo: false,
+        canRedo: false,
+        selectedObjectId: null,
+        hoveredObjectId: null,
+        inProgressTransform: null,
+        inProgressMannequinPose: null,
+        isDirty: true,
+      });
+      expect(storage.getItem(SCENE_STORAGE_KEY)).toBe(savedJson);
+      view.unmount();
+      confirm.mockRestore();
+      return state.document.objects.map(({ kind }) => kind);
+    };
+
+    expect(runReset('새 장면')).toEqual([]);
+    expect(runReset('기본 장면으로 초기화')).toEqual([
+      'floor',
+      'mannequin',
+    ]);
   });
 
   it('document mutation을 debounce autosave하고 persisted 전 dirty 상태에서만 beforeunload를 막는다', () => {

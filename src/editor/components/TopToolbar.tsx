@@ -69,6 +69,7 @@ export function TopToolbar({
   const guideVisibility = useStore(store, (state) => state.guideVisibility);
   const canUndo = useStore(store, (state) => state.canUndo);
   const canRedo = useStore(store, (state) => state.canRedo);
+  const newScene = useStore(store, (state) => state.newScene);
   const resetScene = useStore(store, (state) => state.resetScene);
   const setOutput = useStore(store, (state) => state.setOutput);
   const setGuideVisibility = useStore(
@@ -93,7 +94,7 @@ export function TopToolbar({
           <button
             type="button"
             onClick={() => {
-              if (confirmDocumentReplacement()) resetScene();
+              if (confirmDocumentReplacement()) newScene();
             }}
           >
             새 장면

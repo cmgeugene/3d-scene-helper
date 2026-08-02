@@ -71,6 +71,70 @@ test('persistence refresh restores the latest autosaved scene', async ({
   ).toBe(serializedBeforeReload);
 });
 
+test('restored autosave is not reused by new scene or starter reset', async ({
+  page,
+}) => {
+  await openPersistence(page);
+  await page.getByRole('button', { name: '큐브 추가' }).click();
+  await waitForAutosave(page);
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: 'Cube', exact: true }),
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: '새 장면' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Cube', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Floor', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Mannequin', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '실행 취소' })).toBeDisabled();
+  await waitForAutosave(page);
+
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: 'Cube', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Floor', exact: true }),
+  ).toHaveCount(0);
+
+  await page.getByRole('button', { name: '큐브 추가' }).click();
+  await waitForAutosave(page);
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: 'Cube', exact: true }),
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: '기본 장면으로 초기화' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Cube', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Floor', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Mannequin', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: '실행 취소' })).toBeDisabled();
+  await waitForAutosave(page);
+
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: 'Cube', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Floor', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Mannequin', exact: true }),
+  ).toBeVisible();
+});
+
 test('persistence malformed import preserves the live scene and valid autosave', async ({
   page,
 }) => {
