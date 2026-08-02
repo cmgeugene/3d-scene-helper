@@ -68,7 +68,7 @@ async function waitForCanvasChange(canvas: Locator, previousFrame: Buffer) {
   return changedFrame;
 }
 
-test('viewport Canvas가 실제 WebGL 장면과 bounded shadow renderer를 시작한다', async ({
+test('viewport Canvas가 전역 바닥 그리드 없이 실제 WebGL 장면과 bounded shadow renderer를 시작한다', async ({
   page,
 }) => {
   const rendererWarnings: string[] = [];
@@ -83,7 +83,7 @@ test('viewport Canvas가 실제 WebGL 장면과 bounded shadow renderer를 시�
   const canvas = await openViewport(page);
   await expect(canvas).toHaveAttribute('data-color-space', 'srgb');
   await expect(canvas).toHaveAttribute('data-shadow-bounds', '6m');
-  await expect(canvas).toHaveAttribute('data-grid-size', '20m');
+  await expect(canvas).not.toHaveAttribute('data-grid-size');
   await expect(canvas).toHaveAttribute('data-axes-origin', '0,0.025,0');
 
   const renderedWithShadows = await canvas.screenshot();

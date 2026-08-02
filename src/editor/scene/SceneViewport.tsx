@@ -75,12 +75,6 @@ function EditorHelpers() {
 
   return (
     <group ref={helpers} name="EditorHelpers.layer1">
-      <gridHelper
-        name="EditorGrid.layer1"
-        args={[20, 40, '#769ad0', '#405576']}
-        position={[0, 0.02, 0]}
-        raycast={() => undefined}
-      />
       <axesHelper
         name="EditorAxes.layer1"
         args={[1]}
@@ -336,7 +330,6 @@ export function SceneViewport({
         aria-label="3D 장면 캔버스"
         data-color-space="srgb"
         data-shadow-bounds={`${SHADOW_BOUNDS_M}m`}
-        data-grid-size="20m"
         data-axes-origin="0,0.025,0"
         shadows="percentage"
         dpr={[1, 2]}
