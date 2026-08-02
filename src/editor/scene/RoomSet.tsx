@@ -1,10 +1,12 @@
 import { useThree } from '@react-three/fiber';
 import { useLayoutEffect } from 'react';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
+import { SurfaceGrid } from './SurfaceGrid';
 
 interface RoomSetProps {
   color: string;
   dimensions: { x: number; y: number; z: number };
+  parentScale: Readonly<{ x: number; z: number }>;
   castShadow: boolean;
   receiveShadow: boolean;
 }
@@ -35,6 +37,7 @@ function clearRoomSetDiagnostics(runtimeCanvas: HTMLCanvasElement) {
 export function RoomSet({
   color,
   dimensions,
+  parentScale,
   castShadow,
   receiveShadow,
 }: RoomSetProps) {
@@ -69,6 +72,14 @@ export function RoomSet({
         <boxGeometry args={[dimensions.x, thickness, dimensions.z]} />
         {material}
       </mesh>
+      <SurfaceGrid
+        color={color}
+        depth={dimensions.z}
+        kind="room"
+        parentScale={parentScale}
+        positionY={-dimensions.y / 2 + thickness + 0.002}
+        width={dimensions.x}
+      />
       <mesh
         name="RoomSet.back-wall"
         castShadow={castShadow}

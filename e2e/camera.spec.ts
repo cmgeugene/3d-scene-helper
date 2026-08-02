@@ -146,6 +146,100 @@ test('full viewport remains interactive while a dimmed output gate marks the PNG
   expect(runtime?.zoom).toBeLessThan(1);
 });
 
+test('mouse wheel dollies the output camera without changing its lens or target', async ({
+  page,
+}) => {
+  const runtimeCanvas = await openCameraEditor(page);
+  const cameraBefore = await page.evaluate(() =>
+    structuredClone(
+      (globalThis as unknown as CameraBridge).__I2V_EDITOR_STORE__?.getState()
+        .document.outputCamera,
+    ),
+  );
+  expect(cameraBefore).toBeDefined();
+  if (cameraBefore === undefined) {
+    throw new Error('Wheel dolly 전 document camera가 없습니다.');
+  }
+
+  await page.evaluate(() => {
+    const global = globalThis as unknown as CameraBridge;
+    const store = global.__I2V_EDITOR_STORE__;
+    if (store === undefined) throw new Error('E2E editor store가 없습니다.');
+    global.__CAMERA_DOCUMENT_CHANGES__ = 0;
+    store.subscribe((state, previous) => {
+      if (state.document.outputCamera !== previous.document.outputCamera) {
+        global.__CAMERA_DOCUMENT_CHANGES__ =
+          (global.__CAMERA_DOCUMENT_CHANGES__ ?? 0) + 1;
+      }
+    });
+  });
+
+  const canvasBox = await runtimeCanvas.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  if (canvasBox === null) throw new Error('Canvas bounds가 없습니다.');
+  await page.mouse.move(
+    canvasBox.x + canvasBox.width / 2,
+    canvasBox.y + canvasBox.height / 2,
+  );
+  await page.mouse.wheel(0, -300);
+
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        structuredClone(
+          (
+            globalThis as unknown as CameraBridge
+          ).__I2V_EDITOR_STORE__?.getState().document.outputCamera,
+        ),
+      ),
+    )
+    .not.toEqual(cameraBefore);
+  const cameraAfter = await page.evaluate(() =>
+    structuredClone(
+      (globalThis as unknown as CameraBridge).__I2V_EDITOR_STORE__?.getState()
+        .document.outputCamera,
+    ),
+  );
+  expect(cameraAfter).toBeDefined();
+  if (cameraAfter === undefined) {
+    throw new Error('Wheel dolly 후 document camera가 없습니다.');
+  }
+
+  const distanceToTarget = (camera: typeof cameraBefore) =>
+    Math.hypot(
+      camera.position.x - camera.target.x,
+      camera.position.y - camera.target.y,
+      camera.position.z - camera.target.z,
+    );
+  expect(distanceToTarget(cameraAfter)).toBeLessThan(
+    distanceToTarget(cameraBefore),
+  );
+  expect(cameraAfter.target).toEqual(cameraBefore.target);
+  expect(cameraAfter.focalLengthMm).toBe(cameraBefore.focalLengthMm);
+  expect(cameraAfter.rollDeg).toBe(cameraBefore.rollDeg);
+  expect(
+    await page.evaluate(
+      () => (globalThis as unknown as CameraBridge).__CAMERA_DOCUMENT_CHANGES__,
+    ),
+  ).toBe(1);
+
+  await expect
+    .poll(async () => {
+      const runtime = await readRuntimeCamera(runtimeCanvas);
+      return (
+        runtime !== null &&
+        runtime.focalLengthMm === cameraAfter.focalLengthMm &&
+        (['x', 'y', 'z'] as const).every(
+          (axis) =>
+            Math.abs(runtime.position[axis] - cameraAfter.position[axis]) <
+              1e-5 &&
+            Math.abs(runtime.target[axis] - cameraAfter.target[axis]) < 1e-5,
+        )
+      );
+    })
+    .toBe(true);
+});
+
 test('camera lens, shot actions, selected helper, and no-selection status use explicit commits', async ({
   page,
 }) => {

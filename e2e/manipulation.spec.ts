@@ -184,6 +184,42 @@ test('manipulation attaches TransformControls to selected root and switches W/E/
   await expect(canvas).toHaveAttribute('data-transform-mode', 'translate');
 });
 
+test('Room Set scale preview expands grid coverage without scaling its 0.5m cells', async ({
+  page,
+}) => {
+  const canvas = await openManipulation(page);
+  await page.getByRole('button', { name: '방 세트 추가' }).click();
+  await expect(canvas).toHaveAttribute('data-room-grid-line-count', '18');
+  await page.keyboard.press('r');
+
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) return;
+  const xAxis = await findGizmoAxis(page, canvas, 'X');
+  const origin = JSON.parse(
+    (await canvas.getAttribute('data-gizmo-origin')) ?? 'null',
+  ) as { x: number; y: number };
+  const initialLineCount = Number(
+    await canvas.getAttribute('data-room-grid-line-count'),
+  );
+
+  await page.mouse.move(box.x + origin.x + xAxis.x, box.y + origin.y + xAxis.y);
+  await page.mouse.down();
+  await page.mouse.move(
+    box.x + origin.x + xAxis.x + 80,
+    box.y + origin.y + xAxis.y,
+    { steps: 12 },
+  );
+
+  await expect(canvas).toHaveAttribute('data-transform-dragging', 'true');
+  await expect
+    .poll(async () =>
+      Number(await canvas.getAttribute('data-room-grid-line-count')),
+    )
+    .toBeGreaterThan(initialLineCount);
+  await page.mouse.up();
+});
+
 test('manipulation gizmo drag mutates runtime only, disables orbit, then commits once', async ({
   page,
 }) => {

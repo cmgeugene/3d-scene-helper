@@ -91,7 +91,7 @@ export function EditorNavigation({ store, enabled }: EditorNavigationProps) {
     const controls = new OrbitControls(camera, domElement);
     controlsRef.current = controls;
     controls.enableDamping = false;
-    controls.enableZoom = false;
+    controls.enableZoom = true;
     controls.screenSpacePanning = true;
     controls.target.set(
       cameraData.target.x,

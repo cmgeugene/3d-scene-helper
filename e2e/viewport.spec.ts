@@ -109,18 +109,28 @@ test('viewport 방 세트는 바닥과 두 벽을 렌더링하고 천장·앞·�
   page,
 }) => {
   const canvas = await openViewport(page);
+  const runtimeCanvas = page.locator('canvas[data-engine]');
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor',
+  );
   await page.getByRole('button', { name: 'Floor', exact: true }).click();
   const beforeRoom = await canvas.screenshot();
 
   await page.getByRole('button', { name: '방 세트 추가' }).click();
   await page.getByRole('button', { name: 'Floor', exact: true }).click();
 
-  const runtimeCanvas = page.locator(
-    'canvas[data-room-set-parts="floor,back-wall,left-wall"]',
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-room-set-parts',
+    'floor,back-wall,left-wall',
   );
   await expect(runtimeCanvas).toHaveAttribute(
     'data-room-set-openings',
     'ceiling,front,right',
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor,room',
   );
   await waitForCanvasChange(canvas, beforeRoom);
   await expect(

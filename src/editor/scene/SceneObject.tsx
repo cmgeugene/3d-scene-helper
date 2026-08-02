@@ -13,6 +13,7 @@ import {
   type MannequinIKBinding,
 } from './MannequinIKControls';
 import { RoomSet } from './RoomSet';
+import { SurfaceGrid } from './SurfaceGrid';
 import { getSceneObjectModel } from './sceneObjectModel';
 
 interface SceneObjectProps {
@@ -49,13 +50,29 @@ function Primitive({
   );
 
   switch (kind) {
-    case 'floor':
     case 'cube':
       return (
         <mesh castShadow={castShadow} receiveShadow={receiveShadow}>
           <boxGeometry args={[dimensions.x, dimensions.y, dimensions.z]} />
           {material}
         </mesh>
+      );
+    case 'floor':
+      return (
+        <>
+          <mesh castShadow={castShadow} receiveShadow={receiveShadow}>
+            <boxGeometry args={[dimensions.x, dimensions.y, dimensions.z]} />
+            {material}
+          </mesh>
+          <SurfaceGrid
+            color={object.color}
+            depth={dimensions.z}
+            kind="floor"
+            parentScale={object.transform.scale}
+            positionY={dimensions.y / 2 + 0.002}
+            width={dimensions.x}
+          />
+        </>
       );
     case 'sphere':
       return (
@@ -117,6 +134,7 @@ function Primitive({
         <RoomSet
           color={object.color}
           dimensions={dimensions}
+          parentScale={object.transform.scale}
           castShadow={castShadow}
           receiveShadow={receiveShadow}
         />

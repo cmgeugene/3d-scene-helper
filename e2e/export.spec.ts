@@ -65,6 +65,20 @@ function mismatchRatio(left: PNG, right: PNG) {
   );
 }
 
+function changedPixelRatio(left: PNG, right: PNG, minimumChannelDelta = 8) {
+  expect([right.width, right.height]).toEqual([left.width, left.height]);
+  let changed = 0;
+  for (let index = 0; index < left.data.length; index += 4) {
+    const channelDelta = Math.max(
+      Math.abs(left.data[index] - right.data[index]),
+      Math.abs(left.data[index + 1] - right.data[index + 1]),
+      Math.abs(left.data[index + 2] - right.data[index + 2]),
+    );
+    if (channelDelta >= minimumChannelDelta) changed += 1;
+  }
+  return changed / (left.width * left.height);
+}
+
 function readablePixelRatio(image: PNG) {
   let readable = 0;
   for (let index = 0; index < image.data.length; index += 4) {
@@ -243,6 +257,63 @@ test('front/rear asymmetric mannequin cues remain pixel-readable in both PNG mod
   expect(frontCuePixelCount(frontReference)).toBeGreaterThan(
     frontCuePixelCount(rearReference) + 80,
   );
+});
+
+test('surface grid remains visible in clean PNG exports', async ({ page }) => {
+  await openExportEditor(page);
+  const runtimeCanvas = page.locator('canvas[data-engine]');
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor',
+  );
+
+  await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState();
+    if (state === undefined) throw new Error('E2E editor store가 없습니다.');
+    const floor = state.document.objects.find(({ kind }) => kind === 'floor');
+    if (floor === undefined) throw new Error('Floor를 찾지 못했습니다.');
+    for (const object of state.document.objects) {
+      if (object.id !== floor.id) state.setObjectVisibility(object.id, false);
+    }
+    state.setObjectColor(floor.id, '#d8d8d8');
+    state.setLighting({
+      ...state.document.lighting,
+      shadows: { ...state.document.lighting.shadows, enabled: false },
+    });
+    state.commitCamera({
+      position: { x: 4, y: 7, z: 5 },
+      target: { x: 0, y: 0, z: 0 },
+      focalLengthMm: 50,
+      rollDeg: 0,
+    });
+  });
+
+  const withGrid = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+
+  await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState();
+    if (state === undefined) throw new Error('E2E editor store가 없습니다.');
+    const document = structuredClone(state.document);
+    const floor = document.objects.find(({ kind }) => kind === 'floor');
+    if (floor === undefined) throw new Error('Floor를 찾지 못했습니다.');
+    floor.kind = 'cube';
+    (
+      state as unknown as {
+        replaceDocument: (
+          nextDocument: typeof document,
+          persisted: boolean,
+        ) => void;
+      }
+    ).replaceDocument(document, false);
+  });
+  await expect(runtimeCanvas).not.toHaveAttribute('data-surface-grid-kinds');
+  const withoutGrid = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+
+  expect(changedPixelRatio(withGrid, withoutGrid)).toBeGreaterThan(0.008);
 });
 
 test('room set transform persists and changes the clean exported frame', async ({
