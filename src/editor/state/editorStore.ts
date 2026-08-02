@@ -15,10 +15,8 @@ import {
 } from '../mannequin/mannequinRig';
 import {
   CAMERA_SHOT_PRESETS,
-  CAMERA_VIEW_PRESETS,
   LENS_PRESETS,
   type CameraShotPreset,
-  type CameraViewPreset,
   type LensPreset,
 } from '../presets/cameras';
 import {
@@ -28,7 +26,6 @@ import {
 } from '../presets/lighting';
 import {
   computeCameraShot,
-  computeCameraView,
   computeFrameSelectedCamera,
   computeLookAtSelectedCamera,
 } from '../scene/cameraMath';
@@ -112,7 +109,6 @@ export interface EditorStore {
   commitCamera: (camera: SceneDocument['outputCamera']) => void;
   setCameraLens: (focalLengthMm: LensPreset['focalLengthMm']) => void;
   applyCameraShot: (presetId: CameraShotPreset['id']) => void;
-  applyCameraView: (presetId: CameraViewPreset['id']) => void;
   frameSelected: () => void;
   lookAtSelected: () => void;
   applyLightingPreset: (presetId: LightingPresetId) => void;
@@ -530,32 +526,6 @@ export function createEditorStore(options: EditorStoreOptions) {
       );
       get().commitCamera(camera);
       set({ statusMessage: `${preset.label} 샷을 적용했습니다.` });
-    },
-    applyCameraView: (presetId) => {
-      const preset = CAMERA_VIEW_PRESETS.find(({ id }) => id === presetId);
-      if (preset === undefined) return;
-      const state = get();
-      const selected = state.document.objects.find(
-        ({ id }) => id === state.selectedObjectId,
-      );
-      const fallback = state.document.objects.find(
-        ({ kind, visible }) => kind === 'mannequin' && visible,
-      );
-      const subject = selected ?? fallback;
-      if (subject === undefined) {
-        set({ statusMessage: '방향 뷰를 적용할 오브젝트가 없습니다.' });
-        return;
-      }
-      get().commitCamera(
-        computeCameraView(
-          getSceneObjectBounds(subject),
-          state.document.outputCamera,
-          ASPECT_RATIO_VALUES[state.document.output.aspectRatioId],
-          preset,
-          subject.transform.rotationDeg,
-        ),
-      );
-      set({ statusMessage: `${preset.label} 방향 뷰를 적용했습니다.` });
     },
     frameSelected: () => {
       const state = get();

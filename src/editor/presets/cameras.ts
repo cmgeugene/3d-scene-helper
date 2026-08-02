@@ -20,18 +20,6 @@ export interface CameraShotPreset {
   };
 }
 
-export interface CameraViewPreset {
-  id:
-    | 'front'
-    | 'rear'
-    | 'left'
-    | 'right'
-    | 'front-three-quarter'
-    | 'rear-three-quarter';
-  label: string;
-  cameraDirection: { x: number; y: 0; z: number };
-}
-
 export const LENS_PRESETS = [
   { focalLengthMm: 18, label: '18mm' },
   { focalLengthMm: 24, label: '24mm' },
@@ -102,40 +90,3 @@ export const CAMERA_SHOT_PRESETS = [
     },
   },
 ] as const satisfies readonly CameraShotPreset[];
-
-/**
- * Mannequin local forward is -Z. A front camera therefore sits on the
- * subject's -Z side and looks toward +Z.
- */
-export const CAMERA_VIEW_PRESETS = [
-  {
-    id: 'front',
-    label: '정면',
-    cameraDirection: { x: 0, y: 0, z: -1 },
-  },
-  {
-    id: 'rear',
-    label: '후면',
-    cameraDirection: { x: 0, y: 0, z: 1 },
-  },
-  {
-    id: 'left',
-    label: '좌측',
-    cameraDirection: { x: -1, y: 0, z: 0 },
-  },
-  {
-    id: 'right',
-    label: '우측',
-    cameraDirection: { x: 1, y: 0, z: 0 },
-  },
-  {
-    id: 'front-three-quarter',
-    label: '3/4 정면',
-    cameraDirection: { x: 1, y: 0, z: -1 },
-  },
-  {
-    id: 'rear-three-quarter',
-    label: '3/4 후면',
-    cameraDirection: { x: -1, y: 0, z: 1 },
-  },
-] as const satisfies readonly CameraViewPreset[];

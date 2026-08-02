@@ -46,8 +46,6 @@ test('ordinary production build accepts a real pointer drag on the visible hand 
   );
   const canvas = page.getByRole('img', { name: '3D 장면 캔버스' });
   await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.getByRole('button', { name: 'T 포즈' }).click();
   await page.getByRole('button', { name: '손 IK' }).click();
@@ -70,7 +68,7 @@ test('ordinary production build accepts a real pointer drag on the visible hand 
 
   await page.mouse.move(box.x + center.x, box.y + center.y);
   await page.mouse.down();
-  await page.mouse.move(box.x + center.x - 56, box.y + center.y - 42, {
+  await page.mouse.move(box.x + center.x - 24, box.y + center.y + 18, {
     steps: 10,
   });
   await page.mouse.up();
@@ -81,7 +79,7 @@ test('ordinary production build accepts a real pointer drag on the visible hand 
       const moved = findHandleCenter(after, 'left');
       const fixed = findHandleCenter(after, 'right');
       return (
-        Math.hypot(moved.x - (center.x - 56), moved.y - (center.y - 42)) < 12 &&
+        Math.hypot(moved.x - (center.x - 24), moved.y - (center.y + 18)) < 12 &&
         Math.hypot(fixed.x - fixedCenter.x, fixed.y - fixedCenter.y) < 6
       );
     })
@@ -90,7 +88,7 @@ test('ordinary production build accepts a real pointer drag on the visible hand 
   const moved = findHandleCenter(after, 'left');
   const fixed = findHandleCenter(after, 'right');
   expect(
-    Math.hypot(moved.x - (center.x - 56), moved.y - (center.y - 42)),
+    Math.hypot(moved.x - (center.x - 24), moved.y - (center.y + 18)),
   ).toBeLessThan(12);
   expect(
     Math.hypot(fixed.x - fixedCenter.x, fixed.y - fixedCenter.y),

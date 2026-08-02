@@ -2,11 +2,7 @@ import { useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { SceneObject } from '../persistence/sceneSchema';
-import {
-  CAMERA_SHOT_PRESETS,
-  CAMERA_VIEW_PRESETS,
-  LENS_PRESETS,
-} from '../presets/cameras';
+import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
 import type { EditorStore } from '../state/editorStore';
 import type { EditorPanel } from '../types';
@@ -178,22 +174,6 @@ function CameraControls({ store }: InspectorProps) {
               type="button"
               onClick={() => {
                 store.getState().applyCameraShot(preset.id);
-              }}
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
-      </fieldset>
-      <fieldset>
-        <legend>방향 뷰</legend>
-        <div className="shot-grid">
-          {CAMERA_VIEW_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              onClick={() => {
-                store.getState().applyCameraView(preset.id);
               }}
             >
               {preset.label}

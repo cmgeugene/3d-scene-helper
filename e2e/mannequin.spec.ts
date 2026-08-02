@@ -30,27 +30,10 @@ function changedPixelCount(before: Buffer, after: Buffer) {
   return changed;
 }
 
-function facingCuePixelCount(screenshot: Buffer) {
-  const image = PNG.sync.read(screenshot);
-  let count = 0;
-  for (let index = 0; index < image.data.length; index += 4) {
-    if (
-      image.data[index] > 185 &&
-      image.data[index + 1] > 215 &&
-      image.data[index + 2] > 225
-    ) {
-      count += 1;
-    }
-  }
-  return count;
-}
-
 test('articulated mannequin hierarchy applies pose controls to actual WebGL pixels', async ({
   page,
 }) => {
   const { canvas, runtimeCanvas } = await openMannequin(page);
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '장면', exact: true }).click();
 
   await expect(runtimeCanvas).toHaveAttribute(
@@ -68,24 +51,6 @@ test('articulated mannequin hierarchy applies pose controls to actual WebGL pixe
   const tPose = await canvas.screenshot();
 
   expect(changedPixelCount(standing, tPose)).toBeGreaterThan(800);
-});
-
-test('direction views follow a rotated mannequin local front axis', async ({
-  page,
-}) => {
-  const { canvas } = await openMannequin(page);
-  const rotationY = page.getByRole('spinbutton', { name: '회전 Y' });
-  await rotationY.fill('180');
-  await rotationY.press('Enter');
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
-  const front = await canvas.screenshot();
-  await page.getByRole('button', { name: '후면', exact: true }).click();
-  const rear = await canvas.screenshot();
-
-  expect(facingCuePixelCount(front)).toBeGreaterThan(
-    facingCuePixelCount(rear) + 30,
-  );
 });
 
 test('custom torso, head, and wrist rotations keep rendered bounds and IK anchors aligned', async ({
@@ -182,8 +147,6 @@ test('neck joint exposes only local Y yaw that keeps the head attached', async (
   page,
 }) => {
   const { canvas, runtimeCanvas } = await openMannequin(page);
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.getByRole('button', { name: 'T 포즈' }).click();
   await page.getByRole('button', { name: '손 IK' }).click();
@@ -313,8 +276,6 @@ test('hovered hand IK handle exposes local rotation rings that preview and commi
   page,
 }) => {
   const { canvas, runtimeCanvas } = await openMannequin(page);
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.getByRole('button', { name: 'T 포즈' }).click();
   await page.getByRole('button', { name: '손 IK' }).click();
@@ -483,8 +444,6 @@ test('elbow IK exposes constrained bend and lateral rotation rings', async ({
   page,
 }) => {
   const { canvas, runtimeCanvas } = await openMannequin(page);
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.getByRole('button', { name: 'A 포즈' }).click();
   await page.getByRole('button', { name: '손 IK' }).click();
@@ -642,8 +601,6 @@ test('knee IK exposes constrained bend and lateral rotation rings', async ({
   page,
 }) => {
   const { canvas, runtimeCanvas } = await openMannequin(page);
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.getByRole('button', { name: '걷기 준비' }).click();
   await page.getByRole('button', { name: '손 IK' }).click();
@@ -806,8 +763,6 @@ test('knee IK exposes constrained bend and lateral rotation rings', async ({
 
 test('articulated hand raycast selects the document root', async ({ page }) => {
   const { canvas, runtimeCanvas } = await openMannequin(page);
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.getByRole('button', { name: 'T 포즈' }).click();
   await page.getByRole('button', { name: '손 IK' }).click();
@@ -852,7 +807,6 @@ test('frame-selected uses posed articulated bounds in the runtime camera', async
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.getByRole('button', { name: 'T 포즈' }).click();
   await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '선택 프레임 맞춤' }).click();
   const tFrame = await canvas.screenshot();
   const tDistance = await page.evaluate(() => {
@@ -894,8 +848,6 @@ for (const side of ['left', 'right'] as const) {
     page,
   }) => {
     const { canvas, runtimeCanvas } = await openMannequin(page);
-    await page.getByRole('button', { name: '카메라' }).click();
-    await page.getByRole('button', { name: '정면', exact: true }).click();
     await page.getByRole('button', { name: '장면', exact: true }).click();
     await page.getByRole('button', { name: '손 IK' }).click();
 
@@ -1027,7 +979,6 @@ test('foot IK drag previews at runtime and commits exactly once', async ({
 }) => {
   const { canvas, runtimeCanvas } = await openMannequin(page);
   await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '선택 프레임 맞춤' }).click();
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.getByRole('button', { name: '손 IK' }).click();
@@ -1139,8 +1090,6 @@ test('elbow and knee targets each commit one direct-joint pose', async ({
   page,
 }) => {
   const { canvas, runtimeCanvas } = await openMannequin(page);
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.getByRole('button', { name: '손 IK' }).click();
   const box = await canvas.boundingBox();
@@ -1212,8 +1161,6 @@ test('hand IK pointer cancellation restores the document without history', async
   page,
 }) => {
   const { canvas, runtimeCanvas } = await openMannequin(page);
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.getByRole('button', { name: '손 IK' }).click();
   await expect(runtimeCanvas).toHaveAttribute(
@@ -1293,8 +1240,6 @@ test('hand IK restores transient interaction state when pose commit throws', asy
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   const { canvas, runtimeCanvas } = await openMannequin(page);
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.getByRole('button', { name: '손 IK' }).click();
   await expect(runtimeCanvas).toHaveAttribute(
@@ -1343,19 +1288,26 @@ test('hand IK restores transient interaction state when pose commit throws', asy
   expect(pageErrors).toContain('forced mannequin pose commit failure');
 });
 
-for (const { view, side } of [
-  { view: '좌측', side: 'left' },
-  { view: '우측', side: 'right' },
+for (const { profile, side, cameraX } of [
+  { profile: 'left', side: 'left', cameraX: -5 },
+  { profile: 'right', side: 'right', cameraX: 5 },
 ] as const) {
-  test(`${view} profile chooses the nearest ${side} hand IK handle`, async ({
+  test(`${profile} profile chooses the nearest ${side} hand IK handle`, async ({
     page,
   }) => {
     const { canvas, runtimeCanvas } = await openMannequin(page);
     await page.getByRole('button', { name: '장면', exact: true }).click();
     await page.getByRole('button', { name: 'T 포즈' }).click();
-    await page.getByRole('button', { name: '카메라' }).click();
-    await page.getByRole('button', { name: view, exact: true }).click();
-    await page.getByRole('button', { name: '장면', exact: true }).click();
+    await page.evaluate((x) => {
+      const state = globalThis.__I2V_EDITOR_STORE__?.getState();
+      if (state === undefined) throw new Error('E2E editor store가 없습니다.');
+      state.commitCamera({
+        ...state.document.outputCamera,
+        position: { x, y: 1.6, z: 0 },
+        target: { x: 0, y: 1.6, z: 0 },
+        rollDeg: 0,
+      });
+    }, cameraX);
     await page.getByRole('button', { name: '손 IK' }).click();
     await expect(runtimeCanvas).toHaveAttribute(
       'data-ik-handle-projections',

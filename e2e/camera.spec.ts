@@ -54,6 +54,25 @@ async function readRuntimeCamera(canvas: Locator) {
   return value === null ? null : (JSON.parse(value) as RuntimeCameraDiagnostic);
 }
 
+test('camera panel은 방향 뷰 선택 기능을 제공하지 않는다', async ({ page }) => {
+  await openCameraEditor(page);
+  await page.getByRole('button', { name: '카메라' }).click();
+
+  await expect(page.getByRole('group', { name: '샷 프리셋' })).toBeVisible();
+  await expect(page.getByLabel('렌즈')).toBeVisible();
+  await expect(page.getByRole('group', { name: '방향 뷰' })).toHaveCount(0);
+  for (const label of [
+    '정면',
+    '후면',
+    '좌측',
+    '우측',
+    '3/4 정면',
+    '3/4 후면',
+  ]) {
+    await expect(page.getByRole('button', { name: label })).toHaveCount(0);
+  }
+});
+
 test('camera framing contains every output aspect without stretching at 1280×720', async ({
   page,
 }) => {

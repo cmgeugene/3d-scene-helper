@@ -5,7 +5,7 @@ import {
   createMannequinPose,
   solveMannequinArmIk,
 } from '../mannequin/mannequinRig';
-import { CAMERA_SHOT_PRESETS, CAMERA_VIEW_PRESETS } from '../presets/cameras';
+import { CAMERA_SHOT_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
 import {
   createEditorStore,
@@ -599,43 +599,6 @@ describe('editorStore', () => {
       expect(Number.isFinite(camera.position.z)).toBe(true);
       expect(camera.rollDeg).toBe(preset.framing.rollDeg);
     }
-  });
-
-  it('6개 방향 view를 shot/lens와 독립된 explicit camera commit으로 적용한다', () => {
-    store.getState().selectObject(STARTER_IDS.mannequinId);
-    store.getState().setCameraLens(35);
-    store.getState().applyCameraShot('dutch-angle');
-    const activeShot = structuredClone(store.getState().document.outputCamera);
-    const activeDistance = Math.hypot(
-      activeShot.position.x - activeShot.target.x,
-      activeShot.position.y - activeShot.target.y,
-      activeShot.position.z - activeShot.target.z,
-    );
-    let documentChanges = 0;
-    const unsubscribe = store.subscribe((state, previousState) => {
-      if (state.document.outputCamera !== previousState.document.outputCamera) {
-        documentChanges += 1;
-      }
-    });
-
-    for (const preset of CAMERA_VIEW_PRESETS) {
-      documentChanges = 0;
-      store.getState().applyCameraView(preset.id);
-      const camera = store.getState().document.outputCamera;
-      expect(camera.target).toEqual(activeShot.target);
-      expect(camera.focalLengthMm).toBe(35);
-      expect(camera.rollDeg).toBe(12);
-      expect(
-        Math.hypot(
-          camera.position.x - camera.target.x,
-          camera.position.y - camera.target.y,
-          camera.position.z - camera.target.z,
-        ),
-      ).toBeCloseTo(activeDistance, 10);
-      expect(documentChanges).toBe(1);
-      expect(store.getState().statusMessage).toContain(preset.label);
-    }
-    unsubscribe();
   });
 
   it('frame/look at selected는 bounds를 사용하고 selection이 없으면 camera를 보존해 status를 알린다', () => {

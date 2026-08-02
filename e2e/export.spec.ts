@@ -229,8 +229,16 @@ test('front/rear asymmetric mannequin cues remain pixel-readable in both PNG mod
 }) => {
   await openExportEditor(page);
   await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
-  await page.getByRole('button', { name: '카메라' }).click();
-  await page.getByRole('button', { name: '정면', exact: true }).click();
+  await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState();
+    if (state === undefined) throw new Error('E2E editor store가 없습니다.');
+    state.commitCamera({
+      ...state.document.outputCamera,
+      position: { x: 0, y: 1.6, z: -5 },
+      target: { x: 0, y: 1.6, z: 0 },
+      rollDeg: 0,
+    });
+  });
   const frontClean = decodePng(
     (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
   );
@@ -239,7 +247,16 @@ test('front/rear asymmetric mannequin cues remain pixel-readable in both PNG mod
       .buffer,
   );
 
-  await page.getByRole('button', { name: '후면', exact: true }).click();
+  await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState();
+    if (state === undefined) throw new Error('E2E editor store가 없습니다.');
+    state.commitCamera({
+      ...state.document.outputCamera,
+      position: { x: 0, y: 1.6, z: 5 },
+      target: { x: 0, y: 1.6, z: 0 },
+      rollDeg: 0,
+    });
+  });
   const rearClean = decodePng(
     (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
   );

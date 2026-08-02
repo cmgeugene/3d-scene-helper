@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { MathUtils, PerspectiveCamera, Vector3 } from 'three';
 import { FILM_GAUGE_MM } from '../constants';
-import { CAMERA_SHOT_PRESETS, CAMERA_VIEW_PRESETS } from '../presets/cameras';
+import { CAMERA_SHOT_PRESETS } from '../presets/cameras';
 import {
   applyOutputCameraProjection,
   applyViewportCameraProjection,
   computeCameraShot,
-  computeCameraView,
   computeFrameSelectedCamera,
   computeLetterbox,
   computeLookAtSelectedCamera,
@@ -141,79 +140,6 @@ describe('applyViewportCameraProjection', () => {
 });
 
 describe('bounds 기반 camera composition', () => {
-  it('6개 방향 view가 -Z 전방 규칙으로 active shot distance, target, lens, roll을 보존한다', () => {
-    const activeShot = {
-      ...OUTPUT_CAMERA,
-      target: { ...SUBJECT_BOUNDS.center },
-      focalLengthMm: 85,
-      rollDeg: 12,
-    };
-    const activeDistance = Math.hypot(
-      activeShot.position.x - activeShot.target.x,
-      activeShot.position.y - activeShot.target.y,
-      activeShot.position.z - activeShot.target.z,
-    );
-    const results = Object.fromEntries(
-      CAMERA_VIEW_PRESETS.map((preset) => [
-        preset.id,
-        computeCameraView(SUBJECT_BOUNDS, activeShot, 16 / 9, preset),
-      ]),
-    );
-
-    expect(CAMERA_VIEW_PRESETS.map(({ id }) => id)).toEqual([
-      'front',
-      'rear',
-      'left',
-      'right',
-      'front-three-quarter',
-      'rear-three-quarter',
-    ]);
-    expect(results.front.position.z).toBeLessThan(results.front.target.z);
-    expect(results.rear.position.z).toBeGreaterThan(results.rear.target.z);
-    expect(results.left.position.x).toBeLessThan(results.left.target.x);
-    expect(results.right.position.x).toBeGreaterThan(results.right.target.x);
-    expect(results['front-three-quarter'].position.x).toBeGreaterThan(
-      results['front-three-quarter'].target.x,
-    );
-    expect(results['front-three-quarter'].position.z).toBeLessThan(
-      results['front-three-quarter'].target.z,
-    );
-    expect(results['rear-three-quarter'].position.x).toBeLessThan(
-      results['rear-three-quarter'].target.x,
-    );
-    expect(results['rear-three-quarter'].position.z).toBeGreaterThan(
-      results['rear-three-quarter'].target.z,
-    );
-    for (const camera of Object.values(results)) {
-      expect(camera.target).toEqual(activeShot.target);
-      expect(camera.focalLengthMm).toBe(activeShot.focalLengthMm);
-      expect(camera.rollDeg).toBe(activeShot.rollDeg);
-      expect(
-        Math.hypot(
-          camera.position.x - camera.target.x,
-          camera.position.y - camera.target.y,
-          camera.position.z - camera.target.z,
-        ),
-      ).toBeCloseTo(activeDistance, 10);
-    }
-  });
-
-  it('rotates local direction views with the selected subject root', () => {
-    const front = CAMERA_VIEW_PRESETS.find(({ id }) => id === 'front');
-    if (front === undefined) throw new Error('front view preset이 없습니다.');
-
-    const camera = computeCameraView(
-      SUBJECT_BOUNDS,
-      { ...OUTPUT_CAMERA, target: { ...SUBJECT_BOUNDS.center } },
-      16 / 9,
-      front,
-      { x: 0, y: 180, z: 0 },
-    );
-
-    expect(camera.position.z).toBeGreaterThan(camera.target.z);
-    expect(camera.position.x).toBeCloseTo(camera.target.x, 10);
-  });
-
   it('6개 shot preset을 subject bounds에서 계산하고 angle/roll 의미를 보존한다', () => {
     const results = Object.fromEntries(
       CAMERA_SHOT_PRESETS.map((preset) => [

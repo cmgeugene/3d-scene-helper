@@ -2,11 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
-import {
-  CAMERA_SHOT_PRESETS,
-  CAMERA_VIEW_PRESETS,
-  LENS_PRESETS,
-} from '../presets/cameras';
+import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
 import { createEditorStore } from '../state/editorStore';
 import { EditorShortcuts } from './EditorShortcuts';
@@ -188,7 +184,7 @@ describe('Inspector', () => {
     expect(store.getState().mannequinTool).toBe('object');
   });
 
-  it('camera panel에서 5개 lens, 6개 shot, 6개 방향 view를 독립적으로 적용한다', async () => {
+  it('camera panel에서 lens와 shot을 적용하고 방향 view는 제공하지 않는다', async () => {
     const user = userEvent.setup();
     render(<Inspector store={store} />);
     await user.click(screen.getByRole('button', { name: '카메라' }));
@@ -209,16 +205,17 @@ describe('Inspector', () => {
     await user.click(within(shotGroup).getByRole('button', { name: '전신' }));
     expect(store.getState().statusMessage).toBe('전신 샷을 적용했습니다.');
 
-    const viewGroup = screen.getByRole('group', { name: '방향 뷰' });
-    for (const preset of CAMERA_VIEW_PRESETS) {
-      expect(
-        within(viewGroup).getByRole('button', { name: preset.label }),
-      ).toBeVisible();
+    expect(screen.queryByRole('group', { name: '방향 뷰' })).toBeNull();
+    for (const label of [
+      '정면',
+      '후면',
+      '좌측',
+      '우측',
+      '3/4 정면',
+      '3/4 후면',
+    ]) {
+      expect(screen.queryByRole('button', { name: label })).toBeNull();
     }
-    await user.click(within(viewGroup).getByRole('button', { name: '정면' }));
-    expect(store.getState().document.outputCamera.position.z).toBeLessThan(0);
-    expect(store.getState().document.outputCamera.focalLengthMm).toBe(35);
-    expect(store.getState().statusMessage).toBe('정면 방향 뷰를 적용했습니다.');
 
     await user.click(screen.getByRole('button', { name: '선택 프레임 맞춤' }));
     expect(store.getState().document.outputCamera.target).toEqual({
