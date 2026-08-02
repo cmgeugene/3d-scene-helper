@@ -158,7 +158,7 @@ test('clean and reference exports use separate pixel paths without editor layer 
   expect(mismatchRatio(selectedClean, selectedReference)).toBeGreaterThan(0);
 });
 
-test('hand IK handles stay out of clean and reference PNG exports', async ({
+test('IK handles and neck rotation rings stay out of clean and reference PNG exports', async ({
   page,
 }) => {
   await openExportEditor(page);
@@ -167,6 +167,25 @@ test('hand IK handles stay out of clean and reference PNG exports', async ({
   await expect(
     page.locator('canvas[data-ik-handle-projections]'),
   ).toBeVisible();
+  const runtimeCanvas = page.locator('canvas[data-engine]');
+  const projections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
+  ) as { neck: { x: number; y: number } };
+  const canvasBox = await runtimeCanvas.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  if (canvasBox === null) return;
+  await page.mouse.move(
+    canvasBox.x + projections.neck.x,
+    canvasBox.y + projections.neck.y,
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-rotation-handle',
+    'neck',
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-rotation-ring-projections',
+    /^\{"y":/,
+  );
   const ikClean = decodePng(
     (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
   );

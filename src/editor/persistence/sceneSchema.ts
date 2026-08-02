@@ -55,12 +55,14 @@ const mannequinEulerSchema = z.strictObject({
 const mannequinArmPoseSchema = z.strictObject({
   shoulderRotationDeg: mannequinEulerSchema,
   elbowBendDeg: z.number().min(0).max(150),
+  elbowDeviationDeg: z.number().min(-8).max(8).default(0),
   wristRotationDeg: mannequinEulerSchema,
 });
 
 const mannequinLegPoseSchema = z.strictObject({
   hipRotationDeg: mannequinEulerSchema,
   kneeBendDeg: z.number().min(0).max(150),
+  kneeDeviationDeg: z.number().min(-5).max(5).default(0),
   ankleRotationDeg: mannequinEulerSchema,
 });
 

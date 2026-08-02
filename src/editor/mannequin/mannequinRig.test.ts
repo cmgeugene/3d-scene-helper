@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Euler, MathUtils, Quaternion } from 'three';
+import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
 import { mannequinPoseSchema } from '../persistence/sceneSchema';
 import {
   MANNEQUIN_ARM_ANCHORS,
@@ -8,6 +8,7 @@ import {
   MANNEQUIN_LEG_ANCHORS,
   MANNEQUIN_LEG_LENGTHS,
   MANNEQUIN_POSE_PRESETS,
+  applyMannequinIkRotation,
   computeMannequinPoseBounds,
   createMannequinPose,
   getMannequinArmChain,
@@ -24,6 +25,25 @@ function vectorDistance(
   b: { x: number; y: number; z: number },
 ) {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function armBendDirection(chain: ReturnType<typeof getMannequinArmChain>) {
+  const shoulder = new Vector3(
+    chain.shoulder.x,
+    chain.shoulder.y,
+    chain.shoulder.z,
+  );
+  const handAxis = new Vector3(chain.hand.x, chain.hand.y, chain.hand.z)
+    .sub(shoulder)
+    .normalize();
+  const elbowOffset = new Vector3(
+    chain.elbow.x,
+    chain.elbow.y,
+    chain.elbow.z,
+  ).sub(shoulder);
+  return elbowOffset
+    .addScaledVector(handAxis, -elbowOffset.dot(handAxis))
+    .normalize();
 }
 
 function axialTwistDegrees(rotation: { x: number; y: number; z: number }) {
@@ -87,6 +107,158 @@ describe('mannequin pose conventions and presets', () => {
         MANNEQUIN_ARM_LENGTHS.upperArm + MANNEQUIN_ARM_LENGTHS.forearm,
       );
     }
+  });
+});
+
+describe('IK rotation gizmo pose updates', () => {
+  it('allows only clamped left-right yaw at the neck', () => {
+    const initial = createMannequinPose('t');
+    const pitch = applyMannequinIkRotation(initial, { joint: 'neck' }, 'x', 90);
+    const yaw = applyMannequinIkRotation(initial, { joint: 'neck' }, 'y', 120);
+    const tilt = applyMannequinIkRotation(initial, { joint: 'neck' }, 'z', -90);
+
+    expect(pitch).toEqual(initial);
+    expect(yaw.headRotationDeg).toEqual({ x: 0, y: 80, z: 0 });
+    expect(tilt).toEqual(initial);
+    const expected = structuredClone(initial);
+    expected.id = 'custom';
+    expected.headRotationDeg.y = 80;
+    expect(yaw).toEqual(expected);
+  });
+
+  it('rotates end effectors on local axes and clamps hinge joints anatomically', () => {
+    const initial = createMannequinPose('default');
+    initial.arms.left.wristRotationDeg.z = 170;
+    const wristRotated = applyMannequinIkRotation(
+      initial,
+      { side: 'left', joint: 'hand' },
+      'z',
+      30,
+    );
+    const ankleRotated = applyMannequinIkRotation(
+      wristRotated,
+      { side: 'right', joint: 'foot' },
+      'y',
+      -35,
+    );
+    const elbowRotated = applyMannequinIkRotation(
+      ankleRotated,
+      { side: 'left', joint: 'elbow' },
+      'x',
+      300,
+    );
+    const kneeRotated = applyMannequinIkRotation(
+      elbowRotated,
+      { side: 'right', joint: 'knee' },
+      'x',
+      300,
+    );
+
+    expect(initial.arms.left.wristRotationDeg.z).toBe(170);
+    expect(wristRotated.arms.left.wristRotationDeg.z).toBeCloseTo(-160, 6);
+    expect(ankleRotated.legs.right.ankleRotationDeg.y).toBeCloseTo(-35, 6);
+    expect(elbowRotated.arms.left.elbowBendDeg).toBe(145);
+    expect(kneeRotated.legs.right.kneeBendDeg).toBe(135);
+    expect(kneeRotated.id).toBe('custom');
+    expect(() => mannequinPoseSchema.parse(kneeRotated)).not.toThrow();
+  });
+
+  it('clamps elbow lateral deviation without changing the shoulder or bend', () => {
+    const initial = createMannequinPose('default');
+    const positive = applyMannequinIkRotation(
+      initial,
+      { side: 'left', joint: 'elbow' },
+      'z',
+      40,
+    );
+    const negative = applyMannequinIkRotation(
+      positive,
+      { side: 'left', joint: 'elbow' },
+      'z',
+      -40,
+    );
+
+    expect(positive.arms.left.elbowDeviationDeg).toBe(8);
+    expect(negative.arms.left.elbowDeviationDeg).toBe(-8);
+    const expectedPositive = structuredClone(initial);
+    expectedPositive.id = 'custom';
+    expectedPositive.arms.left.elbowDeviationDeg = 8;
+    expect(positive).toEqual(expectedPositive);
+    const expectedNegative = structuredClone(expectedPositive);
+    expectedNegative.arms.left.elbowDeviationDeg = -8;
+    expect(negative).toEqual(expectedNegative);
+  });
+
+  it('clamps knee lateral deviation without changing any other joint', () => {
+    const initial = createMannequinPose('walk-ready');
+    const positive = applyMannequinIkRotation(
+      initial,
+      { side: 'right', joint: 'knee' },
+      'z',
+      40,
+    ) as typeof initial & {
+      legs: { right: { kneeDeviationDeg?: number } };
+    };
+    const negative = applyMannequinIkRotation(
+      positive,
+      { side: 'right', joint: 'knee' },
+      'z',
+      -40,
+    ) as typeof initial & {
+      legs: { right: { kneeDeviationDeg?: number } };
+    };
+
+    expect(positive.legs.right.kneeDeviationDeg).toBe(5);
+    expect(negative.legs.right.kneeDeviationDeg).toBe(-5);
+    const expectedPositive = structuredClone(initial) as typeof positive;
+    expectedPositive.id = 'custom';
+    expectedPositive.legs.right.kneeDeviationDeg = 5;
+    expect(positive).toEqual(expectedPositive);
+    const expectedNegative = structuredClone(expectedPositive);
+    expectedNegative.legs.right.kneeDeviationDeg = -5;
+    expect(negative).toEqual(expectedNegative);
+  });
+
+  it('applies elbow deviation only to the chain below the elbow', () => {
+    const initial = createMannequinPose('default');
+    initial.arms.left.elbowBendDeg = 70;
+    const before = getMannequinArmChain(initial, 'left');
+    const deviated = applyMannequinIkRotation(
+      initial,
+      { side: 'left', joint: 'elbow' },
+      'z',
+      8,
+    );
+    const after = getMannequinArmChain(deviated, 'left');
+
+    expect(after.shoulder).toEqual(before.shoulder);
+    expect(after.elbow).toEqual(before.elbow);
+    expect(vectorDistance(after.hand, before.hand)).toBeGreaterThan(0.02);
+    expect(vectorDistance(after.elbow, after.hand)).toBeCloseTo(
+      MANNEQUIN_ARM_LENGTHS.forearm,
+      10,
+    );
+  });
+
+  it('applies knee deviation only to the chain below the knee', () => {
+    const initial = createMannequinPose('walk-ready');
+    initial.legs.right.kneeBendDeg = 60;
+    const before = getMannequinLegChain(initial, 'right');
+    const deviated = applyMannequinIkRotation(
+      initial,
+      { side: 'right', joint: 'knee' },
+      'z',
+      5,
+    );
+    const after = getMannequinLegChain(deviated, 'right');
+
+    expect(after.hip).toEqual(before.hip);
+    expect(after.knee).toEqual(before.knee);
+    expect(vectorDistance(after.foot, before.foot)).toBeGreaterThan(0.02);
+    expect(vectorDistance(after.knee, after.foot)).toBeCloseTo(
+      MANNEQUIN_LEG_LENGTHS.shin,
+      10,
+    );
   });
 });
 
@@ -185,6 +357,97 @@ describe('analytic two-bone arm IK', () => {
     expect(JSON.parse(JSON.stringify(pose))).toEqual(pose);
   });
 
+  it('preserves the current elbow bend plane for a nearby hand target', () => {
+    const initial = createMannequinPose('default');
+    initial.arms.left.shoulderRotationDeg = { x: 38, y: 22, z: -34 };
+    initial.arms.left.elbowBendDeg = 72;
+    const before = getMannequinArmChain(initial, 'left');
+    const beforeBendDirection = armBendDirection(before);
+    const shoulder = new Vector3(
+      before.shoulder.x,
+      before.shoulder.y,
+      before.shoulder.z,
+    );
+    const handAxis = new Vector3(before.hand.x, before.hand.y, before.hand.z)
+      .sub(shoulder)
+      .normalize();
+    const tangent = new Vector3(0, 1, 0).cross(handAxis).normalize();
+    const target = new Vector3(
+      before.hand.x,
+      before.hand.y,
+      before.hand.z,
+    ).addScaledVector(tangent, 0.012);
+
+    const solved = solveMannequinArmIk(initial, 'left', {
+      x: target.x,
+      y: target.y,
+      z: target.z,
+    });
+    const after = getMannequinArmChain(solved, 'left');
+
+    expect(armBendDirection(after).dot(beforeBendDirection)).toBeGreaterThan(
+      0.98,
+    );
+  });
+
+  it('preserves elbow deviation while reaching a compatible nearby hand target', () => {
+    const initial = createMannequinPose('a');
+    initial.arms.left.elbowBendDeg = 70;
+    initial.arms.left.elbowDeviationDeg = 8;
+    const currentHand = getMannequinArmChain(initial, 'left').hand;
+    const nearbyTarget = {
+      x: currentHand.x + 0.01,
+      y: currentHand.y + 0.005,
+      z: currentHand.z - 0.005,
+    };
+
+    const solved = solveMannequinArmIk(initial, 'left', nearbyTarget);
+
+    expect(solved.arms.left.elbowDeviationDeg).toBe(8);
+    expect(
+      vectorDistance(getMannequinArmChain(solved, 'left').hand, nearbyTarget),
+    ).toBeLessThan(1e-6);
+  });
+
+  it('uses the shoulder local hinge direction when a straight arm starts bending', () => {
+    const initial = createMannequinPose('default');
+    initial.arms.left.shoulderRotationDeg = { x: 38, y: 22, z: -34 };
+    initial.arms.left.elbowBendDeg = 0;
+    const before = getMannequinArmChain(initial, 'left');
+    const shoulder = new Vector3(
+      before.shoulder.x,
+      before.shoulder.y,
+      before.shoulder.z,
+    );
+    const handOffset = new Vector3(before.hand.x, before.hand.y, before.hand.z)
+      .sub(shoulder)
+      .multiplyScalar(0.96);
+    const target = shoulder.clone().add(handOffset);
+    const shoulderQuaternion = new Quaternion().setFromEuler(
+      new Euler(
+        MathUtils.degToRad(initial.arms.left.shoulderRotationDeg.x),
+        MathUtils.degToRad(initial.arms.left.shoulderRotationDeg.y),
+        MathUtils.degToRad(initial.arms.left.shoulderRotationDeg.z),
+        'XYZ',
+      ),
+    );
+    const preferredBendDirection = new Vector3(0, 0, 1)
+      .applyQuaternion(shoulderQuaternion)
+      .normalize();
+
+    const solved = solveMannequinArmIk(initial, 'left', {
+      x: target.x,
+      y: target.y,
+      z: target.z,
+    });
+
+    expect(
+      armBendDirection(getMannequinArmChain(solved, 'left')).dot(
+        preferredBendDirection,
+      ),
+    ).toBeGreaterThan(0.98);
+  });
+
   it('returns the exact conservative maximum bend at minimum reach', () => {
     const pose = solveMannequinArmIk(
       createMannequinPose('default'),
@@ -254,6 +517,25 @@ describe('analytic two-bone leg IK', () => {
     expect(pose.legs.left.kneeBendDeg).toBeGreaterThanOrEqual(0);
     expect(pose.legs.left.kneeBendDeg).toBeLessThanOrEqual(150);
     expect(mannequinPoseSchema.safeParse(pose).success).toBe(true);
+  });
+
+  it('preserves knee deviation while reaching a compatible nearby foot target', () => {
+    const initial = createMannequinPose('walk-ready');
+    initial.legs.right.kneeBendDeg = 70;
+    initial.legs.right.kneeDeviationDeg = 5;
+    const currentFoot = getMannequinLegChain(initial, 'right').foot;
+    const nearbyTarget = {
+      x: currentFoot.x - 0.005,
+      y: currentFoot.y + 0.005,
+      z: currentFoot.z + 0.005,
+    };
+
+    const solved = solveMannequinLegIk(initial, 'right', nearbyTarget);
+
+    expect(solved.legs.right.kneeDeviationDeg).toBe(5);
+    expect(
+      vectorDistance(getMannequinLegChain(solved, 'right').foot, nearbyTarget),
+    ).toBeLessThan(1e-6);
   });
 
   it('limits lateral hip abduction and deep knee folding', () => {

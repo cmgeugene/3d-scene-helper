@@ -8,18 +8,27 @@ export interface MannequinVector3 {
 
 export type MannequinEulerDegrees = MannequinVector3;
 export type MannequinSide = 'left' | 'right';
+export type MannequinLimbIkJoint = 'hand' | 'foot' | 'elbow' | 'knee';
+export type MannequinIkJoint = MannequinLimbIkJoint | 'neck';
+export type MannequinRotationAxis = 'x' | 'y' | 'z';
+
+export type MannequinIkHandleDescriptor =
+  { joint: 'neck' } | { side: MannequinSide; joint: MannequinLimbIkJoint };
+
 export type MannequinPosePresetId = 'default' | 'a' | 't' | 'walk-ready';
 export type MannequinPoseId = MannequinPosePresetId | 'custom';
 
 export interface MannequinArmPose {
   shoulderRotationDeg: MannequinEulerDegrees;
   elbowBendDeg: number;
+  elbowDeviationDeg: number;
   wristRotationDeg: MannequinEulerDegrees;
 }
 
 export interface MannequinLegPose {
   hipRotationDeg: MannequinEulerDegrees;
   kneeBendDeg: number;
+  kneeDeviationDeg: number;
   ankleRotationDeg: MannequinEulerDegrees;
 }
 
@@ -64,6 +73,8 @@ export const MANNEQUIN_LEG_ANCHORS = {
   right: { hip: { x: 0.085, y: 0.01, z: 0 } },
 } as const;
 
+export const MANNEQUIN_NECK_ANCHOR = { x: 0, y: 0.62, z: 0 } as const;
+
 const rotation = (x = 0, y = 0, z = 0): MannequinEulerDegrees => ({
   x,
   y,
@@ -91,11 +102,13 @@ function pose(
       left: {
         shoulderRotationDeg: values.leftShoulder ?? rotation(),
         elbowBendDeg: values.leftElbow ?? 8,
+        elbowDeviationDeg: 0,
         wristRotationDeg: rotation(),
       },
       right: {
         shoulderRotationDeg: values.rightShoulder ?? rotation(),
         elbowBendDeg: values.rightElbow ?? 8,
+        elbowDeviationDeg: 0,
         wristRotationDeg: rotation(),
       },
     },
@@ -103,11 +116,13 @@ function pose(
       left: {
         hipRotationDeg: values.leftHip ?? rotation(),
         kneeBendDeg: values.leftKnee ?? 0,
+        kneeDeviationDeg: 0,
         ankleRotationDeg: rotation(),
       },
       right: {
         hipRotationDeg: values.rightHip ?? rotation(),
         kneeBendDeg: values.rightKnee ?? 0,
+        kneeDeviationDeg: 0,
         ankleRotationDeg: rotation(),
       },
     },
@@ -337,7 +352,10 @@ const LEG_SWING_LIMITS: LimbSwingLimits = {
   twist: 45,
 };
 const MAX_ELBOW_FLEXION_DEG = 145;
+const MAX_ELBOW_DEVIATION_DEG = 8;
 const MAX_KNEE_FLEXION_DEG = 135;
+const MAX_KNEE_DEVIATION_DEG = 5;
+const MAX_NECK_YAW_DEG = 80;
 
 function constrainLimbSwing(
   quaternion: Quaternion,
@@ -446,6 +464,92 @@ function degreesFromQuaternion(quaternion: Quaternion): MannequinEulerDegrees {
   };
 }
 
+const MANNEQUIN_ROTATION_AXES: Record<MannequinRotationAxis, Vector3> = {
+  x: new Vector3(1, 0, 0),
+  y: new Vector3(0, 1, 0),
+  z: new Vector3(0, 0, 1),
+};
+
+export function applyMannequinIkRotation(
+  pose: MannequinPose,
+  handle: MannequinIkHandleDescriptor,
+  axis: MannequinRotationAxis,
+  deltaDeg: number,
+): MannequinPose {
+  const next = structuredClone(pose);
+  if (handle.joint === 'neck' && axis !== 'y') return next;
+  next.id = 'custom';
+
+  if (handle.joint === 'neck') {
+    next.headRotationDeg = {
+      x: 0,
+      y: MathUtils.clamp(
+        pose.headRotationDeg.y + deltaDeg,
+        -MAX_NECK_YAW_DEG,
+        MAX_NECK_YAW_DEG,
+      ),
+      z: 0,
+    };
+    return next;
+  }
+
+  if (handle.joint === 'elbow') {
+    if (axis === 'x') {
+      next.arms[handle.side].elbowBendDeg = Math.max(
+        0,
+        Math.min(
+          MAX_ELBOW_FLEXION_DEG,
+          pose.arms[handle.side].elbowBendDeg + deltaDeg,
+        ),
+      );
+    } else if (axis === 'z') {
+      next.arms[handle.side].elbowDeviationDeg = MathUtils.clamp(
+        pose.arms[handle.side].elbowDeviationDeg + deltaDeg,
+        -MAX_ELBOW_DEVIATION_DEG,
+        MAX_ELBOW_DEVIATION_DEG,
+      );
+    }
+    return next;
+  }
+  if (handle.joint === 'knee') {
+    if (axis === 'x') {
+      next.legs[handle.side].kneeBendDeg = Math.max(
+        0,
+        Math.min(
+          MAX_KNEE_FLEXION_DEG,
+          pose.legs[handle.side].kneeBendDeg + deltaDeg,
+        ),
+      );
+    } else if (axis === 'z') {
+      next.legs[handle.side].kneeDeviationDeg = MathUtils.clamp(
+        pose.legs[handle.side].kneeDeviationDeg + deltaDeg,
+        -MAX_KNEE_DEVIATION_DEG,
+        MAX_KNEE_DEVIATION_DEG,
+      );
+    }
+    return next;
+  }
+
+  const currentRotation =
+    handle.joint === 'hand'
+      ? pose.arms[handle.side].wristRotationDeg
+      : pose.legs[handle.side].ankleRotationDeg;
+  const rotated = degreesFromQuaternion(
+    quaternionFromDegrees(currentRotation).multiply(
+      new Quaternion().setFromAxisAngle(
+        MANNEQUIN_ROTATION_AXES[axis],
+        MathUtils.degToRad(deltaDeg),
+      ),
+    ),
+  );
+  if (handle.joint === 'hand') {
+    next.arms[handle.side].wristRotationDeg = rotated;
+  } else {
+    next.legs[handle.side].ankleRotationDeg = rotated;
+  }
+  return next;
+}
+
 export interface MannequinArmChain {
   shoulder: MannequinVector3;
   elbow: MannequinVector3;
@@ -482,14 +586,13 @@ function getMannequinArmKinematics(
       DOWN.clone().applyQuaternion(shoulderQuaternion),
       MANNEQUIN_ARM_LENGTHS.upperArm,
     );
-  const elbowQuaternion = shoulderQuaternion
-    .clone()
-    .multiply(
-      new Quaternion().setFromAxisAngle(
-        new Vector3(1, 0, 0),
-        MathUtils.degToRad(pose.arms[side].elbowBendDeg),
-      ),
-    );
+  const elbowQuaternion = shoulderQuaternion.clone().multiply(
+    quaternionFromDegrees({
+      x: pose.arms[side].elbowBendDeg,
+      y: 0,
+      z: pose.arms[side].elbowDeviationDeg,
+    }),
+  );
   const wrist = elbow
     .clone()
     .addScaledVector(
@@ -543,14 +646,13 @@ export function getMannequinLegChain(
       DOWN.clone().applyQuaternion(hipQuaternion),
       MANNEQUIN_LEG_LENGTHS.thigh,
     );
-  const kneeQuaternion = hipQuaternion
-    .clone()
-    .multiply(
-      new Quaternion().setFromAxisAngle(
-        new Vector3(1, 0, 0),
-        -MathUtils.degToRad(pose.legs[side].kneeBendDeg),
-      ),
-    );
+  const kneeQuaternion = hipQuaternion.clone().multiply(
+    quaternionFromDegrees({
+      x: -pose.legs[side].kneeBendDeg,
+      y: 0,
+      z: pose.legs[side].kneeDeviationDeg,
+    }),
+  );
   const foot = knee
     .clone()
     .addScaledVector(
@@ -564,6 +666,99 @@ export function getMannequinLegChain(
   };
 }
 
+export function getMannequinNeckPosition(
+  pose: MannequinPose,
+): MannequinVector3 {
+  return plainVector(
+    new Vector3(
+      MANNEQUIN_NECK_ANCHOR.x,
+      MANNEQUIN_NECK_ANCHOR.y - PELVIS_ORIGIN.y,
+      MANNEQUIN_NECK_ANCHOR.z,
+    )
+      .applyQuaternion(quaternionFromDegrees(pose.torsoRotationDeg))
+      .add(PELVIS_ORIGIN),
+  );
+}
+
+export function getMannequinIkRotationFrame(
+  pose: MannequinPose,
+  handle: MannequinIkHandleDescriptor,
+): Quaternion {
+  if (handle.joint === 'neck') {
+    return quaternionFromDegrees(pose.torsoRotationDeg).multiply(
+      quaternionFromDegrees({ x: 0, y: pose.headRotationDeg.y, z: 0 }),
+    );
+  }
+  if (handle.joint === 'hand' || handle.joint === 'elbow') {
+    const arm = getMannequinArmKinematics(pose, handle.side);
+    if (handle.joint === 'hand') return arm.wristQuaternion.clone();
+    return arm.shoulderQuaternion
+      .clone()
+      .multiply(
+        new Quaternion().setFromAxisAngle(
+          MANNEQUIN_ROTATION_AXES.x,
+          MathUtils.degToRad(pose.arms[handle.side].elbowBendDeg),
+        ),
+      );
+  }
+
+  const leg = pose.legs[handle.side];
+  const hipQuaternion = quaternionFromDegrees(leg.hipRotationDeg);
+  const bentKneeQuaternion = new Quaternion().setFromAxisAngle(
+    MANNEQUIN_ROTATION_AXES.x,
+    -MathUtils.degToRad(leg.kneeBendDeg),
+  );
+  if (handle.joint === 'knee') {
+    return hipQuaternion.multiply(bentKneeQuaternion);
+  }
+  return hipQuaternion
+    .multiply(
+      quaternionFromDegrees({
+        x: -leg.kneeBendDeg,
+        y: 0,
+        z: leg.kneeDeviationDeg,
+      }),
+    )
+    .multiply(quaternionFromDegrees(leg.ankleRotationDeg));
+}
+
+function quaternionMappingDirectionPairs(
+  sourceUpper: Vector3,
+  sourceLower: Vector3,
+  targetUpper: Vector3,
+  targetLower: Vector3,
+) {
+  const frameQuaternion = (upper: Vector3, lower: Vector3) => {
+    const primary = upper.clone().normalize();
+    const secondary = lower
+      .clone()
+      .addScaledVector(primary, -lower.dot(primary));
+    if (secondary.lengthSq() < 1e-12) {
+      const fallback = new Vector3(
+        MANNEQUIN_FORWARD_AXIS.x,
+        MANNEQUIN_FORWARD_AXIS.y,
+        MANNEQUIN_FORWARD_AXIS.z,
+      );
+      if (Math.abs(primary.dot(fallback)) > 0.99) fallback.set(1, 0, 0);
+      secondary
+        .copy(fallback)
+        .addScaledVector(primary, -fallback.dot(primary))
+        .normalize();
+    } else {
+      secondary.normalize();
+    }
+    const tertiary = new Vector3().crossVectors(primary, secondary).normalize();
+    secondary.crossVectors(tertiary, primary).normalize();
+    return new Quaternion().setFromRotationMatrix(
+      new Matrix4().makeBasis(primary, secondary, tertiary),
+    );
+  };
+
+  return frameQuaternion(targetUpper, targetLower)
+    .multiply(frameQuaternion(sourceUpper, sourceLower).invert())
+    .normalize();
+}
+
 export function solveMannequinArmIk(
   pose: MannequinPose,
   side: MannequinSide,
@@ -571,6 +766,7 @@ export function solveMannequinArmIk(
 ): MannequinPose {
   const torsoQuaternion = quaternionFromDegrees(pose.torsoRotationDeg);
   const inverseTorsoQuaternion = torsoQuaternion.clone().invert();
+  const currentElbow = getMannequinArmChain(pose, side).elbow;
   const shoulder = {
     x: MANNEQUIN_ARM_ANCHORS[side].shoulder.x,
     y: MANNEQUIN_ARM_ANCHORS[side].shoulder.y - PELVIS_ORIGIN.y,
@@ -579,10 +775,26 @@ export function solveMannequinArmIk(
   const localTarget = new Vector3(handTarget.x, handTarget.y, handTarget.z)
     .sub(PELVIS_ORIGIN)
     .applyQuaternion(inverseTorsoQuaternion);
+  const localElbowPole = new Vector3(
+    currentElbow.x,
+    currentElbow.y,
+    currentElbow.z,
+  )
+    .sub(PELVIS_ORIGIN)
+    .applyQuaternion(inverseTorsoQuaternion);
+  if (pose.arms[side].elbowBendDeg <= 2) {
+    localElbowPole
+      .set(shoulder.x, shoulder.y, shoulder.z)
+      .add(
+        new Vector3(0, 0, 1).applyQuaternion(
+          quaternionFromDegrees(pose.arms[side].shoulderRotationDeg),
+        ),
+      );
+  }
   const solution = solveTwoBoneArmIk({
     shoulder,
     handTarget: plainVector(localTarget),
-    pole: { x: shoulder.x, y: shoulder.y, z: shoulder.z - 1 },
+    pole: plainVector(localElbowPole),
     upperArmLength: MANNEQUIN_ARM_LENGTHS.upperArm,
     forearmLength: MANNEQUIN_ARM_LENGTHS.forearm,
     maximumElbowBendDeg: MAX_ELBOW_FLEXION_DEG,
@@ -597,31 +809,49 @@ export function solveMannequinArmIk(
     solution.hand.y - solution.elbow.y,
     solution.hand.z - solution.elbow.z,
   ).normalize();
-  const bendRad = MathUtils.degToRad(solution.elbowBendDeg);
-  const sinBend = Math.sin(bendRad);
-  let shoulderQuaternion: Quaternion;
-  if (Math.abs(sinBend) < 1e-8) {
-    shoulderQuaternion = new Quaternion().setFromUnitVectors(DOWN, upper);
-  } else {
-    const yAxis = upper.clone().multiplyScalar(-1);
-    const zAxis = upper
-      .clone()
-      .multiplyScalar(Math.cos(bendRad))
-      .sub(lower)
-      .divideScalar(sinBend)
-      .normalize();
-    const xAxis = new Vector3().crossVectors(yAxis, zAxis).normalize();
-    zAxis.crossVectors(xAxis, yAxis).normalize();
-    shoulderQuaternion = new Quaternion().setFromRotationMatrix(
-      new Matrix4().makeBasis(xAxis, yAxis, zAxis),
+  const totalBendRad = MathUtils.degToRad(solution.elbowBendDeg);
+  const requestedDeviationRad = MathUtils.degToRad(
+    MathUtils.clamp(
+      pose.arms[side].elbowDeviationDeg,
+      -MAX_ELBOW_DEVIATION_DEG,
+      MAX_ELBOW_DEVIATION_DEG,
+    ),
+  );
+  const deviationSign = Math.sign(requestedDeviationRad) || 1;
+  let deviationRad = Math.min(Math.abs(requestedDeviationRad), totalBendRad);
+  let elbowBendRad = Math.acos(
+    MathUtils.clamp(Math.cos(totalBendRad) / Math.cos(deviationRad), -1, 1),
+  );
+  const maximumElbowBendRad = MathUtils.degToRad(MAX_ELBOW_FLEXION_DEG);
+  if (elbowBendRad > maximumElbowBendRad) {
+    elbowBendRad = maximumElbowBendRad;
+    deviationRad = Math.acos(
+      MathUtils.clamp(
+        Math.cos(totalBendRad) / Math.cos(maximumElbowBendRad),
+        -1,
+        1,
+      ),
     );
   }
+  deviationRad *= deviationSign;
+  const elbowQuaternion = quaternionFromDegrees({
+    x: MathUtils.radToDeg(elbowBendRad),
+    y: 0,
+    z: MathUtils.radToDeg(deviationRad),
+  });
+  const shoulderQuaternion = quaternionMappingDirectionPairs(
+    DOWN,
+    DOWN.clone().applyQuaternion(elbowQuaternion),
+    upper,
+    lower,
+  );
   const nextPose = JSON.parse(JSON.stringify(pose)) as MannequinPose;
   nextPose.id = 'custom';
   nextPose.arms[side].shoulderRotationDeg = degreesFromQuaternion(
     constrainLimbSwing(shoulderQuaternion, side, ARM_SWING_LIMITS),
   );
-  nextPose.arms[side].elbowBendDeg = solution.elbowBendDeg;
+  nextPose.arms[side].elbowBendDeg = MathUtils.radToDeg(elbowBendRad);
+  nextPose.arms[side].elbowDeviationDeg = MathUtils.radToDeg(deviationRad);
   return nextPose;
 }
 
@@ -650,30 +880,49 @@ export function solveMannequinLegIk(
     solution.hand.y - solution.elbow.y,
     solution.hand.z - solution.elbow.z,
   ).normalize();
-  const bendRad = MathUtils.degToRad(solution.elbowBendDeg);
-  const sinBend = Math.sin(bendRad);
-  let hipQuaternion: Quaternion;
-  if (Math.abs(sinBend) < 1e-8) {
-    hipQuaternion = new Quaternion().setFromUnitVectors(DOWN, upper);
-  } else {
-    const yAxis = upper.clone().multiplyScalar(-1);
-    const zAxis = lower
-      .clone()
-      .sub(upper.clone().multiplyScalar(Math.cos(bendRad)))
-      .divideScalar(sinBend)
-      .normalize();
-    const xAxis = new Vector3().crossVectors(yAxis, zAxis).normalize();
-    zAxis.crossVectors(xAxis, yAxis).normalize();
-    hipQuaternion = new Quaternion().setFromRotationMatrix(
-      new Matrix4().makeBasis(xAxis, yAxis, zAxis),
+  const totalBendRad = MathUtils.degToRad(solution.elbowBendDeg);
+  const requestedDeviationRad = MathUtils.degToRad(
+    MathUtils.clamp(
+      pose.legs[side].kneeDeviationDeg,
+      -MAX_KNEE_DEVIATION_DEG,
+      MAX_KNEE_DEVIATION_DEG,
+    ),
+  );
+  const deviationSign = Math.sign(requestedDeviationRad) || 1;
+  let deviationRad = Math.min(Math.abs(requestedDeviationRad), totalBendRad);
+  let kneeBendRad = Math.acos(
+    MathUtils.clamp(Math.cos(totalBendRad) / Math.cos(deviationRad), -1, 1),
+  );
+  const maximumKneeBendRad = MathUtils.degToRad(MAX_KNEE_FLEXION_DEG);
+  if (kneeBendRad > maximumKneeBendRad) {
+    kneeBendRad = maximumKneeBendRad;
+    deviationRad = Math.acos(
+      MathUtils.clamp(
+        Math.cos(totalBendRad) / Math.cos(maximumKneeBendRad),
+        -1,
+        1,
+      ),
     );
   }
+  deviationRad *= deviationSign;
+  const kneeQuaternion = quaternionFromDegrees({
+    x: -MathUtils.radToDeg(kneeBendRad),
+    y: 0,
+    z: MathUtils.radToDeg(deviationRad),
+  });
+  const hipQuaternion = quaternionMappingDirectionPairs(
+    DOWN,
+    DOWN.clone().applyQuaternion(kneeQuaternion),
+    upper,
+    lower,
+  );
   const nextPose = structuredClone(pose);
   nextPose.id = 'custom';
   nextPose.legs[side].hipRotationDeg = degreesFromQuaternion(
     constrainLimbSwing(hipQuaternion, side, LEG_SWING_LIMITS),
   );
-  nextPose.legs[side].kneeBendDeg = solution.elbowBendDeg;
+  nextPose.legs[side].kneeBendDeg = MathUtils.radToDeg(kneeBendRad);
+  nextPose.legs[side].kneeDeviationDeg = MathUtils.radToDeg(deviationRad);
   return nextPose;
 }
 
@@ -813,14 +1062,14 @@ export function computeMannequinPoseBounds(
 
   const torsoQuaternion = quaternionFromDegrees(pose.torsoRotationDeg);
   includeChildBox(
-    new Vector3(0, 0.265, 0),
-    new Vector3(0.19, 0.235, 0.137),
+    new Vector3(0, 0.265, -0.0145),
+    new Vector3(0.19, 0.235, 0.1555),
     PELVIS_ORIGIN,
     torsoQuaternion,
   );
   includeChildBox(
-    new Vector3(0, 0.35, -0.142),
-    new Vector3(0.015, 0.031, 0.008),
+    new Vector3(0, 0.36, -0.16),
+    new Vector3(0.015, 0.045, 0.008),
     PELVIS_ORIGIN,
     torsoQuaternion,
   );
@@ -838,7 +1087,7 @@ export function computeMannequinPoseBounds(
   );
   const headQuaternion = torsoQuaternion
     .clone()
-    .multiply(quaternionFromDegrees(pose.headRotationDeg));
+    .multiply(quaternionFromDegrees({ x: 0, y: pose.headRotationDeg.y, z: 0 }));
   includeChildBox(
     new Vector3(0, -0.1025, 0),
     new Vector3(0.057, 0.0675, 0.053),
@@ -852,8 +1101,8 @@ export function computeMannequinPoseBounds(
     headQuaternion,
   );
   includeChildBox(
-    new Vector3(0, -0.012, -0.09),
-    new Vector3(0.02, 0.02, 0.028),
+    new Vector3(0, -0.012, -0.102),
+    new Vector3(0.024, 0.024, 0.036),
     headOrigin,
     headQuaternion,
   );

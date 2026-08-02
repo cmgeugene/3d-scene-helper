@@ -147,7 +147,11 @@ function Arm({
       <group
         name={`${prefix}-elbow-pivot`}
         position={[0, -MANNEQUIN_ARM_LENGTHS.upperArm, 0]}
-        rotation={[MathUtils.degToRad(arm.elbowBendDeg), 0, 0]}
+        rotation={[
+          MathUtils.degToRad(arm.elbowBendDeg),
+          0,
+          MathUtils.degToRad(arm.elbowDeviationDeg),
+        ]}
       >
         <MeshPart
           name={`${prefix}-elbow-joint`}
@@ -235,7 +239,11 @@ function Leg({
       <group
         name={`${prefix}-knee-pivot`}
         position={[0, -MANNEQUIN_LEG_LENGTHS.thigh, 0]}
-        rotation={[-MathUtils.degToRad(leg.kneeBendDeg), 0, 0]}
+        rotation={[
+          -MathUtils.degToRad(leg.kneeBendDeg),
+          0,
+          MathUtils.degToRad(leg.kneeDeviationDeg),
+        ]}
       >
         <MeshPart
           name={`${prefix}-knee-joint`}
@@ -372,13 +380,21 @@ export function ArticulatedMannequin({
           />
           <MeshPart
             {...common}
+            name="Mannequin.upper-chest-plane"
+            geometry="sphere"
+            args={[0.075, 24]}
+            position={[0, 0.4, -0.144]}
+            scale={[2.05, 0.4, 0.22]}
+          />
+          <MeshPart
+            {...common}
             name="Mannequin.chest-front-cue"
             color="#d9f4ff"
             unlit
             geometry="sphere"
-            args={[0.026, 18]}
-            position={[0, 0.35, -0.142]}
-            scale={[0.54, 1.18, 0.28]}
+            args={[0.03, 18]}
+            position={[0, 0.36, -0.16]}
+            scale={[0.46, 1.5, 0.24]}
           />
           <MeshPart
             {...common}
@@ -393,7 +409,7 @@ export function ArticulatedMannequin({
           <group
             name="Mannequin.neck-head-pivot"
             position={[0, 0.66, 0]}
-            rotation={toRadians(pose.headRotationDeg)}
+            rotation={[0, MathUtils.degToRad(pose.headRotationDeg.y), 0]}
           >
             <MeshPart
               {...common}
@@ -407,10 +423,26 @@ export function ArticulatedMannequin({
             />
             <MeshPart
               {...common}
+              name="Mannequin.face-plane"
+              geometry="sphere"
+              args={[0.052, 22]}
+              position={[0, -0.02, -0.084]}
+              scale={[1.42, 1.28, 0.22]}
+            />
+            <MeshPart
+              {...common}
+              name="Mannequin.brow-ridge"
+              geometry="sphere"
+              args={[0.032, 20]}
+              position={[0, 0.035, -0.094]}
+              scale={[2.15, 0.34, 0.28]}
+            />
+            <MeshPart
+              {...common}
               name="Mannequin.nose-cue"
               color={color}
               geometry={geometries.nose}
-              position={[0, -0.012, -0.09]}
+              position={[0, -0.012, -0.102]}
             />
           </group>
           <Arm side="left" pose={pose} {...articulatedCommon} />

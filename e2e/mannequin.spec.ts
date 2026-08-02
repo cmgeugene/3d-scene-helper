@@ -164,6 +164,7 @@ test('IK mode exposes hand, foot, elbow, and knee handles on both sides', async 
       'left-foot',
       'left-hand',
       'left-knee',
+      'neck',
       'right-elbow',
       'right-foot',
       'right-hand',
@@ -175,6 +176,632 @@ test('IK mode exposes hand, foot, elbow, and knee handles on both sides', async 
     expect(Number.isFinite(projection.y)).toBe(true);
     expect(Number.isFinite(projection.depth)).toBe(true);
   }
+});
+
+test('neck joint exposes only local Y yaw that keeps the head attached', async ({
+  page,
+}) => {
+  const { canvas, runtimeCanvas } = await openMannequin(page);
+  await page.getByRole('button', { name: '카메라' }).click();
+  await page.getByRole('button', { name: '정면', exact: true }).click();
+  await page.getByRole('button', { name: '장면', exact: true }).click();
+  await page.getByRole('button', { name: 'T 포즈' }).click();
+  await page.getByRole('button', { name: '손 IK' }).click();
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-joint-projections',
+    /"neck"/,
+  );
+
+  const handleProjections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
+  ) as Record<'neck', { x: number; y: number }>;
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) return;
+  await page.mouse.move(
+    box.x + handleProjections.neck.x,
+    box.y + handleProjections.neck.y,
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-rotation-handle',
+    'neck',
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-highlight-kind',
+    'rotation-origin',
+  );
+  const ringProjections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-rotation-ring-projections')) ??
+      '{}',
+  ) as Record<
+    'y',
+    { start: { x: number; y: number }; end: { x: number; y: number } }
+  >;
+  expect(Object.keys(ringProjections)).toEqual(['y']);
+
+  const before = await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+      document: {
+        objects: Array<{ kind: string; mannequinPose?: unknown }>;
+      };
+      history: { past: unknown[] };
+    };
+    return {
+      pose: structuredClone(
+        state.document.objects.find(({ kind }) => kind === 'mannequin')
+          ?.mannequinPose,
+      ),
+      historyLength: state.history.past.length,
+    };
+  });
+  await page.mouse.move(
+    box.x + ringProjections.y.start.x,
+    box.y + ringProjections.y.start.y,
+  );
+  await expect(runtimeCanvas).toHaveAttribute('data-ik-highlight-axis', 'y');
+  await page.mouse.down();
+  await expect(runtimeCanvas).toHaveAttribute('data-ik-rotation-axis', 'y');
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-highlight-state',
+    'drag',
+  );
+  await page.mouse.move(
+    box.x + ringProjections.y.end.x,
+    box.y + ringProjections.y.end.y,
+    { steps: 12 },
+  );
+  expect(
+    await page.evaluate(() => {
+      const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+        document: { objects: Array<{ kind: string; mannequinPose?: unknown }> };
+        history: { past: unknown[] };
+        inProgressMannequinPose: unknown;
+      };
+      return {
+        pose: structuredClone(
+          state.document.objects.find(({ kind }) => kind === 'mannequin')
+            ?.mannequinPose,
+        ),
+        historyLength: state.history.past.length,
+        inProgress: state.inProgressMannequinPose !== null,
+      };
+    }),
+  ).toEqual({
+    pose: before.pose,
+    historyLength: before.historyLength,
+    inProgress: true,
+  });
+
+  await page.mouse.up();
+  const after = await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+      document: {
+        objects: Array<{
+          kind: string;
+          mannequinPose?: {
+            id: string;
+            headRotationDeg: { x: number; y: number; z: number };
+          };
+        }>;
+      };
+      history: { past: unknown[] };
+      inProgressMannequinPose: unknown;
+    };
+    return {
+      pose: structuredClone(
+        state.document.objects.find(({ kind }) => kind === 'mannequin')
+          ?.mannequinPose,
+      ),
+      historyLength: state.history.past.length,
+      inProgress: state.inProgressMannequinPose,
+    };
+  });
+  expect(after.pose?.id).toBe('custom');
+  expect(Math.abs(after.pose?.headRotationDeg.y ?? 0)).toBeGreaterThan(5);
+  expect(after.pose?.headRotationDeg.x).toBe(0);
+  expect(after.pose?.headRotationDeg.z).toBe(0);
+  const expected = structuredClone(before.pose) as typeof after.pose;
+  if (expected === undefined || after.pose === undefined) return;
+  expected.id = 'custom';
+  expected.headRotationDeg = after.pose.headRotationDeg;
+  expect(after.pose).toEqual(expected);
+  expect(after.historyLength).toBe(before.historyLength + 1);
+  expect(after.inProgress).toBeNull();
+});
+
+test('hovered hand IK handle exposes local rotation rings that preview and commit once', async ({
+  page,
+}) => {
+  const { canvas, runtimeCanvas } = await openMannequin(page);
+  await page.getByRole('button', { name: '카메라' }).click();
+  await page.getByRole('button', { name: '정면', exact: true }).click();
+  await page.getByRole('button', { name: '장면', exact: true }).click();
+  await page.getByRole('button', { name: 'T 포즈' }).click();
+  await page.getByRole('button', { name: '손 IK' }).click();
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-joint-projections',
+    /left-hand/,
+  );
+
+  const handleProjections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
+  ) as Record<'left-hand', { x: number; y: number }>;
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) return;
+  await page.mouse.move(
+    box.x + handleProjections['left-hand'].x,
+    box.y + handleProjections['left-hand'].y,
+  );
+
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-rotation-handle',
+    'left-hand',
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-highlight-state',
+    'hover',
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-highlight-handle',
+    'left-hand',
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-highlight-kind',
+    'position',
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-highlight-color',
+    /^#[0-9a-f]{6}$/,
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-rotation-ring-projections',
+    /"z"/,
+  );
+  const ringProjections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-rotation-ring-projections')) ??
+      '{}',
+  ) as Record<
+    'x' | 'y' | 'z',
+    { start: { x: number; y: number }; end: { x: number; y: number } }
+  >;
+  const before = await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+      document: {
+        objects: Array<{
+          kind: string;
+          mannequinPose?: {
+            arms: {
+              left: {
+                wristRotationDeg: { x: number; y: number; z: number };
+              };
+            };
+          };
+        }>;
+      };
+      history: { past: unknown[] };
+    };
+    return {
+      wrist: structuredClone(
+        state.document.objects.find(({ kind }) => kind === 'mannequin')
+          ?.mannequinPose?.arms.left.wristRotationDeg,
+      ),
+      historyLength: state.history.past.length,
+    };
+  });
+
+  await page.mouse.move(
+    box.x + ringProjections.z.start.x,
+    box.y + ringProjections.z.start.y,
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-highlight-state',
+    'hover',
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-highlight-kind',
+    'rotation',
+  );
+  await expect(runtimeCanvas).toHaveAttribute('data-ik-highlight-axis', 'z');
+  await page.mouse.down();
+  await expect(runtimeCanvas).toHaveAttribute('data-ik-rotation-axis', 'z');
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-highlight-state',
+    'drag',
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-highlight-kind',
+    'rotation',
+  );
+  await expect(runtimeCanvas).toHaveAttribute('data-ik-highlight-axis', 'z');
+  await expect(runtimeCanvas).toHaveAttribute('data-orbit-enabled', 'false');
+  await page.mouse.move(
+    box.x + ringProjections.z.end.x,
+    box.y + ringProjections.z.end.y,
+    { steps: 12 },
+  );
+  await expect(runtimeCanvas).toHaveAttribute('data-mannequin-pose', 'custom');
+  expect(
+    await page.evaluate(() => {
+      const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+        document: {
+          objects: Array<{
+            kind: string;
+            mannequinPose?: { arms: { left: { wristRotationDeg: unknown } } };
+          }>;
+        };
+        history: { past: unknown[] };
+        inProgressMannequinPose: unknown;
+      };
+      return {
+        wrist: structuredClone(
+          state.document.objects.find(({ kind }) => kind === 'mannequin')
+            ?.mannequinPose?.arms.left.wristRotationDeg,
+        ),
+        historyLength: state.history.past.length,
+        inProgress: state.inProgressMannequinPose !== null,
+      };
+    }),
+  ).toEqual({
+    wrist: before.wrist,
+    historyLength: before.historyLength,
+    inProgress: true,
+  });
+
+  await page.mouse.up();
+  await expect(runtimeCanvas).not.toHaveAttribute(
+    'data-ik-rotation-axis',
+    /.+/,
+  );
+  await expect(runtimeCanvas).toHaveAttribute('data-orbit-enabled', 'true');
+  const after = await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+      document: {
+        objects: Array<{
+          kind: string;
+          mannequinPose?: { arms: { left: { wristRotationDeg: unknown } } };
+        }>;
+      };
+      history: { past: unknown[] };
+      inProgressMannequinPose: unknown;
+    };
+    return {
+      wrist: structuredClone(
+        state.document.objects.find(({ kind }) => kind === 'mannequin')
+          ?.mannequinPose?.arms.left.wristRotationDeg,
+      ),
+      historyLength: state.history.past.length,
+      inProgress: state.inProgressMannequinPose,
+    };
+  });
+  expect(after.wrist).not.toEqual(before.wrist);
+  expect(after.historyLength).toBe(before.historyLength + 1);
+  expect(after.inProgress).toBeNull();
+});
+
+test('elbow IK exposes constrained bend and lateral rotation rings', async ({
+  page,
+}) => {
+  const { canvas, runtimeCanvas } = await openMannequin(page);
+  await page.getByRole('button', { name: '카메라' }).click();
+  await page.getByRole('button', { name: '정면', exact: true }).click();
+  await page.getByRole('button', { name: '장면', exact: true }).click();
+  await page.getByRole('button', { name: 'A 포즈' }).click();
+  await page.getByRole('button', { name: '손 IK' }).click();
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-joint-projections',
+    /left-elbow/,
+  );
+
+  const handleProjections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
+  ) as Record<'left-elbow', { x: number; y: number }>;
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) return;
+  await page.mouse.move(
+    box.x + handleProjections['left-elbow'].x,
+    box.y + handleProjections['left-elbow'].y,
+  );
+
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-rotation-handle',
+    'left-elbow',
+  );
+  const ringProjections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-rotation-ring-projections')) ??
+      '{}',
+  ) as Partial<
+    Record<
+      'x' | 'y' | 'z',
+      { start: { x: number; y: number }; end: { x: number; y: number } }
+    >
+  >;
+  expect(Object.keys(ringProjections).sort()).toEqual(['x', 'z']);
+  expect(ringProjections.z).toBeDefined();
+  if (ringProjections.z === undefined) return;
+  const before = await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+      document: {
+        objects: Array<{
+          kind: string;
+          mannequinPose?: {
+            arms: {
+              left: {
+                shoulderRotationDeg: unknown;
+                elbowBendDeg: number;
+                elbowDeviationDeg: number;
+              };
+            };
+          };
+        }>;
+      };
+      history: { past: unknown[] };
+    };
+    const arm = state.document.objects.find(({ kind }) => kind === 'mannequin')
+      ?.mannequinPose?.arms.left;
+    return {
+      arm: structuredClone(arm),
+      historyLength: state.history.past.length,
+    };
+  });
+
+  await page.mouse.move(
+    box.x + ringProjections.z.start.x,
+    box.y + ringProjections.z.start.y,
+  );
+  await page.mouse.down();
+  await expect(runtimeCanvas).toHaveAttribute('data-ik-rotation-axis', 'z');
+  await page.mouse.move(
+    box.x + ringProjections.z.end.x,
+    box.y + ringProjections.z.end.y,
+    { steps: 12 },
+  );
+  await page.mouse.up();
+
+  const after = await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+      document: {
+        objects: Array<{
+          kind: string;
+          mannequinPose?: {
+            arms: {
+              left: {
+                shoulderRotationDeg: unknown;
+                elbowBendDeg: number;
+                elbowDeviationDeg: number;
+              };
+            };
+          };
+        }>;
+      };
+      history: { past: unknown[] };
+    };
+    return {
+      arm: structuredClone(
+        state.document.objects.find(({ kind }) => kind === 'mannequin')
+          ?.mannequinPose?.arms.left,
+      ),
+      historyLength: state.history.past.length,
+    };
+  });
+  expect(after.arm?.elbowDeviationDeg).toBe(8);
+  expect(after.arm?.elbowBendDeg).toBe(before.arm?.elbowBendDeg);
+  expect(after.arm?.shoulderRotationDeg).toEqual(
+    before.arm?.shoulderRotationDeg,
+  );
+  expect(after.historyLength).toBe(before.historyLength + 1);
+
+  const posedProjections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
+  ) as Record<'left-hand', { x: number; y: number }>;
+  const handStart = posedProjections['left-hand'];
+  const handTarget = { x: handStart.x - 12, y: handStart.y + 4 };
+  await page.mouse.move(box.x + handStart.x, box.y + handStart.y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + handTarget.x, box.y + handTarget.y, {
+    steps: 10,
+  });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => {
+      const finalProjections = JSON.parse(
+        (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
+      ) as Record<'left-hand', { x: number; y: number }>;
+      return Math.hypot(
+        finalProjections['left-hand'].x - handTarget.x,
+        finalProjections['left-hand'].y - handTarget.y,
+      );
+    })
+    .toBeLessThan(0.5);
+  const afterHandDrag = await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+      document: {
+        objects: Array<{
+          kind: string;
+          mannequinPose?: {
+            arms: { left: { elbowDeviationDeg: number } };
+          };
+        }>;
+      };
+      history: { past: unknown[] };
+    };
+    return {
+      elbowDeviationDeg: state.document.objects.find(
+        ({ kind }) => kind === 'mannequin',
+      )?.mannequinPose?.arms.left.elbowDeviationDeg,
+      historyLength: state.history.past.length,
+    };
+  });
+  expect(afterHandDrag.elbowDeviationDeg).toBe(8);
+  expect(afterHandDrag.historyLength).toBe(before.historyLength + 2);
+});
+
+test('knee IK exposes constrained bend and lateral rotation rings', async ({
+  page,
+}) => {
+  const { canvas, runtimeCanvas } = await openMannequin(page);
+  await page.getByRole('button', { name: '카메라' }).click();
+  await page.getByRole('button', { name: '정면', exact: true }).click();
+  await page.getByRole('button', { name: '장면', exact: true }).click();
+  await page.getByRole('button', { name: '걷기 준비' }).click();
+  await page.getByRole('button', { name: '손 IK' }).click();
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-joint-projections',
+    /right-knee/,
+  );
+
+  const handleProjections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
+  ) as Record<'right-knee', { x: number; y: number }>;
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) return;
+  await page.mouse.move(
+    box.x + handleProjections['right-knee'].x,
+    box.y + handleProjections['right-knee'].y,
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-ik-rotation-handle',
+    'right-knee',
+  );
+  const ringProjections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-rotation-ring-projections')) ??
+      '{}',
+  ) as Partial<
+    Record<
+      'x' | 'y' | 'z',
+      { start: { x: number; y: number }; end: { x: number; y: number } }
+    >
+  >;
+  expect(Object.keys(ringProjections).sort()).toEqual(['x', 'z']);
+  expect(ringProjections.z).toBeDefined();
+  if (ringProjections.z === undefined) return;
+  const before = await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+      document: {
+        objects: Array<{
+          kind: string;
+          mannequinPose?: {
+            legs: {
+              right: {
+                hipRotationDeg: unknown;
+                kneeBendDeg: number;
+                kneeDeviationDeg: number;
+                ankleRotationDeg: unknown;
+              };
+            };
+          };
+        }>;
+      };
+      history: { past: unknown[] };
+    };
+    return {
+      leg: structuredClone(
+        state.document.objects.find(({ kind }) => kind === 'mannequin')
+          ?.mannequinPose?.legs.right,
+      ),
+      historyLength: state.history.past.length,
+    };
+  });
+
+  await page.mouse.move(
+    box.x + ringProjections.z.start.x,
+    box.y + ringProjections.z.start.y,
+  );
+  await page.mouse.down();
+  await expect(runtimeCanvas).toHaveAttribute('data-ik-rotation-axis', 'z');
+  await page.mouse.move(
+    box.x + ringProjections.z.end.x,
+    box.y + ringProjections.z.end.y,
+    { steps: 12 },
+  );
+  await page.mouse.up();
+
+  const after = await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+      document: {
+        objects: Array<{
+          kind: string;
+          mannequinPose?: { legs: { right: unknown } };
+        }>;
+      };
+      history: { past: unknown[] };
+    };
+    return {
+      leg: structuredClone(
+        state.document.objects.find(({ kind }) => kind === 'mannequin')
+          ?.mannequinPose?.legs.right,
+      ) as {
+        hipRotationDeg: unknown;
+        kneeBendDeg: number;
+        kneeDeviationDeg: number;
+        ankleRotationDeg: unknown;
+      },
+      historyLength: state.history.past.length,
+    };
+  });
+  expect(Math.abs(after.leg.kneeDeviationDeg)).toBe(5);
+  expect({
+    ...after.leg,
+    kneeDeviationDeg: before.leg?.kneeDeviationDeg,
+  }).toEqual(before.leg);
+  expect(after.historyLength).toBe(before.historyLength + 1);
+
+  const posedProjections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
+  ) as Record<'right-foot' | 'right-knee', { x: number; y: number }>;
+  const footStart = posedProjections['right-foot'];
+  const knee = posedProjections['right-knee'];
+  const towardKnee = {
+    x: knee.x - footStart.x,
+    y: knee.y - footStart.y,
+  };
+  const towardKneeLength = Math.hypot(towardKnee.x, towardKnee.y);
+  const footTarget = {
+    x: footStart.x + (towardKnee.x / towardKneeLength) * 12,
+    y: footStart.y + (towardKnee.y / towardKneeLength) * 12,
+  };
+  await page.mouse.move(box.x + footStart.x, box.y + footStart.y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + footTarget.x, box.y + footTarget.y, {
+    steps: 10,
+  });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => {
+      const finalProjections = JSON.parse(
+        (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
+      ) as Record<'right-foot', { x: number; y: number }>;
+      return Math.hypot(
+        finalProjections['right-foot'].x - footTarget.x,
+        finalProjections['right-foot'].y - footTarget.y,
+      );
+    })
+    .toBeLessThan(0.5);
+  const afterFootDrag = await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+      document: {
+        objects: Array<{
+          kind: string;
+          mannequinPose?: {
+            legs: { right: { kneeDeviationDeg: number } };
+          };
+        }>;
+      };
+      history: { past: unknown[] };
+    };
+    return {
+      kneeDeviationDeg: state.document.objects.find(
+        ({ kind }) => kind === 'mannequin',
+      )?.mannequinPose?.legs.right.kneeDeviationDeg,
+      historyLength: state.history.past.length,
+    };
+  });
+  expect(Math.abs(afterFootDrag.kneeDeviationDeg ?? 0)).toBe(5);
+  expect(afterFootDrag.historyLength).toBe(before.historyLength + 2);
 });
 
 test('articulated hand raycast selects the document root', async ({ page }) => {
@@ -308,8 +935,28 @@ for (const side of ['left', 'right'] as const) {
       box.x + projections[side].x,
       box.y + projections[side].y,
     );
+    await expect(runtimeCanvas).toHaveAttribute(
+      'data-ik-highlight-handle',
+      `${side}-hand`,
+    );
+    await expect(runtimeCanvas).toHaveAttribute(
+      'data-ik-highlight-kind',
+      'position',
+    );
+    await expect(runtimeCanvas).toHaveAttribute(
+      'data-ik-highlight-state',
+      'hover',
+    );
     await page.mouse.down();
     await expect(runtimeCanvas).toHaveAttribute('data-ik-dragging', side);
+    await expect(runtimeCanvas).toHaveAttribute(
+      'data-ik-highlight-state',
+      'drag',
+    );
+    await expect(runtimeCanvas).toHaveAttribute(
+      'data-ik-highlight-kind',
+      'position',
+    );
     await expect(runtimeCanvas).toHaveAttribute('data-orbit-enabled', 'false');
     await page.mouse.move(
       box.x + projections[side].x + (side === 'left' ? -64 : 64),

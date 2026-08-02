@@ -19,6 +19,22 @@ function radialExtentAtY(
   return extent;
 }
 
+function depthExtentsAtY(
+  geometry: BufferGeometry,
+  targetY: number,
+  tolerance = 0.012,
+) {
+  const position = geometry.getAttribute('position');
+  let front = 0;
+  let back = 0;
+  for (let index = 0; index < position.count; index += 1) {
+    if (Math.abs(position.getY(index) - targetY) > tolerance) continue;
+    front = Math.max(front, -position.getZ(index));
+    back = Math.max(back, position.getZ(index));
+  }
+  return { front, back };
+}
+
 function countOpenBoundaryEdges(geometry: BufferGeometry) {
   const positions = geometry.getAttribute('position');
   const index = geometry.getIndex();
@@ -98,6 +114,18 @@ describe('studio mannequin appearance geometry', () => {
     expect(geometry.foot.boundingBox?.min.z).toBeLessThan(-0.2);
     expect(geometry.foot.boundingBox?.max.z).toBeLessThan(0.1);
     expect(signedVolume(geometry.foot)).toBeGreaterThan(0);
+
+    for (const part of Object.values(geometry)) part.dispose();
+  });
+
+  it('models a projected chest and lower face so front and back read differently', () => {
+    const geometry = createStudioMannequinGeometries();
+    const upperChest = depthExtentsAtY(geometry.torso, 0.12);
+    geometry.head.computeBoundingBox();
+
+    expect(upperChest.front).toBeGreaterThan(upperChest.back * 1.1);
+    expect(geometry.head.boundingBox?.min.z).toBeLessThan(-0.098);
+    expect(geometry.head.boundingBox?.max.z).toBeGreaterThan(0.1);
 
     for (const part of Object.values(geometry)) part.dispose();
   });

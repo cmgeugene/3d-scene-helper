@@ -48,7 +48,44 @@ function createHeadGeometry() {
     const y = sourceY * 0.13;
     let z = sourceZ * 0.105 * (1 - lowerHalf * 0.08);
     if (z < -0.075) z = -0.075 + (z + 0.075) * 0.42;
+    if (sourceZ < 0) {
+      const lowerFace = Math.max(0, 1 - Math.abs(sourceY + 0.35) / 0.65);
+      z -= 0.018 * Math.max(0, -sourceZ) * (0.35 + lowerFace * 0.65);
+    }
     position.setXYZ(index, x, y, z);
+  }
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function createTorsoGeometry() {
+  const geometry = createProfileGeometry(
+    [
+      [0.122, -0.25],
+      [0.112, -0.22],
+      [0.118, -0.17],
+      [0.145, -0.08],
+      [0.178, 0.06],
+      [0.19, 0.12],
+      [0.172, 0.19],
+      [0.122, 0.22],
+    ],
+    28,
+    0.72,
+  );
+  const position = geometry.getAttribute('position');
+  for (let index = 0; index < position.count; index += 1) {
+    const y = position.getY(index);
+    let z = position.getZ(index);
+    const upperChest = Math.max(0, 1 - Math.abs(y - 0.11) / 0.2);
+    if (z < 0) {
+      z = z * (1 + upperChest * 0.12) - upperChest * 0.004;
+    } else {
+      z *= 1 - upperChest * 0.035;
+    }
+    position.setZ(index, z);
   }
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
@@ -121,20 +158,7 @@ function createFootGeometry() {
 
 export function createStudioMannequinGeometries() {
   return {
-    torso: createProfileGeometry(
-      [
-        [0.122, -0.25],
-        [0.112, -0.22],
-        [0.118, -0.17],
-        [0.145, -0.08],
-        [0.178, 0.06],
-        [0.19, 0.12],
-        [0.172, 0.19],
-        [0.122, 0.22],
-      ],
-      28,
-      0.72,
-    ),
+    torso: createTorsoGeometry(),
     pelvis: createProfileGeometry(
       [
         [0.1, -0.1],
@@ -206,7 +230,7 @@ export function createStudioMannequinGeometries() {
       0.62,
     ),
     thumb: new CapsuleGeometry(0.009, 0.024, 4, 10),
-    nose: new ConeGeometry(0.02, 0.055, 12).rotateX(-Math.PI / 2),
+    nose: new ConeGeometry(0.024, 0.068, 14).rotateX(-Math.PI / 2),
     foot: createFootGeometry(),
   };
 }

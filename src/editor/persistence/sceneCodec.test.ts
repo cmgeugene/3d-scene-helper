@@ -72,6 +72,38 @@ describe('sceneCodec', () => {
     ).toHaveProperty('mannequinPose.arms.left.elbowBendDeg', 74);
   });
 
+  it('기존 v2 팔다리 포즈의 누락된 joint deviation을 0도로 보정한다', () => {
+    const legacyV2 = structuredClone(
+      createStarterSceneDocument(SCENE_IDS),
+    ) as unknown as {
+      objects: Array<{
+        kind: string;
+        mannequinPose?: {
+          arms: Record<'left' | 'right', { elbowDeviationDeg?: number }>;
+          legs: Record<'left' | 'right', { kneeDeviationDeg?: number }>;
+        };
+      }>;
+    };
+    const mannequin = legacyV2.objects.find(({ kind }) => kind === 'mannequin');
+    if (mannequin?.mannequinPose === undefined) {
+      throw new Error('starter mannequin pose가 필요합니다.');
+    }
+    delete mannequin.mannequinPose.arms.left.elbowDeviationDeg;
+    delete mannequin.mannequinPose.arms.right.elbowDeviationDeg;
+    delete mannequin.mannequinPose.legs.left.kneeDeviationDeg;
+    delete mannequin.mannequinPose.legs.right.kneeDeviationDeg;
+
+    const migrated = parseSceneDocument(JSON.stringify(legacyV2));
+    const pose = migrated.objects.find(
+      ({ kind }) => kind === 'mannequin',
+    )?.mannequinPose;
+
+    expect(pose?.arms.left.elbowDeviationDeg).toBe(0);
+    expect(pose?.arms.right.elbowDeviationDeg).toBe(0);
+    expect(pose?.legs.left.kneeDeviationDeg).toBe(0);
+    expect(pose?.legs.right.kneeDeviationDeg).toBe(0);
+  });
+
   it('v1 scene을 v2 default mannequin pose로 안전하게 migration한다', () => {
     const legacy = createLegacyV1Scene();
 
