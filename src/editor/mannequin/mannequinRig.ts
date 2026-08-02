@@ -630,16 +630,26 @@ export interface MannequinLegChain {
   foot: MannequinVector3;
 }
 
-export function getMannequinLegChain(
+interface MannequinLegKinematics {
+  hip: Vector3;
+  knee: Vector3;
+  ankle: Vector3;
+  hipQuaternion: Quaternion;
+  kneeQuaternion: Quaternion;
+  footQuaternion: Quaternion;
+}
+
+function getMannequinLegKinematics(
   pose: MannequinPose,
   side: MannequinSide,
-): MannequinLegChain {
+): MannequinLegKinematics {
+  const leg = pose.legs[side];
   const hip = new Vector3(
     MANNEQUIN_LEG_ANCHORS[side].hip.x,
     MANNEQUIN_LEG_ANCHORS[side].hip.y,
     MANNEQUIN_LEG_ANCHORS[side].hip.z,
   );
-  const hipQuaternion = quaternionFromDegrees(pose.legs[side].hipRotationDeg);
+  const hipQuaternion = quaternionFromDegrees(leg.hipRotationDeg);
   const knee = hip
     .clone()
     .addScaledVector(
@@ -648,21 +658,39 @@ export function getMannequinLegChain(
     );
   const kneeQuaternion = hipQuaternion.clone().multiply(
     quaternionFromDegrees({
-      x: -pose.legs[side].kneeBendDeg,
+      x: -leg.kneeBendDeg,
       y: 0,
-      z: pose.legs[side].kneeDeviationDeg,
+      z: leg.kneeDeviationDeg,
     }),
   );
-  const foot = knee
+  const ankle = knee
     .clone()
     .addScaledVector(
       DOWN.clone().applyQuaternion(kneeQuaternion),
       MANNEQUIN_LEG_LENGTHS.shin,
     );
+  const footQuaternion = kneeQuaternion
+    .clone()
+    .multiply(quaternionFromDegrees(leg.ankleRotationDeg));
+  return {
+    hip,
+    knee,
+    ankle,
+    hipQuaternion,
+    kneeQuaternion,
+    footQuaternion,
+  };
+}
+
+export function getMannequinLegChain(
+  pose: MannequinPose,
+  side: MannequinSide,
+): MannequinLegChain {
+  const { hip, knee, ankle } = getMannequinLegKinematics(pose, side);
   return {
     hip: plainVector(hip),
     knee: plainVector(knee),
-    foot: plainVector(foot),
+    foot: plainVector(ankle),
   };
 }
 
@@ -1149,35 +1177,8 @@ export function computeMannequinPoseBounds(
           ),
         ),
     );
-    const hip = new Vector3(
-      MANNEQUIN_LEG_ANCHORS[side].hip.x,
-      MANNEQUIN_LEG_ANCHORS[side].hip.y,
-      MANNEQUIN_LEG_ANCHORS[side].hip.z,
-    );
-    const hipQuaternion = quaternionFromDegrees(pose.legs[side].hipRotationDeg);
-    const knee = hip
-      .clone()
-      .addScaledVector(
-        DOWN.clone().applyQuaternion(hipQuaternion),
-        MANNEQUIN_LEG_LENGTHS.thigh,
-      );
-    const kneeQuaternion = hipQuaternion
-      .clone()
-      .multiply(
-        new Quaternion().setFromAxisAngle(
-          new Vector3(1, 0, 0),
-          -MathUtils.degToRad(pose.legs[side].kneeBendDeg),
-        ),
-      );
-    const ankle = knee
-      .clone()
-      .addScaledVector(
-        DOWN.clone().applyQuaternion(kneeQuaternion),
-        MANNEQUIN_LEG_LENGTHS.shin,
-      );
-    const footQuaternion = kneeQuaternion
-      .clone()
-      .multiply(quaternionFromDegrees(pose.legs[side].ankleRotationDeg));
+    const { hip, knee, ankle, hipQuaternion, kneeQuaternion, footQuaternion } =
+      getMannequinLegKinematics(pose, side);
     include(hip, 0.06);
     includeBox(
       hip

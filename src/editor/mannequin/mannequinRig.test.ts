@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
+import {
+  Box3,
+  Euler,
+  Group,
+  MathUtils,
+  Mesh,
+  Quaternion,
+  Vector3,
+} from 'three';
 import { mannequinPoseSchema } from '../persistence/sceneSchema';
+import { createStudioMannequinGeometries } from './mannequinAppearance';
 import {
   MANNEQUIN_ARM_ANCHORS,
   MANNEQUIN_ARM_LENGTHS,
@@ -25,6 +34,48 @@ function vectorDistance(
   b: { x: number; y: number; z: number },
 ) {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function renderedShinAndFootBounds(
+  pose: ReturnType<typeof createMannequinPose>,
+  side: 'left' | 'right',
+) {
+  const geometries = createStudioMannequinGeometries();
+  const pelvis = new Group();
+  pelvis.position.y = 0.06;
+  const hip = new Group();
+  const hipAnchor = MANNEQUIN_LEG_ANCHORS[side].hip;
+  hip.position.set(hipAnchor.x, hipAnchor.y - 0.06, hipAnchor.z);
+  hip.rotation.set(
+    MathUtils.degToRad(pose.legs[side].hipRotationDeg.x),
+    MathUtils.degToRad(pose.legs[side].hipRotationDeg.y),
+    MathUtils.degToRad(pose.legs[side].hipRotationDeg.z),
+    'XYZ',
+  );
+  const knee = new Group();
+  knee.position.y = -MANNEQUIN_LEG_LENGTHS.thigh;
+  knee.rotation.set(
+    -MathUtils.degToRad(pose.legs[side].kneeBendDeg),
+    0,
+    MathUtils.degToRad(pose.legs[side].kneeDeviationDeg),
+    'XYZ',
+  );
+  const ankle = new Group();
+  ankle.position.y = -MANNEQUIN_LEG_LENGTHS.shin;
+  ankle.rotation.set(
+    MathUtils.degToRad(pose.legs[side].ankleRotationDeg.x),
+    MathUtils.degToRad(pose.legs[side].ankleRotationDeg.y),
+    MathUtils.degToRad(pose.legs[side].ankleRotationDeg.z),
+    'XYZ',
+  );
+  knee.add(new Mesh(geometries.shin), ankle);
+  ankle.add(new Mesh(geometries.foot));
+  hip.add(knee);
+  pelvis.add(hip);
+  pelvis.updateWorldMatrix(true, true);
+  const bounds = new Box3().setFromObject(pelvis);
+  for (const geometry of Object.values(geometries)) geometry.dispose();
+  return bounds;
 }
 
 function armBendDirection(chain: ReturnType<typeof getMannequinArmChain>) {
@@ -897,6 +948,28 @@ describe('direct elbow and knee targets', () => {
 });
 
 describe('posed mannequin bounds', () => {
+  it.each([
+    { side: 'right' as const, deviationDeg: 5, hipZDeg: -24, bendDeg: 68 },
+    { side: 'left' as const, deviationDeg: -5, hipZDeg: 24, bendDeg: 112 },
+  ])(
+    'contains the rendered $side shin and foot at maximum $deviationDeg° knee deviation',
+    ({ side, deviationDeg, hipZDeg, bendDeg }) => {
+      const pose = createMannequinPose('default');
+      pose.legs[side].hipRotationDeg.z = hipZDeg;
+      pose.legs[side].kneeBendDeg = bendDeg;
+      pose.legs[side].kneeDeviationDeg = deviationDeg;
+      const rendered = renderedShinAndFootBounds(pose, side);
+      const computed = computeMannequinPoseBounds(pose);
+
+      expect(computed.min.x).toBeLessThanOrEqual(rendered.min.x);
+      expect(computed.min.y).toBeLessThanOrEqual(rendered.min.y);
+      expect(computed.min.z).toBeLessThanOrEqual(rendered.min.z);
+      expect(computed.max.x).toBeGreaterThanOrEqual(rendered.max.x);
+      expect(computed.max.y).toBeGreaterThanOrEqual(rendered.max.y);
+      expect(computed.max.z).toBeGreaterThanOrEqual(rendered.max.z);
+    },
+  );
+
   it('uses the same backward knee hinge direction as FK and rendering', () => {
     const bent = createMannequinPose('default');
     bent.legs.left.kneeBendDeg = 90;
