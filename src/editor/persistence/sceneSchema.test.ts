@@ -222,6 +222,12 @@ describe('sceneDocumentSchema', () => {
     );
   });
 
+  it('Room Set은 기본 정면 카메라 쪽으로 열린 면을 향해 생성된다', () => {
+    const room = createSceneObject('room-facing-camera', { kind: 'room' });
+
+    expect(room.transform.rotationDeg).toEqual({ x: 0, y: 180, z: 0 });
+  });
+
   it('starter factory는 주입 ID까지 최종 schema로 검증한다', () => {
     expect(() =>
       createStarterSceneDocument({ ...STARTER_IDS, documentId: '' }),

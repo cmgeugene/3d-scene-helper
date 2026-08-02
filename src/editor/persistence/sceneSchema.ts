@@ -271,15 +271,18 @@ export interface AddSceneObjectInput extends CreateSceneObjectInput {
   kind: AddableSceneObjectKind;
 }
 
-const identityTransform = (positionY: number) => ({
+const identityTransform = (positionY: number, rotationY = 0) => ({
   position: { x: 0, y: positionY, z: 0 },
-  rotationDeg: { x: 0, y: 0, z: 0 },
+  rotationDeg: { x: 0, y: rotationY, z: 0 },
   scale: { x: 1, y: 1, z: 1 },
 });
 
 const OBJECT_DEFAULTS: Record<
   SceneObjectKind,
-  Pick<SceneObject, 'name' | 'dimensions' | 'color'> & { positionY: number }
+  Pick<SceneObject, 'name' | 'dimensions' | 'color'> & {
+    positionY: number;
+    rotationY?: number;
+  }
 > = {
   floor: {
     name: 'Floor',
@@ -322,6 +325,7 @@ const OBJECT_DEFAULTS: Record<
     dimensions: { x: 4, y: 2.7, z: 4 },
     color: '#d0cbc2',
     positionY: 1.35,
+    rotationY: 180,
   },
 };
 
@@ -344,7 +348,7 @@ export function createSceneObject(
     kind: input.kind,
     name: input.name ?? defaults.name,
     transform: {
-      ...identityTransform(defaults.positionY),
+      ...identityTransform(defaults.positionY, defaults.rotationY),
       ...(position === undefined ? {} : { position }),
     },
     dimensions: defaults.dimensions,

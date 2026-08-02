@@ -7,7 +7,10 @@ interface BrowserEditorState {
       id: string;
       kind: string;
       visible: boolean;
-      transform: { position: { x: number; y: number; z: number } };
+      transform: {
+        position: { x: number; y: number; z: number };
+        rotationDeg: { x: number; y: number; z: number };
+      };
     }>;
     outputCamera: {
       position: { x: number; y: number; z: number };
@@ -105,7 +108,7 @@ test('viewport Canvas가 실제 WebGL 장면과 bounded shadow renderer를 시�
   await waitForCanvasChange(canvas, renderedWithShadows);
 });
 
-test('viewport 방 세트는 바닥과 두 벽을 렌더링하고 천장·앞·오른쪽을 연다', async ({
+test('viewport 방 세트는 기본 카메라에 실내를 보이며 천장·앞·오른쪽을 연다', async ({
   page,
 }) => {
   const canvas = await openViewport(page);
@@ -132,7 +135,27 @@ test('viewport 방 세트는 바닥과 두 벽을 렌더링하고 천장·앞·�
     'data-surface-grid-kinds',
     'floor,room',
   );
-  await waitForCanvasChange(canvas, beforeRoom);
+  const roomFrame = await waitForCanvasChange(canvas, beforeRoom);
+  const roomRotation = await page.evaluate(
+    () =>
+      globalThis.__I2V_EDITOR_STORE__
+        ?.getState()
+        .document.objects.find((object) => object.kind === 'room')?.transform
+        .rotationDeg,
+  );
+  expect(roomRotation).toEqual({ x: 0, y: 180, z: 0 });
+
+  const image = PNG.sync.read(roomFrame);
+  const visibleInteriorColors = new Set<string>();
+  for (let y = image.height * 0.15; y < image.height * 0.78; y += 1) {
+    for (let x = image.width * 0.1; x < image.width * 0.9; x += 1) {
+      const index = (Math.floor(y) * image.width + Math.floor(x)) * 4;
+      visibleInteriorColors.add(
+        `${image.data[index] >> 4}:${image.data[index + 1] >> 4}:${image.data[index + 2] >> 4}`,
+      );
+    }
+  }
+  expect(visibleInteriorColors.size).toBeGreaterThan(5);
   await expect(
     page.getByRole('button', { name: 'Room Set', exact: true }),
   ).toBeVisible();
