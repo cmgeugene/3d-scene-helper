@@ -360,6 +360,23 @@ export async function startCompanionServer(
         return;
       }
 
+      const sceneRenderContentMatch = requestUrl.pathname.match(
+        /^\/api\/scene-renders\/([^/]+)\/content$/,
+      );
+      if (request.method === 'GET' && sceneRenderContentMatch !== null) {
+        const renderId = decodeURIComponent(sceneRenderContentMatch[1] ?? '');
+        const { data, mimeType } =
+          await generationStore.readSceneRenderContent(renderId);
+        response.writeHead(200, {
+          'Content-Type': mimeType,
+          'Content-Length': String(data.byteLength),
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        response.end(data);
+        return;
+      }
+
       if (
         request.method === 'GET' &&
         requestUrl.pathname === '/api/generations'

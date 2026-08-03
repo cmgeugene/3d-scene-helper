@@ -17,6 +17,11 @@ import { encodeSceneDocument } from '../persistence/sceneCodec';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
 import { createEditorStore } from '../state/editorStore';
 import { EditorShell } from './EditorShell';
+import type {
+  CompanionBrowserClient,
+  GenerationRecord,
+} from '../../assistant/companionClient';
+import { TEST_LAYOUT_SPEC } from '../../../shared/layoutSpecTestFixture';
 
 const sceneViewportModuleLoaded = vi.hoisted(() => vi.fn());
 const sceneViewportFailure = vi.hoisted(() => ({
@@ -122,6 +127,123 @@ describe('EditorShell', () => {
     ).toBeVisible();
     expect(screen.getByRole('group', { name: '장면 시작' })).toBeVisible();
     expect(screen.getByRole('group', { name: '파일과 출력' })).toBeVisible();
+  });
+
+  it('3D 씬과 키프레임 작업 모드를 전환하고 선택한 완료 generation으로 보정에 진입한다', async () => {
+    const user = userEvent.setup();
+    const scene = createStarterSceneDocument({
+      documentId: 'scene-test',
+      floorId: 'floor-test',
+      mannequinId: 'mannequin-test',
+    });
+    const generation: GenerationRecord = {
+      id: 'generation-selected',
+      threadId: 'thread-test',
+      turnId: 'turn-test',
+      status: 'completed',
+      prompt: '$imagegen selected',
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: scene,
+      referenceSnapshots: [],
+      parentGenerationId: null,
+      versionNumber: 1,
+      feedback: null,
+      generationMode: 'fresh',
+      layoutRenderId: 'render-selected',
+      referenceIds: [],
+      attachments: [{ type: 'layout', id: 'render-selected', kind: 'layout' }],
+      revisedPrompt: null,
+      result: {
+        artifactId: 'artifact-selected',
+        contentHash: `sha256:${'a'.repeat(64)}`,
+        mimeType: 'image/png',
+        width: 1920,
+        height: 1080,
+        byteLength: 3,
+      },
+      error: null,
+      createdAt: '2026-08-03T00:00:00.000Z',
+      updatedAt: '2026-08-03T00:01:00.000Z',
+    };
+    const client: CompanionBrowserClient = {
+      getRuntime: async () => ({
+        state: 'ready',
+        version: 'codex-test',
+        account: { type: 'chatgpt', email: null, planType: 'plus' },
+        requiresOpenaiAuth: true,
+        error: null,
+      }),
+      startThread: async () => 'thread-test',
+      startTurn: async () => 'turn-test',
+      interruptTurn: async () => undefined,
+      listReferences: async () => [],
+      importReference: async () => {
+        throw new Error('not used');
+      },
+      updateReference: async () => {
+        throw new Error('not used');
+      },
+      loadReferenceBlob: async () => new Blob(),
+      createSceneRender: async () => {
+        throw new Error('not used');
+      },
+      loadSceneRenderBlob: async () =>
+        new Blob(['layout'], { type: 'image/png' }),
+      listGenerations: async () => [generation],
+      startGeneration: async () => {
+        throw new Error('not used');
+      },
+      loadGenerationBlob: async () =>
+        new Blob(['result'], { type: 'image/png' }),
+      subscribe: () => () => undefined,
+    };
+    const storage = createMemoryStorage();
+    const store = createTestStore();
+
+    render(
+      <EditorShell
+        store={store}
+        webGLState="available"
+        storage={storage}
+        companionConnection={{
+          version: 1,
+          url: 'http://127.0.0.1:61234',
+          token: 'a'.repeat(43),
+        }}
+        assistantClientFactory={() => client}
+        createAssistantObjectUrl={() => 'blob:test'}
+        revokeAssistantObjectUrl={() => undefined}
+      />,
+    );
+
+    const modes = screen.getByRole('group', { name: '작업 모드' });
+    expect(
+      within(modes).getByRole('button', { name: '3D 씬' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await user.click(within(modes).getByRole('button', { name: '키프레임' }));
+    expect(
+      await screen.findByRole('heading', { name: '키프레임 작업 공간' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('region', { name: '장면 뷰포트' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '삭제' }),
+    ).not.toBeInTheDocument();
+    act(() => store.getState().selectObject('mannequin-test'));
+    await user.keyboard('{Delete}');
+    expect(
+      store
+        .getState()
+        .document.objects.some(({ id }) => id === 'mannequin-test'),
+    ).toBe(true);
+
+    await user.click(
+      await screen.findByRole('button', { name: '선택 결과로 보정' }),
+    );
+    expect(screen.getByRole('region', { name: '장면 뷰포트' })).toBeVisible();
+    expect(await screen.findByText('키프레임 보정 모드')).toBeVisible();
+    expect(screen.getByText(/v1.*generation-selected.*결과/)).toBeVisible();
   });
 
   it('우측 패널 너비를 키보드로 조절하고 확장·접기 상태를 저장한다', async () => {

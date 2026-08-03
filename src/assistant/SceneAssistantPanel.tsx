@@ -54,6 +54,8 @@ interface SceneAssistantPanelProps {
   createObjectUrl?: (blob: Blob) => string;
   revokeObjectUrl?: (url: string) => void;
   onRefinementModeChange?: (active: boolean) => void;
+  refinementSource?: GenerationRecord | null;
+  onRefinementSourceChange?: (generation: GenerationRecord | null) => void;
 }
 
 interface ConnectedSceneAssistantProps {
@@ -66,6 +68,8 @@ interface ConnectedSceneAssistantProps {
   createObjectUrl: (blob: Blob) => string;
   revokeObjectUrl: (url: string) => void;
   onRefinementModeChange: (active: boolean) => void;
+  refinementSource?: GenerationRecord | null;
+  onRefinementSourceChange: (generation: GenerationRecord | null) => void;
 }
 
 const defaultClientFactory = (connection: CompanionConnection) =>
@@ -75,6 +79,7 @@ const emptySelectedReferences = () => [];
 const defaultCreateObjectUrl = (blob: Blob) => URL.createObjectURL(blob);
 const defaultRevokeObjectUrl = (url: string) => URL.revokeObjectURL(url);
 const ignoreRefinementModeChange = () => undefined;
+const ignoreRefinementSourceChange = () => undefined;
 
 function accountLabel(runtime: CompanionRuntimeStatus) {
   if (runtime.account?.type === 'chatgpt') {
@@ -135,6 +140,8 @@ function ConnectedSceneAssistant({
   createObjectUrl,
   revokeObjectUrl,
   onRefinementModeChange,
+  refinementSource: controlledRefinementSource,
+  onRefinementSourceChange,
 }: ConnectedSceneAssistantProps) {
   const client = useMemo(
     () => clientFactory(connection),
@@ -156,8 +163,12 @@ function ConnectedSceneAssistant({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [generation, setGeneration] = useState<GenerationRecord | null>(null);
-  const [refinementSource, setRefinementSource] =
+  const [internalRefinementSource, setInternalRefinementSource] =
     useState<GenerationRecord | null>(null);
+  const refinementSource =
+    controlledRefinementSource === undefined
+      ? internalRefinementSource
+      : controlledRefinementSource;
   const [generationPreviewUrl, setGenerationPreviewUrl] = useState<
     string | null
   >(null);
@@ -169,6 +180,14 @@ function ConnectedSceneAssistant({
   const activeTurnIdRef = useRef<string | null>(null);
   const messageSequence = useRef(0);
   const generationPreviewUrlRef = useRef<string | null>(null);
+
+  const changeRefinementSource = useCallback(
+    (next: GenerationRecord | null) => {
+      setInternalRefinementSource(next);
+      onRefinementSourceChange(next);
+    },
+    [onRefinementSourceChange],
+  );
 
   useEffect(() => {
     onRefinementModeChange(refinementSource !== null);
@@ -544,9 +563,9 @@ function ConnectedSceneAssistant({
     setThreadId(null);
     setMessages([]);
     setConversationError(null);
-    setRefinementSource(null);
+    changeRefinementSource(null);
     clearSceneAssistantThread();
-  }, []);
+  }, [changeRefinementSource]);
 
   const busy = activeTurnId !== null || isSubmitting;
   const selectedReferences = getSelectedReferences();
@@ -701,18 +720,6 @@ function ConnectedSceneAssistant({
                 · {generation.result.width ?? '?'}×
                 {generation.result.height ?? '?'}
               </figcaption>
-              {generation.status === 'completed' &&
-              refinementSource === null ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRefinementSource(generation);
-                    setConversationError(null);
-                  }}
-                >
-                  이 결과를 기반으로 보정
-                </button>
-              ) : null}
             </figure>
           ) : null}
 
@@ -721,14 +728,14 @@ function ConnectedSceneAssistant({
               <div>
                 <strong>키프레임 보정 모드</strong>
                 <span>
-                  v{refinementSource.versionNumber} 결과 + 현재 3D 레이아웃 ·
-                  레퍼런스 최대 {maximumReferences}장
+                  v{refinementSource.versionNumber} · {refinementSource.id} 결과
+                  + 현재 3D 레이아웃 · 레퍼런스 최대 {maximumReferences}장
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => {
-                  setRefinementSource(null);
+                  changeRefinementSource(null);
                   setConversationError(null);
                 }}
                 disabled={busy}
@@ -907,6 +914,8 @@ export function SceneAssistantPanel({
   createObjectUrl = defaultCreateObjectUrl,
   revokeObjectUrl = defaultRevokeObjectUrl,
   onRefinementModeChange = ignoreRefinementModeChange,
+  refinementSource,
+  onRefinementSourceChange = ignoreRefinementSourceChange,
 }: SceneAssistantPanelProps) {
   if (connection === null) {
     return (
@@ -939,6 +948,8 @@ export function SceneAssistantPanel({
       createObjectUrl={createObjectUrl}
       revokeObjectUrl={revokeObjectUrl}
       onRefinementModeChange={onRefinementModeChange}
+      refinementSource={refinementSource}
+      onRefinementSourceChange={onRefinementSourceChange}
     />
   );
 }

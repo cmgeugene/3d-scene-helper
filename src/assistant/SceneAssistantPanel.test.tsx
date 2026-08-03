@@ -30,6 +30,7 @@ const conversationMethods = {
   createSceneRender: async () => {
     throw new Error('not implemented in this test');
   },
+  loadSceneRenderBlob: async () => new Blob(),
   listGenerations: async () => [],
   startGeneration: async () => {
     throw new Error('not implemented in this test');
@@ -498,15 +499,14 @@ describe('SceneAssistantPanel', () => {
         createObjectUrl={() => 'blob:source-generation'}
         revokeObjectUrl={() => undefined}
         onRefinementModeChange={onRefinementModeChange}
+        refinementSource={sourceGeneration}
       />,
     );
 
-    await user.click(
-      await screen.findByRole('button', {
-        name: '이 결과를 기반으로 보정',
-      }),
-    );
-    expect(screen.getByText('키프레임 보정 모드')).toBeVisible();
+    expect(await screen.findByText('키프레임 보정 모드')).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: '이 결과를 기반으로 보정' }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText(/레퍼런스 최대 3장/)).toBeVisible();
     await waitFor(() =>
       expect(onRefinementModeChange).toHaveBeenLastCalledWith(true),

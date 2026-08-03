@@ -99,6 +99,20 @@ describe('GenerationStore', () => {
     const content = await store.readGenerationContent(generation.id);
     expect(content.data).toEqual(onePixelPng);
     expect(content.mimeType).toBe('image/png');
+    const layoutContent = await store.readSceneRenderContent(render.id);
+    expect(layoutContent.data).toEqual(onePixelPng);
+    expect(layoutContent.mimeType).toBe('image/png');
+    expect(layoutContent.render).toMatchObject({
+      id: render.id,
+      sceneId: 'scene-test',
+    });
+    const restartedStore = new GenerationStore(root);
+    await expect(restartedStore.listGenerations()).resolves.toEqual([
+      expect.objectContaining({ id: generation.id, status: 'completed' }),
+    ]);
+    await expect(
+      restartedStore.readSceneRenderContent(render.id),
+    ).resolves.toMatchObject({ data: onePixelPng, mimeType: 'image/png' });
 
     const manifest = JSON.parse(
       await readFile(path.join(root, 'generations.json'), 'utf8'),
@@ -106,6 +120,14 @@ describe('GenerationStore', () => {
     expect(manifest.generations[0]?.result.assetPath).toMatch(
       /^generations\/artifact_.+\.png$/,
     );
+  });
+
+  it('존재하지 않는 저장 레이아웃 렌더 콘텐츠를 명확히 거부한다', async () => {
+    const { store } = await createStore();
+
+    await expect(
+      store.readSceneRenderContent('missing-render'),
+    ).rejects.toThrow('레이아웃 렌더를 찾을 수 없습니다');
   });
 
   it('이미지 결과 없이 끝난 turn은 실패로 기록한다', async () => {

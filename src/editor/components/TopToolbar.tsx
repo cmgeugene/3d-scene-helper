@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { FrameExportHandler } from '../export/exportFrame';
@@ -19,6 +19,7 @@ interface TopToolbarProps {
   storage: Storage;
   frameExporter: FrameExportHandler | null;
   exportUnavailable?: boolean;
+  titleAccessory?: ReactNode;
 }
 
 const GUIDE_OPTIONS: ReadonlyArray<{
@@ -57,6 +58,7 @@ export function TopToolbar({
   storage,
   frameExporter,
   exportUnavailable = false,
+  titleAccessory,
 }: TopToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportButtonRef = useRef<HTMLButtonElement>(null);
@@ -88,7 +90,10 @@ export function TopToolbar({
 
   return (
     <header className="top-toolbar">
-      <h1>I2V 3D Scene Helper</h1>
+      <div className="toolbar-brand">
+        <h1>I2V 3D Scene Helper</h1>
+        {titleAccessory}
+      </div>
       <nav className="toolbar-actions" aria-label="장면 도구">
         <div className="toolbar-group" role="group" aria-label="장면 시작">
           <button

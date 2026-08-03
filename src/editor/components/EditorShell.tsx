@@ -12,8 +12,13 @@ import {
 } from 'react';
 import { useStore, type StoreApi } from 'zustand';
 import { SceneAssistantPanel } from '../../assistant/SceneAssistantPanel';
+import { KeyframeWorkspace } from '../../assistant/KeyframeWorkspace';
 import { ReferenceManager } from '../../assistant/ReferenceManager';
-import type { ReferenceArtifact } from '../../assistant/companionClient';
+import type {
+  CompanionBrowserClient,
+  GenerationRecord,
+  ReferenceArtifact,
+} from '../../assistant/companionClient';
 import type { CompanionConnection } from '../../assistant/companionConnection';
 import {
   IMAGEGEN_MAX_INPUT_IMAGES,
@@ -53,6 +58,11 @@ interface EditorShellProps {
   companionConnection?: CompanionConnection | null;
   companionConnectionError?: string | null;
   onDisconnectCompanion?: () => void;
+  assistantClientFactory?: (
+    connection: CompanionConnection,
+  ) => CompanionBrowserClient;
+  createAssistantObjectUrl?: (blob: Blob) => string;
+  revokeAssistantObjectUrl?: (url: string) => void;
 }
 
 interface RuntimeFailure {
@@ -104,6 +114,18 @@ function readAssistantPanelCollapsed(storage: Storage) {
   }
 }
 
+const WORKSPACE_MODE_STORAGE_KEY = 'i2v.workspace.mode.v1';
+
+function readWorkspaceMode(storage: Storage): 'scene' | 'keyframe' {
+  try {
+    return storage.getItem(WORKSPACE_MODE_STORAGE_KEY) === 'keyframe'
+      ? 'keyframe'
+      : 'scene';
+  } catch {
+    return 'scene';
+  }
+}
+
 function ViewportPlaceholder({ webGLState }: { webGLState: WebGLState }) {
   return (
     <div
@@ -129,6 +151,9 @@ export function EditorShell({
   companionConnection = null,
   companionConnectionError = null,
   onDisconnectCompanion,
+  assistantClientFactory,
+  createAssistantObjectUrl,
+  revokeAssistantObjectUrl,
 }: EditorShellProps) {
   const [frameExporter, setFrameExporter] = useState<FrameExportHandler | null>(
     null,
@@ -140,6 +165,11 @@ export function EditorShell({
     ReferenceArtifact[]
   >([]);
   const [refinementModeActive, setRefinementModeActive] = useState(false);
+  const [refinementSource, setRefinementSource] =
+    useState<GenerationRecord | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<'scene' | 'keyframe'>(() =>
+    readWorkspaceMode(storage),
+  );
   const [assistantPanelWidth, setAssistantPanelWidth] = useState(() =>
     readAssistantPanelWidth(storage),
   );
@@ -223,6 +253,14 @@ export function EditorShell({
   }, [assistantPanelCollapsed, storage]);
 
   useEffect(() => {
+    try {
+      storage.setItem(WORKSPACE_MODE_STORAGE_KEY, workspaceMode);
+    } catch {
+      // Workspace preference should not make the editor unusable.
+    }
+  }, [storage, workspaceMode]);
+
+  useEffect(() => {
     if (!resizingAssistantPanel) return undefined;
     const handlePointerMove = (event: PointerEvent) => {
       setAssistantPanelExpanded(false);
@@ -295,123 +333,173 @@ export function EditorShell({
   const workspaceStyle = {
     '--assistant-panel-width': `${assistantPanelWidth}px`,
   } as CSSProperties;
+  const workspaceModeSwitch = (
+    <div className="workspace-mode-switch" role="group" aria-label="작업 모드">
+      <button
+        type="button"
+        aria-pressed={workspaceMode === 'scene'}
+        onClick={() => setWorkspaceMode('scene')}
+      >
+        3D 씬
+      </button>
+      <button
+        type="button"
+        aria-pressed={workspaceMode === 'keyframe'}
+        onClick={() => setWorkspaceMode('keyframe')}
+      >
+        키프레임
+      </button>
+    </div>
+  );
 
   return (
     <main className="editor-shell">
-      <EditorShortcuts store={store} />
-      <div className="desktop-editor">
-        <TopToolbar
-          store={store}
-          storage={storage}
-          frameExporter={frameExporter}
-          exportUnavailable={runtimeFailure !== null}
-        />
-        <div
-          className={`editor-workspace${assistantPanelCollapsed ? ' editor-workspace--assistant-collapsed' : ''}`}
-          style={workspaceStyle}
-        >
-          <aside className="left-panel" aria-label="에셋과 장면">
-            <AssetPanel store={store} />
-            <Outliner store={store} />
-          </aside>
-          <section className="viewport-panel" aria-label="장면 뷰포트">
-            {canvasEnabled && webGLState === 'available' ? (
-              <SceneErrorBoundary onError={handleViewportError}>
-                <Suspense
-                  fallback={<ViewportPlaceholder webGLState={webGLState} />}
-                >
-                  <SceneViewport
-                    store={store}
-                    onExportReady={handleExportReady}
-                    onRuntimeFailure={handleRuntimeFailure}
-                  />
-                </Suspense>
-              </SceneErrorBoundary>
-            ) : (
-              <ViewportPlaceholder webGLState={webGLState} />
-            )}
-            {runtimeFailure?.kind !== 'context-loss' ? null : (
-              <div className="viewport-placeholder" role="alert">
-                <p className="eyebrow">WebGL 연결 오류</p>
-                <h2>장면 데이터는 안전합니다</h2>
-                <p>{runtimeFailure.message}</p>
-              </div>
-            )}
-            <p
-              className={`webgl-status webgl-status--${effectiveWebGLState}`}
-              role="status"
-              data-webgl-state={effectiveWebGLState}
-            >
-              {WEBGL_MESSAGES[effectiveWebGLState]}
-            </p>
-          </section>
-          <div
-            className="assistant-panel-resizer"
-            role="separator"
-            aria-label="우측 패널 너비 조절"
-            aria-orientation="vertical"
-            aria-valuemin={ASSISTANT_PANEL_MIN_WIDTH}
-            aria-valuemax={maxAssistantPanelWidth()}
-            aria-valuenow={assistantPanelWidth}
-            tabIndex={assistantPanelCollapsed ? -1 : 0}
-            onPointerDown={beginAssistantPanelResize}
-            onKeyDown={resizeAssistantPanelWithKeyboard}
+      {workspaceMode === 'scene' ? <EditorShortcuts store={store} /> : null}
+      <div className={`desktop-editor desktop-editor--${workspaceMode}`}>
+        {workspaceMode === 'scene' ? (
+          <TopToolbar
+            store={store}
+            storage={storage}
+            frameExporter={frameExporter}
+            exportUnavailable={runtimeFailure !== null}
+            titleAccessory={workspaceModeSwitch}
           />
-          <aside className="inspector-panel" aria-label="속성">
-            {assistantPanelCollapsed ? (
-              <div className="assistant-dock-collapsed">
-                <button
-                  type="button"
-                  aria-label="우측 패널 펼치기"
-                  title="우측 패널 펼치기"
-                  onClick={() => setAssistantPanelCollapsed(false)}
-                >
-                  ‹
-                </button>
-                <span>Assistant</span>
-              </div>
-            ) : (
-              <>
-                <div className="assistant-dock-toolbar">
-                  <span>우측 패널 · {assistantPanelWidth}px</span>
-                  <div>
-                    <button
-                      type="button"
-                      onClick={toggleAssistantPanelExpanded}
-                    >
-                      {assistantPanelExpanded ? '이전 너비' : '넓게'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAssistantPanelCollapsed(true)}
-                    >
-                      접기
-                    </button>
-                  </div>
+        ) : (
+          <header className="top-toolbar keyframe-toolbar">
+            <div className="toolbar-brand">
+              <h1>I2V 3D Scene Helper</h1>
+              {workspaceModeSwitch}
+            </div>
+            <span>Generation workspace</span>
+          </header>
+        )}
+        {workspaceMode === 'scene' ? (
+          <div
+            className={`editor-workspace${assistantPanelCollapsed ? ' editor-workspace--assistant-collapsed' : ''}`}
+            style={workspaceStyle}
+          >
+            <aside className="left-panel" aria-label="에셋과 장면">
+              <AssetPanel store={store} />
+              <Outliner store={store} />
+            </aside>
+            <section className="viewport-panel" aria-label="장면 뷰포트">
+              {canvasEnabled && webGLState === 'available' ? (
+                <SceneErrorBoundary onError={handleViewportError}>
+                  <Suspense
+                    fallback={<ViewportPlaceholder webGLState={webGLState} />}
+                  >
+                    <SceneViewport
+                      store={store}
+                      onExportReady={handleExportReady}
+                      onRuntimeFailure={handleRuntimeFailure}
+                    />
+                  </Suspense>
+                </SceneErrorBoundary>
+              ) : (
+                <ViewportPlaceholder webGLState={webGLState} />
+              )}
+              {runtimeFailure?.kind !== 'context-loss' ? null : (
+                <div className="viewport-placeholder" role="alert">
+                  <p className="eyebrow">WebGL 연결 오류</p>
+                  <h2>장면 데이터는 안전합니다</h2>
+                  <p>{runtimeFailure.message}</p>
                 </div>
-                <Inspector store={store} />
-                <SceneAssistantPanel
-                  connection={companionConnection}
-                  connectionError={companionConnectionError}
-                  onDisconnect={onDisconnectCompanion}
-                  getSceneContext={() => store.getState().document}
-                  getSelectedReferences={getSelectedReferences}
-                  captureLayout={
-                    frameExporter === null ? null : captureAssistantLayout
-                  }
-                  onRefinementModeChange={setRefinementModeActive}
-                />
-              </>
-            )}
-          </aside>
-        </div>
-        <ReferenceManager
-          connection={companionConnection}
-          targets={referenceTargets}
-          maximumSelected={maximumSelectedReferences}
-          reservedInputImages={reservedGenerationImages}
-          onSelectionChange={setSelectedReferences}
-        />
+              )}
+              <p
+                className={`webgl-status webgl-status--${effectiveWebGLState}`}
+                role="status"
+                data-webgl-state={effectiveWebGLState}
+              >
+                {WEBGL_MESSAGES[effectiveWebGLState]}
+              </p>
+            </section>
+            <div
+              className="assistant-panel-resizer"
+              role="separator"
+              aria-label="우측 패널 너비 조절"
+              aria-orientation="vertical"
+              aria-valuemin={ASSISTANT_PANEL_MIN_WIDTH}
+              aria-valuemax={maxAssistantPanelWidth()}
+              aria-valuenow={assistantPanelWidth}
+              tabIndex={assistantPanelCollapsed ? -1 : 0}
+              onPointerDown={beginAssistantPanelResize}
+              onKeyDown={resizeAssistantPanelWithKeyboard}
+            />
+            <aside className="inspector-panel" aria-label="속성">
+              {assistantPanelCollapsed ? (
+                <div className="assistant-dock-collapsed">
+                  <button
+                    type="button"
+                    aria-label="우측 패널 펼치기"
+                    title="우측 패널 펼치기"
+                    onClick={() => setAssistantPanelCollapsed(false)}
+                  >
+                    ‹
+                  </button>
+                  <span>Assistant</span>
+                </div>
+              ) : (
+                <>
+                  <div className="assistant-dock-toolbar">
+                    <span>우측 패널 · {assistantPanelWidth}px</span>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={toggleAssistantPanelExpanded}
+                      >
+                        {assistantPanelExpanded ? '이전 너비' : '넓게'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAssistantPanelCollapsed(true)}
+                      >
+                        접기
+                      </button>
+                    </div>
+                  </div>
+                  <Inspector store={store} />
+                  <SceneAssistantPanel
+                    connection={companionConnection}
+                    connectionError={companionConnectionError}
+                    onDisconnect={onDisconnectCompanion}
+                    getSceneContext={() => store.getState().document}
+                    getSelectedReferences={getSelectedReferences}
+                    captureLayout={
+                      frameExporter === null ? null : captureAssistantLayout
+                    }
+                    onRefinementModeChange={setRefinementModeActive}
+                    refinementSource={refinementSource}
+                    onRefinementSourceChange={setRefinementSource}
+                    clientFactory={assistantClientFactory}
+                    createObjectUrl={createAssistantObjectUrl}
+                    revokeObjectUrl={revokeAssistantObjectUrl}
+                  />
+                </>
+              )}
+            </aside>
+          </div>
+        ) : (
+          <KeyframeWorkspace
+            connection={companionConnection}
+            storage={storage}
+            clientFactory={assistantClientFactory}
+            createObjectUrl={createAssistantObjectUrl}
+            revokeObjectUrl={revokeAssistantObjectUrl}
+            onRefine={(generation) => {
+              setRefinementSource(generation);
+              setWorkspaceMode('scene');
+            }}
+          />
+        )}
+        {workspaceMode === 'scene' ? (
+          <ReferenceManager
+            connection={companionConnection}
+            targets={referenceTargets}
+            maximumSelected={maximumSelectedReferences}
+            reservedInputImages={reservedGenerationImages}
+            onSelectionChange={setSelectedReferences}
+          />
+        ) : null}
         <StatusBar store={store} />
       </div>
       <section

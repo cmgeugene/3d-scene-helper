@@ -316,6 +316,12 @@ describe('CompanionClient', () => {
     await expect(
       client.loadGenerationBlob('generation-1'),
     ).resolves.toMatchObject({ type: 'image/png', size: 3 });
+    await expect(client.loadSceneRenderBlob('render-1')).resolves.toMatchObject(
+      {
+        type: 'image/png',
+        size: 3,
+      },
+    );
 
     expect(fetchCalls[0]).toMatchObject({
       input: 'http://127.0.0.1:61234/api/scene-renders?sceneId=scene-1',
@@ -339,5 +345,8 @@ describe('CompanionClient', () => {
         generationMode: 'fresh',
       }),
     });
+    expect(fetchCalls.at(-1)?.input).toBe(
+      'http://127.0.0.1:61234/api/scene-renders/render-1/content',
+    );
   });
 });

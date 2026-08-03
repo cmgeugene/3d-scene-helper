@@ -173,6 +173,7 @@ export interface CompanionBrowserClient {
     sceneId: string,
     signal?: AbortSignal,
   ): Promise<SceneRenderArtifact>;
+  loadSceneRenderBlob(renderId: string, signal?: AbortSignal): Promise<Blob>;
   listGenerations(signal?: AbortSignal): Promise<GenerationRecord[]>;
   startGeneration(
     input: StartGenerationInput,
@@ -376,6 +377,15 @@ export class CompanionClient implements CompanionBrowserClient {
     return z
       .object({ render: sceneRenderArtifactSchema })
       .parse(await response.json()).render;
+  }
+
+  async loadSceneRenderBlob(renderId: string, signal?: AbortSignal) {
+    const response = await this.fetchImpl(
+      `${this.connection.url}/api/scene-renders/${encodeURIComponent(renderId)}/content`,
+      { headers: this.headers(), signal },
+    );
+    if (!response.ok) throw await this.createHttpError(response);
+    return response.blob();
   }
 
   async listGenerations(signal?: AbortSignal) {

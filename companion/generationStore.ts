@@ -162,6 +162,16 @@ export class GenerationStore {
     };
   }
 
+  async readSceneRenderContent(renderId: string) {
+    const { render, assetPath } = await this.resolveSceneRender(renderId);
+    const filePath = await resolveProjectArtifact(this.projectRoot, assetPath);
+    return {
+      render,
+      data: await readFile(filePath),
+      mimeType: render.mimeType,
+    };
+  }
+
   createGeneration(input: CreateGenerationInput) {
     return this.mutate(() => this.createGenerationInternal(input));
   }

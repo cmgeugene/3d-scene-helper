@@ -376,6 +376,18 @@ describe('Companion loopback API', () => {
     expect(content.status).toBe(200);
     expect(Buffer.from(await content.arrayBuffer())).toEqual(onePixelPng);
 
+    const unauthorizedLayout = await fetch(
+      `${server.url}/api/scene-renders/${render.render.id}/content`,
+    );
+    expect(unauthorizedLayout.status).toBe(401);
+    const layoutContent = await fetch(
+      `${server.url}/api/scene-renders/${render.render.id}/content`,
+      { headers: { Authorization: 'Bearer test-token' } },
+    );
+    expect(layoutContent.status).toBe(200);
+    expect(layoutContent.headers.get('content-type')).toBe('image/png');
+    expect(Buffer.from(await layoutContent.arrayBuffer())).toEqual(onePixelPng);
+
     runtime.startTurn.mockResolvedValueOnce('turn_2');
     const refinementResponse = await fetch(`${server.url}/api/generations`, {
       method: 'POST',
