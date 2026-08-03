@@ -1,0 +1,645 @@
+import { randomBytes } from 'node:crypto';
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { z } from 'zod';
+import type {
+  AppServerStatus,
+  CodexRuntime,
+  TurnInput,
+} from './appServerClient';
+import type { JsonRpcNotification, JsonRpcServerRequest } from './jsonRpcPeer';
+import { layoutSpecSchema } from '../shared/layoutSpecSchema';
+import {
+  FRESH_GENERATION_MAX_REFERENCES,
+  getMaximumReferenceImages,
+} from '../shared/imageInputBudget';
+import { sceneDocumentSchema } from '../src/editor/persistence/sceneSchema';
+import { GenerationStore } from './generationStore';
+import { resolveProjectArtifact } from './projectArtifacts';
+import {
+  ReferenceInputError,
+  ReferenceNotFoundError,
+  ReferenceStore,
+  referenceKindSchema,
+  referenceMetadataInputSchema,
+  toPublicReference,
+} from './referenceStore';
+
+const threadBodySchema = z.object({
+  threadId: z.string().min(1).optional(),
+});
+
+const turnBodySchema = z.object({
+  threadId: z.string().min(1),
+  prompt: z.string().min(1).max(100_000),
+  attachments: z.array(z.string().min(1)).max(16).default([]),
+  referenceIds: z.array(z.string().min(1)).max(16).default([]),
+});
+
+const interruptBodySchema = z.object({
+  threadId: z.string().min(1),
+  turnId: z.string().min(1),
+});
+
+const referenceImportQuerySchema = z.object({
+  name: z.string().min(1).max(120),
+  kind: referenceKindSchema,
+  fileName: z.string().min(1).max(255),
+});
+
+const sceneRenderQuerySchema = z.object({
+  sceneId: z.string().min(1).max(200),
+});
+
+const generationBodySchema = z
+  .object({
+    threadId: z.string().min(1),
+    prompt: z.string().min(1).max(100_000),
+    layoutSpec: layoutSpecSchema,
+    sceneSnapshot: sceneDocumentSchema,
+    parentGenerationId: z.string().min(1).nullable().default(null),
+    feedback: z.string().trim().min(1).max(4_000).nullable().default(null),
+    generationMode: z.enum(['fresh', 'edit']).default('fresh'),
+    layoutRenderId: z.string().min(1),
+    referenceIds: z
+      .array(z.string().min(1))
+      .max(
+        FRESH_GENERATION_MAX_REFERENCES,
+        `3D 레이아웃을 포함한 생성에서는 레퍼런스를 최대 ${FRESH_GENERATION_MAX_REFERENCES}장까지 사용할 수 있습니다.`,
+      )
+      .default([]),
+  })
+  .superRefine((body, context) => {
+    const editing = body.generationMode === 'edit';
+    if (editing && body.parentGenerationId === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parentGenerationId'],
+        message: '보정 생성에는 원본 키프레임이 필요합니다.',
+      });
+    }
+    if (!editing && body.parentGenerationId !== null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parentGenerationId'],
+        message: '새 생성에는 부모 키프레임을 지정할 수 없습니다.',
+      });
+    }
+    const maximumReferences = getMaximumReferenceImages({
+      includeLayout: true,
+      includeSourceKeyframe: editing,
+    });
+    if (body.referenceIds.length > maximumReferences) {
+      context.addIssue({
+        code: 'too_big',
+        origin: 'array',
+        maximum: maximumReferences,
+        inclusive: true,
+        path: ['referenceIds'],
+        message: `보정 원본과 3D 레이아웃을 포함하면 레퍼런스는 최대 ${maximumReferences}장까지 사용할 수 있습니다.`,
+      });
+    }
+  });
+
+const completedImageGenerationSchema = z.object({
+  threadId: z.string(),
+  turnId: z.string(),
+  item: z.object({
+    type: z.literal('imageGeneration'),
+    status: z.string(),
+    revisedPrompt: z.string().nullable(),
+    savedPath: z.string().optional(),
+  }),
+});
+
+const completedTurnNotificationSchema = z.object({
+  threadId: z.string(),
+  turn: z.object({
+    id: z.string(),
+    status: z.enum(['completed', 'failed', 'interrupted', 'inProgress']),
+    error: z.object({ message: z.string() }).nullable(),
+  }),
+});
+
+export interface CompanionServerOptions {
+  runtime: CodexRuntime;
+  projectRoot: string;
+  allowedOrigins: string[];
+  token?: string;
+  port?: number;
+}
+
+export interface CompanionServerHandle {
+  token: string;
+  url: string;
+  close(): Promise<void>;
+}
+
+interface SseClient {
+  response: ServerResponse;
+  heartbeat: NodeJS.Timeout;
+}
+
+function sendJson(
+  response: ServerResponse,
+  statusCode: number,
+  value: unknown,
+) {
+  response.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  response.end(JSON.stringify(value));
+}
+
+class RequestBodyTooLargeError extends Error {}
+
+async function readBody(request: IncomingMessage, maximumBytes: number) {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.byteLength;
+    if (size > maximumBytes)
+      throw new RequestBodyTooLargeError('요청 본문이 너무 큽니다.');
+    chunks.push(buffer);
+  }
+
+  return Buffer.concat(chunks);
+}
+
+async function readJson(request: IncomingMessage) {
+  const body = await readBody(request, 1_000_000);
+
+  if (body.length === 0) return {};
+  return JSON.parse(body.toString('utf8')) as unknown;
+}
+
+function writeSse(response: ServerResponse, event: string, value: unknown) {
+  response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`);
+}
+
+export async function startCompanionServer(
+  options: CompanionServerOptions,
+): Promise<CompanionServerHandle> {
+  const token = options.token ?? randomBytes(32).toString('base64url');
+  const sseClients = new Set<SseClient>();
+  const allowedOrigins = new Set(options.allowedOrigins);
+  const referenceStore = new ReferenceStore(options.projectRoot);
+  const generationStore = new GenerationStore(options.projectRoot);
+
+  const broadcast = (event: string, value: unknown) => {
+    for (const client of sseClients) writeSse(client.response, event, value);
+  };
+  const handleStatus = (status: AppServerStatus) =>
+    broadcast('runtime', status);
+  const handleNotification = (notification: JsonRpcNotification) => {
+    broadcast('codex', notification);
+    const processGenerationNotification = async () => {
+      if (notification.method === 'item/completed') {
+        const parsed = completedImageGenerationSchema.safeParse(
+          notification.params,
+        );
+        if (!parsed.success || parsed.data.item.savedPath === undefined) return;
+        const generation = await generationStore.importGenerationResult(
+          parsed.data.turnId,
+          parsed.data.item.savedPath,
+          parsed.data.item.revisedPrompt,
+        );
+        if (generation !== null) broadcast('generation', generation);
+        return;
+      }
+      if (notification.method === 'turn/completed') {
+        const parsed = completedTurnNotificationSchema.safeParse(
+          notification.params,
+        );
+        if (!parsed.success || parsed.data.turn.status === 'inProgress') return;
+        const generation = await generationStore.completeTurn(
+          parsed.data.turn.id,
+          parsed.data.turn.status,
+          parsed.data.turn.error?.message ?? null,
+        );
+        if (generation !== null) broadcast('generation', generation);
+      }
+    };
+    void processGenerationNotification()
+      .catch(async (error) => {
+        const directTurnId =
+          notification.params !== null &&
+          typeof notification.params === 'object' &&
+          'turnId' in notification.params &&
+          typeof notification.params.turnId === 'string'
+            ? notification.params.turnId
+            : null;
+        const nestedTurnId = completedTurnNotificationSchema.safeParse(
+          notification.params,
+        );
+        const turnId =
+          directTurnId ??
+          (nestedTurnId.success ? nestedTurnId.data.turn.id : null);
+        const message =
+          error instanceof Error
+            ? error.message
+            : '생성 결과를 프로젝트에 편입하지 못했습니다.';
+        if (turnId !== null) {
+          const generation = await generationStore.completeTurn(
+            turnId,
+            'failed',
+            message,
+          );
+          if (generation !== null) broadcast('generation', generation);
+        }
+        broadcast('generation-error', { turnId, error: message });
+      })
+      .catch((error) => {
+        broadcast('generation-error', {
+          turnId: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : '생성 실패 상태를 기록하지 못했습니다.',
+        });
+      });
+  };
+  const handleServerRequest = (request: JsonRpcServerRequest) =>
+    broadcast('codex-request', request);
+  options.runtime.on('status', handleStatus);
+  options.runtime.on('notification', handleNotification);
+  options.runtime.on('serverRequest', handleServerRequest);
+
+  const server = createServer(async (request, response) => {
+    const origin = request.headers.origin;
+    if (origin !== undefined && !allowedOrigins.has(origin)) {
+      sendJson(response, 403, { error: '허용되지 않은 Origin입니다.' });
+      return;
+    }
+    if (origin !== undefined) {
+      response.setHeader('Access-Control-Allow-Origin', origin);
+      response.setHeader('Vary', 'Origin');
+    }
+
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204, {
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+        'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+        'Access-Control-Max-Age': '600',
+      });
+      response.end();
+      return;
+    }
+
+    const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
+    if (request.method === 'GET' && requestUrl.pathname === '/healthz') {
+      sendJson(response, 200, { status: 'ok' });
+      return;
+    }
+
+    if (request.headers.authorization !== `Bearer ${token}`) {
+      sendJson(response, 401, {
+        error: '유효한 Companion 세션 토큰이 필요합니다.',
+      });
+      return;
+    }
+
+    try {
+      if (request.method === 'GET' && requestUrl.pathname === '/api/runtime') {
+        sendJson(response, 200, options.runtime.status);
+        return;
+      }
+
+      if (request.method === 'GET' && requestUrl.pathname === '/api/events') {
+        response.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+        response.write(': connected\n\n');
+        const client: SseClient = {
+          response,
+          heartbeat: setInterval(
+            () => response.write(': heartbeat\n\n'),
+            15_000,
+          ),
+        };
+        sseClients.add(client);
+        request.on('close', () => {
+          clearInterval(client.heartbeat);
+          sseClients.delete(client);
+        });
+        return;
+      }
+
+      if (
+        request.method === 'GET' &&
+        requestUrl.pathname === '/api/references'
+      ) {
+        sendJson(response, 200, {
+          version: 1,
+          references: await referenceStore.list(),
+        });
+        return;
+      }
+
+      if (
+        request.method === 'POST' &&
+        requestUrl.pathname === '/api/scene-renders'
+      ) {
+        const query = sceneRenderQuerySchema.parse(
+          Object.fromEntries(requestUrl.searchParams),
+        );
+        const render = await generationStore.importSceneRender(
+          query.sceneId,
+          await readBody(request, 25 * 1024 * 1024),
+        );
+        sendJson(response, 201, { render });
+        return;
+      }
+
+      if (
+        request.method === 'GET' &&
+        requestUrl.pathname === '/api/generations'
+      ) {
+        sendJson(response, 200, {
+          version: 1,
+          generations: await generationStore.listGenerations(),
+        });
+        return;
+      }
+
+      if (
+        request.method === 'POST' &&
+        requestUrl.pathname === '/api/generations'
+      ) {
+        const body = generationBodySchema.parse(await readJson(request));
+        if (options.runtime.status.capabilities?.imageGeneration === false) {
+          throw new ReferenceInputError(
+            '현재 Codex 모델 공급자에서는 imagegen을 사용할 수 없습니다.',
+          );
+        }
+        const layout = await generationStore.resolveSceneRender(
+          body.layoutRenderId,
+        );
+        const references = await referenceStore.resolveReferenceAttachments(
+          body.referenceIds,
+        );
+        const sourceGeneration =
+          body.generationMode === 'edit' && body.parentGenerationId !== null
+            ? await generationStore.resolveGenerationResult(
+                body.parentGenerationId,
+              )
+            : null;
+        if (
+          layout.render.sceneId !== body.sceneSnapshot.id ||
+          body.layoutSpec.sceneId !== body.sceneSnapshot.id
+        ) {
+          throw new ReferenceInputError(
+            '장면 스냅샷, 레이아웃 렌더와 LayoutSpec의 장면 ID가 일치하지 않습니다.',
+          );
+        }
+        const input: TurnInput[] = [{ type: 'text', text: body.prompt }];
+        if (sourceGeneration !== null) {
+          input.push({
+            type: 'localImage',
+            path: await resolveProjectArtifact(
+              options.projectRoot,
+              sourceGeneration.assetPath,
+            ),
+            detail: 'original',
+          });
+        }
+        input.push({
+          type: 'localImage',
+          path: await resolveProjectArtifact(
+            options.projectRoot,
+            layout.assetPath,
+          ),
+          detail: 'original',
+        });
+        for (const reference of references) {
+          input.push({
+            type: 'localImage',
+            path: await resolveProjectArtifact(
+              options.projectRoot,
+              reference.assetPath,
+            ),
+            detail: 'original',
+          });
+        }
+        const turnId = await options.runtime.startTurn(body.threadId, input);
+        const generation = await generationStore
+          .createGeneration({
+            threadId: body.threadId,
+            turnId,
+            prompt: body.prompt,
+            layoutSpec: body.layoutSpec,
+            sceneSnapshot: body.sceneSnapshot,
+            referenceSnapshots: references.map(toPublicReference),
+            parentGenerationId: body.parentGenerationId,
+            feedback: body.feedback,
+            generationMode: body.generationMode,
+            layoutRenderId: body.layoutRenderId,
+            referenceIds: references.map(({ id }) => id),
+            attachments: [
+              ...(sourceGeneration === null
+                ? []
+                : [
+                    {
+                      type: 'sourceGeneration' as const,
+                      id: sourceGeneration.generation.id,
+                      kind: null,
+                    },
+                  ]),
+              { type: 'layout', id: body.layoutRenderId, kind: 'layout' },
+              ...references.map(({ id, kind }) => ({
+                type: 'reference' as const,
+                id,
+                kind,
+              })),
+            ],
+          })
+          .catch(async (error) => {
+            await options.runtime
+              .interruptTurn(body.threadId, turnId)
+              .catch(() => undefined);
+            throw error;
+          });
+        sendJson(response, 202, { turnId, generation });
+        return;
+      }
+
+      const generationContentMatch = requestUrl.pathname.match(
+        /^\/api\/generations\/([^/]+)\/content$/,
+      );
+      if (request.method === 'GET' && generationContentMatch !== null) {
+        const generationId = decodeURIComponent(
+          generationContentMatch[1] ?? '',
+        );
+        const { data, mimeType } =
+          await generationStore.readGenerationContent(generationId);
+        response.writeHead(200, {
+          'Content-Type': mimeType,
+          'Content-Length': String(data.byteLength),
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        response.end(data);
+        return;
+      }
+
+      if (
+        request.method === 'POST' &&
+        requestUrl.pathname === '/api/references'
+      ) {
+        const query = referenceImportQuerySchema.parse(
+          Object.fromEntries(requestUrl.searchParams),
+        );
+        const reference = await referenceStore.importReference({
+          name: query.name,
+          kind: query.kind,
+          originalFileName: query.fileName,
+          data: await readBody(request, 25 * 1024 * 1024),
+        });
+        sendJson(response, 201, { reference });
+        return;
+      }
+
+      const referenceMatch = requestUrl.pathname.match(
+        /^\/api\/references\/([^/]+)$/,
+      );
+      if (request.method === 'PATCH' && referenceMatch !== null) {
+        const referenceId = decodeURIComponent(referenceMatch[1] ?? '');
+        const metadata = referenceMetadataInputSchema.parse(
+          await readJson(request),
+        );
+        const reference = await referenceStore.updateReference(
+          referenceId,
+          metadata,
+        );
+        sendJson(response, 200, { reference });
+        return;
+      }
+
+      const referenceContentMatch = requestUrl.pathname.match(
+        /^\/api\/references\/([^/]+)\/content$/,
+      );
+      if (request.method === 'GET' && referenceContentMatch !== null) {
+        const referenceId = decodeURIComponent(referenceContentMatch[1] ?? '');
+        const { reference, data } =
+          await referenceStore.readReferenceContent(referenceId);
+        response.writeHead(200, {
+          'Content-Type': reference.mimeType,
+          'Content-Length': String(data.byteLength),
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        response.end(data);
+        return;
+      }
+
+      if (request.method === 'POST' && requestUrl.pathname === '/api/threads') {
+        const body = threadBodySchema.parse(await readJson(request));
+        const threadId =
+          body.threadId === undefined
+            ? await options.runtime.startThread(options.projectRoot)
+            : await options.runtime.resumeThread(
+                body.threadId,
+                options.projectRoot,
+              );
+        sendJson(response, 200, { threadId });
+        return;
+      }
+
+      if (request.method === 'POST' && requestUrl.pathname === '/api/turns') {
+        const body = turnBodySchema.parse(await readJson(request));
+        const input: TurnInput[] = [{ type: 'text', text: body.prompt }];
+        const references = await referenceStore.resolveReferenceAttachments(
+          body.referenceIds,
+        );
+        const artifactPaths = [
+          ...body.attachments,
+          ...references.map(({ assetPath }) => assetPath),
+        ];
+        if (artifactPaths.length > 16) {
+          throw new ReferenceInputError(
+            '한 번의 요청에는 이미지 첨부를 최대 16개까지 사용할 수 있습니다.',
+          );
+        }
+        for (const artifactPath of artifactPaths) {
+          input.push({
+            type: 'localImage',
+            path: await resolveProjectArtifact(
+              options.projectRoot,
+              artifactPath,
+            ),
+            detail: 'original',
+          });
+        }
+        const turnId = await options.runtime.startTurn(body.threadId, input);
+        sendJson(response, 202, { turnId });
+        return;
+      }
+
+      if (
+        request.method === 'POST' &&
+        requestUrl.pathname === '/api/turns/interrupt'
+      ) {
+        const body = interruptBodySchema.parse(await readJson(request));
+        await options.runtime.interruptTurn(body.threadId, body.turnId);
+        sendJson(response, 200, { interrupted: true });
+        return;
+      }
+
+      sendJson(response, 404, { error: '요청한 Companion API가 없습니다.' });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Companion 요청이 실패했습니다.';
+      const statusCode =
+        error instanceof z.ZodError ||
+        error instanceof ReferenceInputError ||
+        error instanceof RequestBodyTooLargeError
+          ? 400
+          : error instanceof ReferenceNotFoundError
+            ? 404
+            : 500;
+      sendJson(response, statusCode, {
+        error: message,
+      });
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(options.port ?? 0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+
+  const address = server.address() as AddressInfo;
+  return {
+    token,
+    url: `http://127.0.0.1:${address.port}`,
+    async close() {
+      options.runtime.off('status', handleStatus);
+      options.runtime.off('notification', handleNotification);
+      options.runtime.off('serverRequest', handleServerRequest);
+      for (const client of sseClients) {
+        clearInterval(client.heartbeat);
+        client.response.end();
+      }
+      sseClients.clear();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) =>
+          error === undefined ? resolve() : reject(error),
+        );
+      });
+    },
+  };
+}

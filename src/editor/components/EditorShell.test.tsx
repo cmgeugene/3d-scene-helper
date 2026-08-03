@@ -8,7 +8,11 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SCENE_STORAGE_KEY } from '../constants';
+import {
+  ASSISTANT_PANEL_COLLAPSED_STORAGE_KEY,
+  ASSISTANT_PANEL_WIDTH_STORAGE_KEY,
+  SCENE_STORAGE_KEY,
+} from '../constants';
 import { encodeSceneDocument } from '../persistence/sceneCodec';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
 import { createEditorStore } from '../state/editorStore';
@@ -97,10 +101,9 @@ describe('EditorShell', () => {
       screen.getByRole('button', { name: 'Preserved cube' }),
     ).toBeVisible();
     expect(screen.getByRole('button', { name: 'JSON 내보내기' })).toBeEnabled();
-    expect(screen.getByRole('status')).toHaveAttribute(
-      'data-webgl-state',
-      'fallback',
-    );
+    expect(
+      screen.getByText('WebGL을 사용할 수 없어 기본 안내 화면을 표시합니다.'),
+    ).toHaveAttribute('data-webgl-state', 'fallback');
     expect(screen.getByRole('button', { name: 'PNG 내보내기' })).toBeDisabled();
     expect(store.getState().document).toEqual(preservedDocument);
     expect(consoleError).toHaveBeenCalled();
@@ -119,6 +122,66 @@ describe('EditorShell', () => {
     ).toBeVisible();
     expect(screen.getByRole('group', { name: '장면 시작' })).toBeVisible();
     expect(screen.getByRole('group', { name: '파일과 출력' })).toBeVisible();
+  });
+
+  it('우측 패널 너비를 키보드로 조절하고 확장·접기 상태를 저장한다', async () => {
+    const user = userEvent.setup();
+    const storage = createMemoryStorage({
+      [ASSISTANT_PANEL_WIDTH_STORAGE_KEY]: '400',
+    });
+    const view = render(
+      <EditorShell
+        store={createTestStore()}
+        webGLState="available"
+        storage={storage}
+      />,
+    );
+
+    const separator = screen.getByRole('separator', {
+      name: '우측 패널 너비 조절',
+    });
+    expect(separator).toHaveAttribute('aria-valuenow', '400');
+    separator.focus();
+    await user.keyboard('{ArrowLeft}');
+    expect(separator).toHaveAttribute('aria-valuenow', '416');
+    await waitFor(() =>
+      expect(storage.getItem(ASSISTANT_PANEL_WIDTH_STORAGE_KEY)).toBe('416'),
+    );
+
+    await user.click(screen.getByRole('button', { name: '넓게' }));
+    expect(Number(separator.getAttribute('aria-valuenow'))).toBeGreaterThan(
+      416,
+    );
+    await user.click(screen.getByRole('button', { name: '이전 너비' }));
+    expect(separator).toHaveAttribute('aria-valuenow', '416');
+
+    await user.click(screen.getByRole('button', { name: '접기' }));
+    expect(
+      screen.getByRole('button', { name: '우측 패널 펼치기' }),
+    ).toBeVisible();
+    expect(separator).toHaveAttribute('tabindex', '-1');
+    await waitFor(() =>
+      expect(storage.getItem(ASSISTANT_PANEL_COLLAPSED_STORAGE_KEY)).toBe(
+        'true',
+      ),
+    );
+
+    await user.click(screen.getByRole('button', { name: '우측 패널 펼치기' }));
+    expect(
+      screen.getByRole('heading', { name: 'Scene Assistant' }),
+    ).toBeVisible();
+    view.unmount();
+
+    render(
+      <EditorShell
+        store={createTestStore()}
+        webGLState="available"
+        storage={storage}
+      />,
+    );
+    expect(
+      screen.getByRole('separator', { name: '우측 패널 너비 조절' }),
+    ).toHaveAttribute('aria-valuenow', '416');
   });
 
   it('화면비와 가이드를 바꾸고 기본 장면으로 초기화한다', async () => {
@@ -175,6 +238,17 @@ describe('EditorShell', () => {
     expect(screen.getByLabelText('크기 X')).toHaveValue(1);
     expect(screen.getByLabelText('위치 X')).not.toBeDisabled();
     expect(screen.getByRole('button', { name: 'Mannequin' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    const nameInput = screen.getByLabelText('오브젝트 이름');
+    await user.clear(nameInput);
+    await user.type(nameInput, '정민');
+    await user.keyboard('{Enter}');
+
+    expect(store.getState().document.objects[1]?.name).toBe('정민');
+    expect(screen.getByRole('button', { name: '정민' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );

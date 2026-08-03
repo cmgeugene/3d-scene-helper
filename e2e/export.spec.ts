@@ -8,7 +8,7 @@ const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 async function openExportEditor(page: Page) {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
-  await expect(page.getByRole('status')).toHaveAttribute(
+  await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
     'data-webgl-state',
     'available',
   );
@@ -347,7 +347,7 @@ test('room set transform persists and changes the clean exported frame', async (
   await page.getByRole('button', { name: '로컬 저장' }).click();
   await page.reload();
 
-  await expect(page.getByRole('status')).toHaveAttribute(
+  await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
     'data-webgl-state',
     'available',
   );

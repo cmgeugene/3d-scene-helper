@@ -2,7 +2,10 @@ import { z } from 'zod';
 import {
   ASPECT_RATIO_VALUES,
   MANNEQUIN_REFERENCE_HEIGHT_M,
+  MAX_GENERATION_NOTES_LENGTH,
+  MAX_OBJECT_NAME_LENGTH,
   MAX_SCENE_NOTES_LENGTH,
+  MAX_SEMANTIC_MEANING_LENGTH,
   MAX_SHADOW_MAP_SIZE,
   OUTPUT_DIMENSION_RANGE,
   SCENE_DOCUMENT_VERSION,
@@ -80,6 +83,11 @@ export const mannequinPoseSchema = z.strictObject({
   }),
 });
 
+const semanticObjectSchema = z.strictObject({
+  meaning: z.string().trim().max(MAX_SEMANTIC_MEANING_LENGTH),
+  generationNotes: z.string().trim().max(MAX_GENERATION_NOTES_LENGTH),
+});
+
 const sceneObjectSchema = z
   .strictObject({
     id: stableIdSchema,
@@ -92,12 +100,13 @@ const sceneObjectSchema = z
       'mannequin',
       'room',
     ]),
-    name: z.string().trim().min(1),
+    name: z.string().trim().min(1).max(MAX_OBJECT_NAME_LENGTH),
     transform: transformSchema,
     dimensions: positiveVector3Schema,
     color: z.string().regex(/^#[0-9a-f]{6}$/i),
     visible: z.boolean(),
     exportable: z.boolean(),
+    semantic: semanticObjectSchema.optional(),
     mannequinPose: mannequinPoseSchema.optional(),
   })
   .superRefine((object, context) => {

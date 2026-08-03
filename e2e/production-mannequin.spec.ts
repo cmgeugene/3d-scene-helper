@@ -40,7 +40,7 @@ test('ordinary production build accepts a real pointer drag on the visible hand 
 }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
-  await expect(page.getByRole('status')).toHaveAttribute(
+  await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
     'data-webgl-state',
     'available',
   );

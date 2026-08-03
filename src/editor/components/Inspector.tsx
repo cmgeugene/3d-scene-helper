@@ -2,6 +2,11 @@ import { useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { SceneObject } from '../persistence/sceneSchema';
+import {
+  MAX_GENERATION_NOTES_LENGTH,
+  MAX_OBJECT_NAME_LENGTH,
+  MAX_SEMANTIC_MEANING_LENGTH,
+} from '../constants';
 import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
 import type { EditorStore } from '../state/editorStore';
@@ -407,14 +412,19 @@ function LightingControls({ store }: InspectorProps) {
 
 function createTransformDraft(object: SceneObject | undefined) {
   if (object === undefined) return {};
-  return Object.fromEntries(
-    TRANSFORM_GROUPS.flatMap(({ key }) =>
-      AXES.map((axis) => [
-        `${key}.${axis}`,
-        String(object.transform[key][axis]),
-      ]),
+  return {
+    ...Object.fromEntries(
+      TRANSFORM_GROUPS.flatMap(({ key }) =>
+        AXES.map((axis) => [
+          `${key}.${axis}`,
+          String(object.transform[key][axis]),
+        ]),
+      ),
     ),
-  );
+    name: object.name,
+    'semantic.meaning': object.semantic?.meaning ?? '',
+    'semantic.generationNotes': object.semantic?.generationNotes ?? '',
+  };
 }
 
 export function Inspector({ store }: InspectorProps) {
@@ -462,6 +472,31 @@ export function Inspector({ store }: InspectorProps) {
     transform[key][axis] = value;
     store.getState().beginTransform();
     store.getState().commitTransform(transform);
+  };
+
+  const commitObjectName = () => {
+    if (selectedObject === undefined) return;
+    const name = (draft.name ?? '').trim();
+    if (name === '' || name.length > MAX_OBJECT_NAME_LENGTH) {
+      setDraft((current) => ({ ...current, name: selectedObject.name }));
+      setInvalidFields((current) => new Set(current).add('name'));
+      return;
+    }
+    store.getState().renameObject(selectedObject.id, name);
+  };
+
+  const commitSemantic = () => {
+    if (selectedObject === undefined) return;
+    const meaning = (draft['semantic.meaning'] ?? '').trim();
+    const generationNotes = (draft['semantic.generationNotes'] ?? '').trim();
+    store
+      .getState()
+      .setObjectSemantic(
+        selectedObject.id,
+        meaning === '' && generationNotes === ''
+          ? undefined
+          : { meaning, generationNotes },
+      );
   };
 
   return (
@@ -537,6 +572,30 @@ export function Inspector({ store }: InspectorProps) {
             </div>
             <fieldset className="object-controls">
               <legend>오브젝트</legend>
+              <label className="object-text-field">
+                <span>이름</span>
+                <input
+                  aria-label="오브젝트 이름"
+                  type="text"
+                  value={draft.name ?? ''}
+                  maxLength={MAX_OBJECT_NAME_LENGTH}
+                  disabled={selectedObject === undefined}
+                  aria-invalid={invalidFields.has('name')}
+                  onChange={(event) => {
+                    const name = event.currentTarget.value;
+                    setInvalidFields((current) => {
+                      const next = new Set(current);
+                      next.delete('name');
+                      return next;
+                    });
+                    setDraft((current) => ({ ...current, name }));
+                  }}
+                  onBlur={commitObjectName}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                  }}
+                />
+              </label>
               <label>
                 <span>색상</span>
                 <input
@@ -598,6 +657,50 @@ export function Inspector({ store }: InspectorProps) {
                   삭제
                 </button>
               </div>
+            </fieldset>
+            <fieldset className="object-controls">
+              <legend>이미지 생성 의미</legend>
+              <label className="object-text-field">
+                <span>실제 의미</span>
+                <input
+                  aria-label="오브젝트 실제 의미"
+                  type="text"
+                  placeholder="예: 빨간 원형 포차 테이블 상판"
+                  value={draft['semantic.meaning'] ?? ''}
+                  maxLength={MAX_SEMANTIC_MEANING_LENGTH}
+                  disabled={selectedObject === undefined}
+                  onChange={(event) => {
+                    const meaning = event.currentTarget.value;
+                    setDraft((current) => ({
+                      ...current,
+                      'semantic.meaning': meaning,
+                    }));
+                  }}
+                  onBlur={commitSemantic}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                  }}
+                />
+              </label>
+              <label className="object-text-field">
+                <span>생성 메모</span>
+                <textarea
+                  aria-label="오브젝트 생성 메모"
+                  placeholder="예: 3D 위치와 크기는 유지하고 광택 있는 빨간 플라스틱으로 표현"
+                  value={draft['semantic.generationNotes'] ?? ''}
+                  maxLength={MAX_GENERATION_NOTES_LENGTH}
+                  rows={3}
+                  disabled={selectedObject === undefined}
+                  onChange={(event) => {
+                    const generationNotes = event.currentTarget.value;
+                    setDraft((current) => ({
+                      ...current,
+                      'semantic.generationNotes': generationNotes,
+                    }));
+                  }}
+                  onBlur={commitSemantic}
+                />
+              </label>
             </fieldset>
             {selectedObject?.kind === 'mannequin' ? (
               <fieldset className="object-controls">

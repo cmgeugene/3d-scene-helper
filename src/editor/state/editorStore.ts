@@ -93,6 +93,7 @@ export interface EditorStore {
   selectObject: (id: string | null) => void;
   setHoveredObject: (id: string | null) => void;
   renameObject: (id: string, name: string) => void;
+  setObjectSemantic: (id: string, semantic: SceneObject['semantic']) => void;
   setObjectColor: (id: string, color: string) => void;
   setObjectVisibility: (id: string, visible: boolean) => void;
   applyMannequinPosePreset: (presetId: MannequinPosePresetId) => void;
@@ -287,6 +288,9 @@ export function createEditorStore(options: EditorStoreOptions) {
     },
     renameObject: (id, name) => {
       updateObject(set, id, { name });
+    },
+    setObjectSemantic: (id, semantic) => {
+      updateObject(set, id, { semantic });
     },
     setObjectColor: (id, color) => {
       updateObject(set, id, { color });

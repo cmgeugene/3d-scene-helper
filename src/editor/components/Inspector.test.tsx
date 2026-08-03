@@ -136,6 +136,45 @@ describe('Inspector', () => {
     expect(scaleX).toHaveAttribute('aria-invalid', 'true');
   });
 
+  it('선택 오브젝트의 이름과 이미지 생성 의미를 편집한다', async () => {
+    const user = userEvent.setup();
+    render(<Inspector store={store} />);
+
+    const name = screen.getByLabelText('오브젝트 이름');
+    await user.clear(name);
+    await user.type(name, '정민{Enter}');
+
+    const meaning = screen.getByLabelText('오브젝트 실제 의미');
+    await user.type(meaning, '화면 왼쪽에 앉은 정민');
+    fireEvent.blur(meaning);
+    const notes = screen.getByLabelText('오브젝트 생성 메모');
+    await user.type(notes, '외형은 캐릭터 레퍼런스, 포즈는 3D를 따른다.');
+    fireEvent.blur(notes);
+
+    expect(
+      store.getState().document.objects.find(({ id }) => id === MANNEQUIN_ID),
+    ).toMatchObject({
+      name: '정민',
+      semantic: {
+        meaning: '화면 왼쪽에 앉은 정민',
+        generationNotes: '외형은 캐릭터 레퍼런스, 포즈는 3D를 따른다.',
+      },
+    });
+    expect(screen.getByText('정민')).toBeVisible();
+  });
+
+  it('빈 오브젝트 이름을 거부하고 기존 이름을 복원한다', async () => {
+    const user = userEvent.setup();
+    render(<Inspector store={store} />);
+    const name = screen.getByLabelText('오브젝트 이름');
+
+    await user.clear(name);
+    fireEvent.blur(name);
+
+    expect(name).toHaveValue('Mannequin');
+    expect(name).toHaveAttribute('aria-invalid', 'true');
+  });
+
   it('색상/표시와 duplicate/delete inspector action을 document에 반영한다', async () => {
     const user = userEvent.setup();
     store = createTestStore(['mannequin-copy']);

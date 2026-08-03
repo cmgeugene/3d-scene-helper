@@ -133,6 +133,10 @@ describe('editorStore', () => {
     store.getState().selectObject('missing-object');
     store.getState().setHoveredObject('missing-object');
     store.getState().renameObject('missing-object', 'Missing');
+    store.getState().setObjectSemantic('missing-object', {
+      meaning: 'Missing',
+      generationNotes: '',
+    });
     store.getState().setObjectColor('missing-object', '#123456');
     store.getState().setObjectVisibility('missing-object', false);
     store.getState().deleteObject('missing-object');
@@ -147,8 +151,12 @@ describe('editorStore', () => {
     });
   });
 
-  it('rename, color, visibility object 속성을 committed document에 반영한다', () => {
+  it('rename, semantic, color, visibility object 속성을 committed document에 반영한다', () => {
     store.getState().renameObject(STARTER_IDS.mannequinId, 'Actor');
+    store.getState().setObjectSemantic(STARTER_IDS.mannequinId, {
+      meaning: '화면 왼쪽의 정민',
+      generationNotes: '포즈는 3D 레이아웃을 유지한다.',
+    });
     store.getState().setObjectColor(STARTER_IDS.mannequinId, '#123456');
     store.getState().setObjectVisibility(STARTER_IDS.mannequinId, false);
 
@@ -158,6 +166,10 @@ describe('editorStore', () => {
 
     expect(mannequin).toMatchObject({
       name: 'Actor',
+      semantic: {
+        meaning: '화면 왼쪽의 정민',
+        generationNotes: '포즈는 3D 레이아웃을 유지한다.',
+      },
       color: '#123456',
       visible: false,
     });

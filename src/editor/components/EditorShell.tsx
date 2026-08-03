@@ -1,8 +1,35 @@
-import { lazy, Suspense, useCallback, useState } from 'react';
-import type { StoreApi } from 'zustand';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { useStore, type StoreApi } from 'zustand';
+import { SceneAssistantPanel } from '../../assistant/SceneAssistantPanel';
+import { ReferenceManager } from '../../assistant/ReferenceManager';
+import type { ReferenceArtifact } from '../../assistant/companionClient';
+import type { CompanionConnection } from '../../assistant/companionConnection';
+import {
+  IMAGEGEN_MAX_INPUT_IMAGES,
+  getMaximumReferenceImages,
+} from '../../../shared/imageInputBudget';
 import type { FrameExportHandler } from '../export/exportFrame';
 import type { EditorStore } from '../state/editorStore';
 import { AssetPanel } from './AssetPanel';
+import {
+  ASSISTANT_PANEL_COLLAPSED_STORAGE_KEY,
+  ASSISTANT_PANEL_DEFAULT_WIDTH,
+  ASSISTANT_PANEL_MAX_VIEWPORT_RATIO,
+  ASSISTANT_PANEL_MAX_WIDTH,
+  ASSISTANT_PANEL_MIN_WIDTH,
+  ASSISTANT_PANEL_WIDTH_STORAGE_KEY,
+} from '../constants';
 import { EditorShortcuts } from './EditorShortcuts';
 import { Inspector } from './Inspector';
 import { Outliner } from './Outliner';
@@ -23,6 +50,9 @@ interface EditorShellProps {
   webGLState: WebGLState;
   canvasEnabled?: boolean;
   storage?: Storage;
+  companionConnection?: CompanionConnection | null;
+  companionConnectionError?: string | null;
+  onDisconnectCompanion?: () => void;
 }
 
 interface RuntimeFailure {
@@ -35,6 +65,44 @@ const WEBGL_MESSAGES: Record<WebGLState, string> = {
   available: 'WebGL을 사용할 수 있습니다.',
   fallback: 'WebGL을 사용할 수 없어 기본 안내 화면을 표시합니다.',
 };
+
+function maxAssistantPanelWidth() {
+  return Math.max(
+    ASSISTANT_PANEL_MIN_WIDTH,
+    Math.min(
+      ASSISTANT_PANEL_MAX_WIDTH,
+      Math.round(window.innerWidth * ASSISTANT_PANEL_MAX_VIEWPORT_RATIO),
+    ),
+  );
+}
+
+function clampAssistantPanelWidth(width: number) {
+  return Math.min(
+    maxAssistantPanelWidth(),
+    Math.max(ASSISTANT_PANEL_MIN_WIDTH, Math.round(width)),
+  );
+}
+
+function readAssistantPanelWidth(storage: Storage) {
+  try {
+    const storedWidth = Number(
+      storage.getItem(ASSISTANT_PANEL_WIDTH_STORAGE_KEY),
+    );
+    return Number.isFinite(storedWidth) && storedWidth > 0
+      ? clampAssistantPanelWidth(storedWidth)
+      : clampAssistantPanelWidth(ASSISTANT_PANEL_DEFAULT_WIDTH);
+  } catch {
+    return clampAssistantPanelWidth(ASSISTANT_PANEL_DEFAULT_WIDTH);
+  }
+}
+
+function readAssistantPanelCollapsed(storage: Storage) {
+  try {
+    return storage.getItem(ASSISTANT_PANEL_COLLAPSED_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
 
 function ViewportPlaceholder({ webGLState }: { webGLState: WebGLState }) {
   return (
@@ -58,6 +126,9 @@ export function EditorShell({
   webGLState,
   canvasEnabled = false,
   storage = window.localStorage,
+  companionConnection = null,
+  companionConnectionError = null,
+  onDisconnectCompanion,
 }: EditorShellProps) {
   const [frameExporter, setFrameExporter] = useState<FrameExportHandler | null>(
     null,
@@ -65,6 +136,51 @@ export function EditorShell({
   const [runtimeFailure, setRuntimeFailure] = useState<RuntimeFailure | null>(
     null,
   );
+  const [selectedReferences, setSelectedReferences] = useState<
+    ReferenceArtifact[]
+  >([]);
+  const [refinementModeActive, setRefinementModeActive] = useState(false);
+  const [assistantPanelWidth, setAssistantPanelWidth] = useState(() =>
+    readAssistantPanelWidth(storage),
+  );
+  const [assistantPanelCollapsed, setAssistantPanelCollapsed] = useState(() =>
+    readAssistantPanelCollapsed(storage),
+  );
+  const [assistantPanelExpanded, setAssistantPanelExpanded] = useState(false);
+  const [resizingAssistantPanel, setResizingAssistantPanel] = useState(false);
+  const resizeStart = useRef({ pointerX: 0, width: assistantPanelWidth });
+  const widthBeforeExpand = useRef(assistantPanelWidth);
+  const sceneObjects = useStore(store, (state) => state.document.objects);
+  const referenceTargets = useMemo(
+    () =>
+      sceneObjects
+        .filter(({ kind }) => kind === 'mannequin')
+        .map(({ id, name }) => ({ id, name })),
+    [sceneObjects],
+  );
+  const getSelectedReferences = useCallback(
+    () => selectedReferences,
+    [selectedReferences],
+  );
+  const maximumSelectedReferences = getMaximumReferenceImages({
+    includeLayout: true,
+    includeSourceKeyframe: refinementModeActive,
+  });
+  const reservedGenerationImages =
+    IMAGEGEN_MAX_INPUT_IMAGES - maximumSelectedReferences;
+  const captureAssistantLayout = useCallback(async () => {
+    if (frameExporter === null) {
+      throw new Error('3D 뷰포트가 아직 캡처를 준비하지 못했습니다.');
+    }
+    const state = store.getState();
+    return frameExporter({
+      document: {
+        ...state.document,
+        output: { ...state.document.output, mode: 'reference' },
+      },
+      guideVisibility: state.guideVisibility,
+    });
+  }, [frameExporter, store]);
   const handleExportReady = useCallback(
     (nextExporter: FrameExportHandler | null) => {
       setFrameExporter(() => nextExporter);
@@ -84,6 +200,102 @@ export function EditorShell({
   const effectiveWebGLState: WebGLState =
     runtimeFailure === null ? webGLState : 'fallback';
 
+  useEffect(() => {
+    try {
+      storage.setItem(
+        ASSISTANT_PANEL_WIDTH_STORAGE_KEY,
+        String(assistantPanelWidth),
+      );
+    } catch {
+      // UI preferences should not make the editor unusable when storage fails.
+    }
+  }, [assistantPanelWidth, storage]);
+
+  useEffect(() => {
+    try {
+      storage.setItem(
+        ASSISTANT_PANEL_COLLAPSED_STORAGE_KEY,
+        String(assistantPanelCollapsed),
+      );
+    } catch {
+      // UI preferences should not make the editor unusable when storage fails.
+    }
+  }, [assistantPanelCollapsed, storage]);
+
+  useEffect(() => {
+    if (!resizingAssistantPanel) return undefined;
+    const handlePointerMove = (event: PointerEvent) => {
+      setAssistantPanelExpanded(false);
+      setAssistantPanelWidth(
+        clampAssistantPanelWidth(
+          resizeStart.current.width +
+            (resizeStart.current.pointerX - event.clientX),
+        ),
+      );
+    };
+    const handlePointerUp = () => setResizingAssistantPanel(false);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp, { once: true });
+    document.body.classList.add('is-resizing-assistant-panel');
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      document.body.classList.remove('is-resizing-assistant-panel');
+    };
+  }, [resizingAssistantPanel]);
+
+  useEffect(() => {
+    const handleWindowResize = () => {
+      setAssistantPanelWidth((width) => clampAssistantPanelWidth(width));
+    };
+    window.addEventListener('resize', handleWindowResize);
+    return () => window.removeEventListener('resize', handleWindowResize);
+  }, []);
+
+  const beginAssistantPanelResize = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    if (assistantPanelCollapsed) return;
+    resizeStart.current = {
+      pointerX: event.clientX,
+      width: assistantPanelWidth,
+    };
+    setResizingAssistantPanel(true);
+    event.preventDefault();
+  };
+
+  const resizeAssistantPanelWithKeyboard = (
+    event: KeyboardEvent<HTMLDivElement>,
+  ) => {
+    const step = event.shiftKey ? 64 : 16;
+    let nextWidth: number | null = null;
+    if (event.key === 'ArrowLeft') nextWidth = assistantPanelWidth + step;
+    if (event.key === 'ArrowRight') nextWidth = assistantPanelWidth - step;
+    if (event.key === 'Home') nextWidth = ASSISTANT_PANEL_MIN_WIDTH;
+    if (event.key === 'End') nextWidth = maxAssistantPanelWidth();
+    if (nextWidth === null) return;
+    event.preventDefault();
+    setAssistantPanelExpanded(false);
+    setAssistantPanelWidth(clampAssistantPanelWidth(nextWidth));
+  };
+
+  const toggleAssistantPanelExpanded = () => {
+    if (assistantPanelExpanded) {
+      setAssistantPanelWidth(
+        clampAssistantPanelWidth(widthBeforeExpand.current),
+      );
+      setAssistantPanelExpanded(false);
+      return;
+    }
+    widthBeforeExpand.current = assistantPanelWidth;
+    setAssistantPanelWidth(maxAssistantPanelWidth());
+    setAssistantPanelExpanded(true);
+  };
+
+  const workspaceStyle = {
+    '--assistant-panel-width': `${assistantPanelWidth}px`,
+  } as CSSProperties;
+
   return (
     <main className="editor-shell">
       <EditorShortcuts store={store} />
@@ -94,7 +306,10 @@ export function EditorShell({
           frameExporter={frameExporter}
           exportUnavailable={runtimeFailure !== null}
         />
-        <div className="editor-workspace">
+        <div
+          className={`editor-workspace${assistantPanelCollapsed ? ' editor-workspace--assistant-collapsed' : ''}`}
+          style={workspaceStyle}
+        >
           <aside className="left-panel" aria-label="에셋과 장면">
             <AssetPanel store={store} />
             <Outliner store={store} />
@@ -130,10 +345,73 @@ export function EditorShell({
               {WEBGL_MESSAGES[effectiveWebGLState]}
             </p>
           </section>
+          <div
+            className="assistant-panel-resizer"
+            role="separator"
+            aria-label="우측 패널 너비 조절"
+            aria-orientation="vertical"
+            aria-valuemin={ASSISTANT_PANEL_MIN_WIDTH}
+            aria-valuemax={maxAssistantPanelWidth()}
+            aria-valuenow={assistantPanelWidth}
+            tabIndex={assistantPanelCollapsed ? -1 : 0}
+            onPointerDown={beginAssistantPanelResize}
+            onKeyDown={resizeAssistantPanelWithKeyboard}
+          />
           <aside className="inspector-panel" aria-label="속성">
-            <Inspector store={store} />
+            {assistantPanelCollapsed ? (
+              <div className="assistant-dock-collapsed">
+                <button
+                  type="button"
+                  aria-label="우측 패널 펼치기"
+                  title="우측 패널 펼치기"
+                  onClick={() => setAssistantPanelCollapsed(false)}
+                >
+                  ‹
+                </button>
+                <span>Assistant</span>
+              </div>
+            ) : (
+              <>
+                <div className="assistant-dock-toolbar">
+                  <span>우측 패널 · {assistantPanelWidth}px</span>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={toggleAssistantPanelExpanded}
+                    >
+                      {assistantPanelExpanded ? '이전 너비' : '넓게'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssistantPanelCollapsed(true)}
+                    >
+                      접기
+                    </button>
+                  </div>
+                </div>
+                <Inspector store={store} />
+                <SceneAssistantPanel
+                  connection={companionConnection}
+                  connectionError={companionConnectionError}
+                  onDisconnect={onDisconnectCompanion}
+                  getSceneContext={() => store.getState().document}
+                  getSelectedReferences={getSelectedReferences}
+                  captureLayout={
+                    frameExporter === null ? null : captureAssistantLayout
+                  }
+                  onRefinementModeChange={setRefinementModeActive}
+                />
+              </>
+            )}
           </aside>
         </div>
+        <ReferenceManager
+          connection={companionConnection}
+          targets={referenceTargets}
+          maximumSelected={maximumSelectedReferences}
+          reservedInputImages={reservedGenerationImages}
+          onSelectionChange={setSelectedReferences}
+        />
         <StatusBar store={store} />
       </div>
       <section

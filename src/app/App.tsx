@@ -1,5 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { StoreApi } from 'zustand/vanilla';
+import {
+  clearCompanionConnection,
+  consumeCompanionConnection,
+} from '../assistant/companionConnection';
 import { EditorShell, type WebGLState } from '../editor/components/EditorShell';
 import { AUTOSAVE_DEBOUNCE_MS, SCENE_STORAGE_KEY } from '../editor/constants';
 import {
@@ -55,6 +59,19 @@ export function App({
   storage = window.localStorage,
 }: AppProps) {
   const [webGLState, setWebGLState] = useState<WebGLState>('checking');
+  const [companionState, setCompanionState] = useState(() =>
+    consumeCompanionConnection({
+      hash: window.location.hash,
+      pathname: window.location.pathname,
+      search: window.location.search,
+      storage: window.sessionStorage,
+      replaceUrl: (url) => window.history.replaceState(null, '', url),
+    }),
+  );
+  const disconnectCompanion = useCallback(() => {
+    clearCompanionConnection(window.sessionStorage);
+    setCompanionState({ connection: null, error: null });
+  }, []);
 
   useEffect(() => {
     const nextState = canUseWebGL() ? 'available' : 'fallback';
@@ -162,6 +179,9 @@ export function App({
       storage={storage}
       webGLState={webGLState}
       canvasEnabled={canvasEnabled}
+      companionConnection={companionState.connection}
+      companionConnectionError={companionState.error}
+      onDisconnectCompanion={disconnectCompanion}
     />
   );
 }

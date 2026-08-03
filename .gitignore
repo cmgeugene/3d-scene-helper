@@ -16,6 +16,13 @@ playwright-report/
 test-results/
 blob-report/
 
+# Local Scene Assistant project data and generated images
+/assets/generations/
+/assets/references/
+/assets/scene-renders/
+/generations.json
+/references.json
+
 # Local environment and editor files
 .env
 .env.*
