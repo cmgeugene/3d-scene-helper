@@ -238,6 +238,7 @@ describe('CompanionClient', () => {
       floorId: 'floor-test',
       mannequinId: 'mannequin-test',
     });
+    sceneSnapshot.semanticSceneSpec.intent.location = '한국 노포 야외 치킨집';
     const render = {
       id: 'render-1',
       sceneId: 'scene-1',
@@ -257,6 +258,9 @@ describe('CompanionClient', () => {
       prompt: '$imagegen test',
       layoutSpec: TEST_LAYOUT_SPEC,
       sceneSnapshot,
+      semanticSceneSpecSnapshot: structuredClone(
+        sceneSnapshot.semanticSceneSpec,
+      ),
       referenceSnapshots: [],
       parentGenerationId: null,
       versionNumber: 1,

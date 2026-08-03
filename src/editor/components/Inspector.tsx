@@ -11,6 +11,7 @@ import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
 import type { EditorStore } from '../state/editorStore';
 import type { EditorPanel } from '../types';
+import { SemanticSceneSpecEditor } from './SemanticSceneSpecEditor';
 
 interface InspectorProps {
   store: StoreApi<EditorStore>;
@@ -31,6 +32,7 @@ const PANEL_OPTIONS: ReadonlyArray<{
   label: string;
 }> = [
   { id: 'scene', label: '장면' },
+  { id: 'semantic', label: '연출' },
   { id: 'camera', label: '카메라' },
   { id: 'lighting', label: '조명' },
   { id: 'output', label: '출력' },
@@ -80,7 +82,7 @@ const CAMERA_MOTION_PRESETS = [
 ] as const;
 
 const DEFERRED_PANEL_MESSAGES: Record<
-  Exclude<EditorPanel, 'scene' | 'camera' | 'lighting'>,
+  Exclude<EditorPanel, 'scene' | 'semantic' | 'camera' | 'lighting'>,
   string
 > = {
   output: '출력 설정은 내보내기 구성 단계에서 제공됩니다.',
@@ -748,6 +750,8 @@ export function Inspector({ store }: InspectorProps) {
               selectedObject={selectedObject}
             />
           </>
+        ) : activePanel === 'semantic' ? (
+          <SemanticSceneSpecEditor store={store} />
         ) : activePanel === 'camera' ? (
           <CameraControls store={store} />
         ) : activePanel === 'lighting' ? (

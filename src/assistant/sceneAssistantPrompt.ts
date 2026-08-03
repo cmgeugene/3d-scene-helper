@@ -1,5 +1,7 @@
 import type { GenerationRecord, ReferenceArtifact } from './companionClient';
 import type { LayoutSpec } from '../../shared/layoutSpecSchema';
+import type { SceneDocument } from '../editor/persistence/sceneSchema';
+import { normalizeSemanticSceneSpec } from '../editor/persistence/semanticSceneSpec';
 
 const SCENE_ASSISTANT_INSTRUCTIONS = `너는 I2V 3D Scene Helper의 Scene Assistant다.
 현재 요청에서는 파일을 수정하거나 명령을 실행하지 말고, 제공된 SceneDocument와 사용자의 설명을 바탕으로 장면을 해석하고 필요한 확인 질문이나 연출 제안을 한국어로 간결하게 답한다.
@@ -29,6 +31,92 @@ function referenceManifest(
     }));
 }
 
+export function serializeSemanticSceneSpecPrompt(
+  spec: SceneDocument['semanticSceneSpec'],
+) {
+  const normalized = normalizeSemanticSceneSpec(spec);
+  const blocks: string[] = [];
+  const intentLines = [
+    ['장소', normalized.intent.location],
+    ['시간대', normalized.intent.timeOfDay],
+    ['분위기', normalized.intent.mood],
+    ['화풍 의도', normalized.intent.visualStyle],
+  ]
+    .filter((entry): entry is [string, string] => entry[1] !== '')
+    .map(([label, value]) => `- ${label}: ${value}`);
+  if (intentLines.length > 0) {
+    blocks.push(`[장면 의도]\n${intentLines.join('\n')}`);
+  }
+
+  if (normalized.generatedProps.length > 0) {
+    blocks.push(
+      `[생성 전용 소품]\n${normalized.generatedProps
+        .map(({ name, placement, importance }) =>
+          [
+            `- ${name}`,
+            placement === '' ? '' : `배치: ${placement}`,
+            importance === '' ? '' : `중요도: ${importance}`,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        )
+        .join('\n')}`,
+    );
+  }
+
+  if (normalized.extras.enabled) {
+    const count =
+      normalized.extras.minCount === normalized.extras.maxCount
+        ? `${normalized.extras.minCount}명`
+        : `${normalized.extras.minCount}~${normalized.extras.maxCount}명`;
+    const lines = [
+      `- 인원: ${count}`,
+      normalized.extras.placement === ''
+        ? ''
+        : `- 배치: ${normalized.extras.placement}`,
+      normalized.extras.importance === ''
+        ? ''
+        : `- 중요도: ${normalized.extras.importance}`,
+    ].filter(Boolean);
+    blocks.push(`[엑스트라]\n${lines.join('\n')}`);
+  }
+
+  if (normalized.relationships.length > 0) {
+    blocks.push(
+      `[인물/오브젝트 관계]\n${normalized.relationships
+        .map(
+          ({ subjectObjectId, targetObjectId, relationship, gaze, action }) =>
+            [
+              `- ${subjectObjectId} → ${targetObjectId}`,
+              relationship === '' ? '' : `관계: ${relationship}`,
+              gaze === '' ? '' : `시선: ${gaze}`,
+              action === '' ? '' : `행동: ${action}`,
+            ]
+              .filter(Boolean)
+              .join(' · '),
+        )
+        .join('\n')}`,
+    );
+  }
+
+  if (normalized.constraints.preserve.length > 0) {
+    blocks.push(
+      `[필수 유지]\n${normalized.constraints.preserve
+        .map((value) => `- ${value}`)
+        .join('\n')}`,
+    );
+  }
+  if (normalized.constraints.allowChanges.length > 0) {
+    blocks.push(
+      `[변경 가능]\n${normalized.constraints.allowChanges
+        .map((value) => `- ${value}`)
+        .join('\n')}`,
+    );
+  }
+
+  return blocks.join('\n\n');
+}
+
 export function createSceneAssistantPrompt(
   userMessage: string,
   sceneDocument: unknown,
@@ -53,27 +141,33 @@ ${JSON.stringify(sceneDocument)}${serializedReferences}`;
 }
 
 export function createImageGenerationPrompt(
-  userMessage: string,
-  sceneDocument: unknown,
+  sceneDocument: SceneDocument,
   layoutSpec: LayoutSpec,
   references: ReferenceArtifact[] = [],
 ) {
   const referenceBlock = referenceManifest(references, 1);
+  const semanticSpecBlock = serializeSemanticSceneSpecPrompt(
+    sceneDocument.semanticSceneSpec,
+  );
+  const semanticSection =
+    semanticSpecBlock === '' ? '' : `\n\n${semanticSpecBlock}`;
+  const sceneDocumentWithoutSemanticSpec = Object.fromEntries(
+    Object.entries(sceneDocument).filter(
+      ([key]) => key !== 'semanticSceneSpec',
+    ),
+  );
   return `$imagegen
 첨부 이미지 1은 현재 OutputCamera의 3D 레이아웃 렌더이며 최종 키프레임의 공간 설계도입니다. LayoutSpec의 정규화 화면 좌표, 점유율, 깊이 순서와 잠재 가림 관계를 최종 이미지에서도 유지하세요.
 3D 레이아웃이 권위를 갖는 항목은 카메라, 원근, 크롭, 화면상 배치와 크기, 포즈, 방향, 깊이와 가림입니다. 3D 프록시의 색, 재질과 단순 도형 외형은 최종 외형이 아니며 의미 데이터와 역할별 레퍼런스로 교체하세요.
 이어지는 이미지는 아래 매니페스트의 순서와 역할에만 사용하세요. 캐릭터 레퍼런스는 연결된 마네킹의 얼굴, 체형, 헤어와 의상에만 사용하고 포즈와 위치는 3D 레이아웃을 따릅니다. 캐릭터 시트의 글자나 패널 구성은 결과에 포함하지 마세요.
-사용자 연출은 프록시의 실제 의미, 분위기, 생성 전용 요소와 예외를 결정합니다. 명시적 지시가 없는 한 LayoutSpec의 preserve 항목을 변경하지 마세요. 한 장의 완성 이미지를 생성하고 파일 수정이나 명령 실행은 하지 마세요.
-LayoutSpec 각 오브젝트의 semanticMeaning과 generationNotes는 대화에서 확정되어 프로젝트에 저장된 의미 데이터입니다. 일반적인 primitive 이름이나 guideColor보다 우선하며 해당 오브젝트를 그 의미의 실제 사물로 교체하세요.
-
-[사용자 연출]
-${userMessage}
+저장된 Semantic Scene Spec은 장소, 시간대, 분위기, 화풍 의도, 생성 전용 소품, 엑스트라, 관계와 제약의 권위 있는 현재 상태입니다. 채팅 기록을 장면 원본으로 사용하지 마세요. 명시적 지시가 없는 한 LayoutSpec의 preserve 항목을 변경하지 말고 한 장의 완성 이미지만 생성하세요. 파일 수정이나 명령 실행은 하지 마세요.
+LayoutSpec 각 오브젝트의 semanticMeaning과 generationNotes는 해당 오브젝트에만 권위가 있는 의미 데이터입니다. 장면 전체 spec과 중복 추론하지 말고 일반적인 primitive 이름이나 guideColor보다 우선해 실제 사물로 교체하세요.${semanticSection}
 
 [LayoutSpec / 3D 레이아웃과 최종 키프레임의 변환 계약]
 ${JSON.stringify(layoutSpec)}
 
 [현재 SceneDocument]
-${JSON.stringify(sceneDocument)}
+${JSON.stringify(sceneDocumentWithoutSemanticSpec)}
 
 [선택 레퍼런스 매니페스트 / 첨부 순서]
 ${JSON.stringify(referenceBlock)}`;

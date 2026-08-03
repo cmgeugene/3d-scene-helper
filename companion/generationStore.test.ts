@@ -21,11 +21,20 @@ async function createStore() {
 }
 
 function createSceneSnapshot() {
-  return createStarterSceneDocument({
+  const scene = createStarterSceneDocument({
     documentId: 'scene-test',
     floorId: 'floor-test',
     mannequinId: 'mannequin-test',
   });
+  scene.semanticSceneSpec.intent.location = '한국 노포 야외 치킨집';
+  scene.semanticSceneSpec.extras = {
+    enabled: true,
+    minCount: 5,
+    maxCount: 8,
+    placement: '오른쪽 배경',
+    importance: '주인공보다 낮음',
+  };
+  return scene;
 }
 
 const referenceSnapshot = {
@@ -86,6 +95,11 @@ describe('GenerationStore', () => {
       id: generation.id,
       layoutSpec: { sceneId: 'scene-test' },
       sceneSnapshot: { id: 'scene-test' },
+      semanticSceneSpecSnapshot: {
+        version: 1,
+        intent: { location: '한국 노포 야외 치킨집' },
+        extras: { enabled: true, minCount: 5, maxCount: 8 },
+      },
       referenceSnapshots: [expect.objectContaining({ id: 'ref-1' })],
       parentGenerationId: null,
       versionNumber: 1,
@@ -120,6 +134,26 @@ describe('GenerationStore', () => {
     expect(manifest.generations[0]?.result.assetPath).toMatch(
       /^generations\/artifact_.+\.png$/,
     );
+  });
+
+  it('새 generation의 null scene snapshot을 Zod 경계에서 fail-closed한다', async () => {
+    const { store } = await createStore();
+    const render = await store.importSceneRender('scene-test', onePixelPng);
+
+    await expect(
+      store.createGeneration({
+        threadId: 'thread-null-scene',
+        turnId: 'turn-null-scene',
+        prompt: '$imagegen invalid',
+        layoutSpec: TEST_LAYOUT_SPEC,
+        sceneSnapshot: null as never,
+        referenceSnapshots: [],
+        layoutRenderId: render.id,
+        referenceIds: [],
+        attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+      }),
+    ).rejects.toMatchObject({ name: 'ZodError' });
+    await expect(store.listGenerations()).resolves.toEqual([]);
   });
 
   it('저장된 snapshot·LayoutSpec·layout render scene ID 무결성을 재시작 뒤에도 판정한다', async () => {
@@ -240,6 +274,7 @@ describe('GenerationStore', () => {
       ],
     });
     scene.name = '호출 뒤 변경된 이름';
+    scene.semanticSceneSpec.intent.location = '호출 뒤 변경된 장소';
     reference.name = '호출 뒤 변경된 레퍼런스';
 
     const child = await store.createGeneration({
@@ -262,6 +297,9 @@ describe('GenerationStore', () => {
 
     expect((await store.listGenerations())[0]).toMatchObject({
       sceneSnapshot: { name: 'Untitled scene' },
+      semanticSceneSpecSnapshot: {
+        intent: { location: '한국 노포 야외 치킨집' },
+      },
       referenceSnapshots: [{ name: '정민 캐릭터 시트' }],
     });
     expect(child).toMatchObject({
@@ -388,6 +426,7 @@ describe('GenerationStore', () => {
     };
     for (const field of [
       'sceneSnapshot',
+      'semanticSceneSpecSnapshot',
       'referenceSnapshots',
       'parentGenerationId',
       'sourceGenerationId',
@@ -402,6 +441,7 @@ describe('GenerationStore', () => {
     await expect(new GenerationStore(root).listGenerations()).resolves.toEqual([
       expect.objectContaining({
         sceneSnapshot: null,
+        semanticSceneSpecSnapshot: null,
         referenceSnapshots: [],
         parentGenerationId: null,
         sourceGenerationId: null,

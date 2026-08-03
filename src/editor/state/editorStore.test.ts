@@ -176,6 +176,77 @@ describe('editorStore', () => {
     expect(store.getState().isDirty).toBe(true);
   });
 
+  it('SemanticSceneSpec 편집을 단일 history/dirty mutation으로 기록하고 undo/redo한다', () => {
+    const original = structuredClone(
+      store.getState().document.semanticSceneSpec,
+    );
+    const next = {
+      ...original,
+      intent: {
+        location: '한국 노포 야외 치킨집',
+        timeOfDay: '해질녘',
+        mood: '조용한 대화',
+        visualStyle: '시네마틱 2D 애니메이션',
+      },
+      extras: {
+        enabled: true,
+        minCount: 5,
+        maxCount: 8,
+        placement: '오른쪽 배경 테이블',
+        importance: '주인공보다 낮음',
+      },
+    };
+
+    store.getState().setSemanticSceneSpec(next);
+
+    expect(store.getState().document.semanticSceneSpec).toEqual(next);
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'update-semantic-scene-spec',
+    );
+    expect(store.getState().isDirty).toBe(true);
+
+    store.getState().undo();
+    expect(store.getState().document.semanticSceneSpec).toEqual(original);
+    store.getState().redo();
+    expect(store.getState().document.semanticSceneSpec).toEqual(next);
+  });
+
+  it('dangling 관계는 원자적으로 거부하고 object 삭제 시 해당 관계만 정리한다', () => {
+    const original = store.getState().document;
+    expect(() =>
+      store.getState().setSemanticSceneSpec({
+        ...original.semanticSceneSpec,
+        relationships: [
+          {
+            subjectObjectId: STARTER_IDS.mannequinId,
+            targetObjectId: 'missing',
+            relationship: '바라봄',
+            gaze: 'missing을 바라봄',
+            action: '',
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(store.getState().document).toBe(original);
+
+    store.getState().setSemanticSceneSpec({
+      ...original.semanticSceneSpec,
+      relationships: [
+        {
+          subjectObjectId: STARTER_IDS.mannequinId,
+          targetObjectId: STARTER_IDS.floorId,
+          relationship: '위에 서 있음',
+          gaze: '',
+          action: '서 있음',
+        },
+      ],
+    });
+    store.getState().deleteObject(STARTER_IDS.floorId);
+    expect(store.getState().document.semanticSceneSpec.relationships).toEqual(
+      [],
+    );
+  });
+
   it('beginTransform은 문서를 쓰지 않고 commitTransform에서 한 번만 최종 transform을 확정한다', () => {
     store.getState().selectObject(STARTER_IDS.mannequinId);
     const originalDocument = store.getState().document;
@@ -464,6 +535,7 @@ describe('editorStore', () => {
       'update-lighting-background',
       'update-output',
       'update-motion-metadata',
+      'update-semantic-scene-spec',
       'commit-mannequin-pose',
       'apply-generation-snapshot',
     ]);

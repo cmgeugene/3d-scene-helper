@@ -25,6 +25,52 @@ const STARTER_IDS = {
 } as const;
 
 describe('sceneDocumentSchema', () => {
+  it('장면 전체 SemanticSceneSpec 기본값과 object ID 관계 무결성을 보존한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    expect(document.semanticSceneSpec).toMatchObject({
+      version: 1,
+      generatedProps: [],
+      extras: { enabled: false, minCount: 0, maxCount: 0 },
+      relationships: [],
+      constraints: { preserve: [], allowChanges: [] },
+    });
+
+    document.semanticSceneSpec.relationships = [
+      {
+        subjectObjectId: STARTER_IDS.mannequinId,
+        targetObjectId: STARTER_IDS.floorId,
+        relationship: '바닥 위에 서 있음',
+        gaze: '',
+        action: '서 있음',
+      },
+    ];
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(true);
+
+    document.semanticSceneSpec.relationships[0]!.targetObjectId = 'missing';
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+  });
+
+  it('구형 current-version 문서의 누락 spec은 기본값으로 복원하고 unknown spec version은 거부한다', () => {
+    const withoutSpec = structuredClone(
+      createStarterSceneDocument(STARTER_IDS),
+    ) as Partial<ReturnType<typeof createStarterSceneDocument>>;
+    delete withoutSpec.semanticSceneSpec;
+
+    expect(
+      sceneDocumentSchema.parse(withoutSpec).semanticSceneSpec,
+    ).toMatchObject({
+      version: 1,
+      generatedProps: [],
+      relationships: [],
+    });
+    expect(
+      sceneDocumentSchema.safeParse({
+        ...withoutSpec,
+        semanticSceneSpec: { version: 99 },
+      }).success,
+    ).toBe(false);
+  });
+
   it('결정적 starter 문서를 직렬화 왕복하며 핵심 불변식을 보존한다', () => {
     const document = createStarterSceneDocument(STARTER_IDS);
     const parsed = sceneDocumentSchema.parse(

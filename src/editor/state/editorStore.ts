@@ -9,6 +9,7 @@ import {
   type SceneDocument,
   type SceneObject,
 } from '../persistence/sceneSchema';
+import type { SemanticSceneSpec } from '../persistence/semanticSceneSpec';
 import {
   createMannequinPose,
   type MannequinPosePresetId,
@@ -56,6 +57,7 @@ export const DOCUMENT_MUTATION_KINDS = [
   'update-lighting-background',
   'update-output',
   'update-motion-metadata',
+  'update-semantic-scene-spec',
   'commit-mannequin-pose',
   'apply-generation-snapshot',
 ] as const;
@@ -125,6 +127,7 @@ export interface EditorStore {
     guide: NonNullable<SceneDocument['cameraMotionGuide']> | null,
   ) => void;
   setSceneNotes: (notes: string) => void;
+  setSemanticSceneSpec: (spec: SemanticSceneSpec) => void;
   setTransformMode: (mode: TransformMode) => void;
   setMannequinTool: (tool: MannequinTool) => void;
   setGuideVisibility: (visibility: Partial<GuideVisibility>) => void;
@@ -453,6 +456,14 @@ export function createEditorStore(options: EditorStoreOptions) {
         const documentWithoutObject = {
           ...state.document,
           objects: state.document.objects.filter((object) => object.id !== id),
+          semanticSceneSpec: {
+            ...state.document.semanticSceneSpec,
+            relationships:
+              state.document.semanticSceneSpec.relationships.filter(
+                ({ subjectObjectId, targetObjectId }) =>
+                  subjectObjectId !== id && targetObjectId !== id,
+              ),
+          },
         };
         const document = { ...documentWithoutObject };
         if (state.document.subjectMotionGuide?.subjectId === id) {
@@ -685,6 +696,19 @@ export function createEditorStore(options: EditorStoreOptions) {
           sceneNotes: sceneNotes.slice(0, MAX_SCENE_NOTES_LENGTH),
         });
         return recordMutation(state, nextDocument, 'update-motion-metadata');
+      });
+    },
+    setSemanticSceneSpec: (semanticSceneSpec) => {
+      set((state) => {
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          semanticSceneSpec,
+        });
+        return recordMutation(
+          state,
+          nextDocument,
+          'update-semantic-scene-spec',
+        );
       });
     },
     setTransformMode: (transformMode) => {

@@ -488,12 +488,7 @@ function ConnectedSceneAssistant({
       const currentThreadId = await ensureThread();
       const prompt =
         sourceGeneration === null
-          ? createImageGenerationPrompt(
-              message,
-              scene,
-              layoutSpec,
-              selectedReferences,
-            )
+          ? createImageGenerationPrompt(scene, layoutSpec, selectedReferences)
           : createImageRefinementPrompt(
               message,
               scene,

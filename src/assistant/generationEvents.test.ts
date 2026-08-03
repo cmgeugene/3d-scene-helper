@@ -10,6 +10,7 @@ const generation = {
   prompt: '$imagegen test',
   layoutSpec: TEST_LAYOUT_SPEC,
   sceneSnapshot: null,
+  semanticSceneSpecSnapshot: null,
   referenceSnapshots: [],
   parentGenerationId: null,
   versionNumber: 1,

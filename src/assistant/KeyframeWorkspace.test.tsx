@@ -96,6 +96,7 @@ function generation(
     createdAt: '2026-08-03T00:00:00.000Z',
     updatedAt: '2026-08-03T00:01:00.000Z',
     ...rest,
+    semanticSceneSpecSnapshot: rest.semanticSceneSpecSnapshot ?? null,
   };
 }
 

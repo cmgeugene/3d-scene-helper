@@ -1539,7 +1539,7 @@ p {
 
 .inspector-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.25rem;
   margin-bottom: 0.8rem;
 }
@@ -1880,6 +1880,49 @@ p {
 
 .object-controls {
   margin-top: 0.7rem !important;
+}
+
+.semantic-spec-editor {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  padding-bottom: 0.75rem;
+}
+
+.semantic-spec-note,
+.semantic-spec-error {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.semantic-spec-note {
+  color: #aebbd0;
+}
+
+.semantic-spec-error {
+  color: #ff9b92;
+}
+
+.semantic-spec-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.semantic-spec-counts label {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+}
+
+.semantic-spec-counts input,
+.semantic-spec-editor textarea,
+.semantic-spec-editor input:not([type='checkbox']) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
 }
 
 .object-controls > label {

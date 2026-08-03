@@ -163,6 +163,96 @@ describe('Inspector', () => {
     expect(screen.getByText('정민')).toBeVisible();
   });
 
+  it('연출 탭에서 장면 전체 spec을 구조화해 한 번 적용하고 history/undo 복원한다', async () => {
+    const user = userEvent.setup();
+    render(<Inspector store={store} />);
+
+    await user.click(screen.getByRole('button', { name: '연출' }));
+    await user.type(screen.getByLabelText('장소'), '한국 노포 야외 치킨집');
+    await user.type(screen.getByLabelText('시간대'), '해질녘');
+    await user.type(
+      screen.getByLabelText('분위기'),
+      '따뜻한 저녁의 조용한 대화',
+    );
+    await user.type(
+      screen.getByLabelText('화풍 의도'),
+      '시네마틱 2D 애니메이션',
+    );
+    await user.type(
+      screen.getByLabelText('생성 전용 소품'),
+      '치킨 | 테이블 중앙 | 핵심{enter}맥주 | 테이블 오른쪽 | 보조',
+    );
+    await user.click(screen.getByRole('checkbox', { name: '엑스트라 사용' }));
+    await user.clear(screen.getByLabelText('엑스트라 최소 인원'));
+    await user.type(screen.getByLabelText('엑스트라 최소 인원'), '5');
+    await user.clear(screen.getByLabelText('엑스트라 최대 인원'));
+    await user.type(screen.getByLabelText('엑스트라 최대 인원'), '8');
+    await user.type(
+      screen.getByLabelText('엑스트라 배치'),
+      '오른쪽 배경 테이블',
+    );
+    await user.type(
+      screen.getByLabelText('엑스트라 중요도'),
+      '주인공보다 낮음',
+    );
+    await user.type(
+      screen.getByLabelText('인물 및 오브젝트 관계'),
+      `${MANNEQUIN_ID} | floor-test | 친구 | 바닥 쪽 시선 | 서 있음`,
+    );
+    await user.type(
+      screen.getByLabelText('필수 유지 요소'),
+      '카메라 구도{enter}인물 외형',
+    );
+    await user.type(screen.getByLabelText('변경 가능 요소'), '배경 디테일');
+
+    expect(store.getState().isDirty).toBe(false);
+    await user.click(screen.getByRole('button', { name: '장면 명세 적용' }));
+
+    expect(store.getState().document.semanticSceneSpec).toMatchObject({
+      intent: {
+        location: '한국 노포 야외 치킨집',
+        timeOfDay: '해질녘',
+        mood: '따뜻한 저녁의 조용한 대화',
+        visualStyle: '시네마틱 2D 애니메이션',
+      },
+      generatedProps: [
+        { name: '맥주', placement: '테이블 오른쪽', importance: '보조' },
+        { name: '치킨', placement: '테이블 중앙', importance: '핵심' },
+      ],
+      extras: {
+        enabled: true,
+        minCount: 5,
+        maxCount: 8,
+        placement: '오른쪽 배경 테이블',
+        importance: '주인공보다 낮음',
+      },
+      relationships: [
+        {
+          subjectObjectId: MANNEQUIN_ID,
+          targetObjectId: 'floor-test',
+          relationship: '친구',
+          gaze: '바닥 쪽 시선',
+          action: '서 있음',
+        },
+      ],
+      constraints: {
+        preserve: ['인물 외형', '카메라 구도'],
+        allowChanges: ['배경 디테일'],
+      },
+    });
+    expect(store.getState().history.past).toHaveLength(1);
+    expect(store.getState().isDirty).toBe(true);
+
+    store.getState().undo();
+    expect(store.getState().document.semanticSceneSpec.intent.location).toBe(
+      '',
+    );
+    store.getState().redo();
+    expect(store.getState().document.semanticSceneSpec.intent.location).toBe(
+      '한국 노포 야외 치킨집',
+    );
+  });
+
   it('빈 오브젝트 이름을 거부하고 기존 이름을 복원한다', async () => {
     const user = userEvent.setup();
     render(<Inspector store={store} />);

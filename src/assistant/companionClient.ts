@@ -7,6 +7,7 @@ import {
   sceneDocumentSchema,
   type SceneDocument,
 } from '../editor/persistence/sceneSchema';
+import { semanticSceneSpecSchema } from '../editor/persistence/semanticSceneSpec';
 import type { CompanionConnection } from './companionConnection';
 
 const accountSchema = z
@@ -107,6 +108,7 @@ export const generationRecordSchema = z.object({
   prompt: z.string().min(1),
   layoutSpec: layoutSpecSchema.nullable(),
   sceneSnapshot: sceneDocumentSchema.nullable().default(null),
+  semanticSceneSpecSnapshot: semanticSceneSpecSchema.nullable().default(null),
   referenceSnapshots: z.array(referenceArtifactSchema).default([]),
   parentGenerationId: z.string().min(1).nullable().default(null),
   sourceGenerationId: z.string().min(1).nullable().optional(),

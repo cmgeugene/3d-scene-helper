@@ -1,8 +1,8 @@
 # AI Scene Assistant 구현 로드맵
 
-> 기준일: 2026-08-03
+> 기준일: 2026-08-04
 >
-> 현재 기준: S21 sceneSnapshot 읽기 전용 미리보기 완료; S22 안전 적용은 구현·검증 완료 후 Grok review 대기
+> 현재 기준: S23 Semantic Scene Spec 1차 수직 슬라이스와 P2 완료; P3는 시작 전
 >
 > 이 문서는 앞으로의 구현 순서와 완료 기준을 관리하는 단일 로드맵이다. 세부 설계는
 > `ai-scene-assistant.md`, 완료된 작업의 검증 기록은 `session-handoffs/`를 따른다.
@@ -21,6 +21,8 @@
 | 생성 원본 보존 | 생성 당시 SceneDocument·레퍼런스·LayoutSpec 불변 스냅샷과 버전 계보         | S18     |
 | 키프레임 보정  | 기존 결과 + 현재 3D 레이아웃을 사용하는 단일 단계 `edit` 생성               | S19     |
 | 키프레임 작업  | 전체 generation 이력과 sceneSnapshot 읽기 전용 3D 미리보기·차이·무결성 표시 | S20–S21 |
+| 스냅샷 적용    | generation sceneSnapshot의 fail-closed 적용·undo·durable recovery·출처 보존 | S22     |
+| 장면 전체 명세 | versioned Semantic Scene Spec 저장·편집·snapshot·prompt와 권위 경계         | S23     |
 
 현재 기본 생성은 `3D 레이아웃 1장 + 레퍼런스 최대 4장`, 보정 생성은
 `원본 키프레임 1장 + 현재 3D 레이아웃 1장 + 레퍼런스 최대 3장`을 사용한다.
@@ -49,7 +51,7 @@
 3. 선택한 과거 generation을 기준으로 보정해도 올바른 부모 ID와 버전이 기록된다.
 4. 스냅샷이 없는 구형 기록은 복원 제한을 명확히 표시하고 앱을 깨뜨리지 않는다.
 
-### P1. 생성 당시 3D 씬 불러오기 — 진행 중 (S22 구현·검증 완료, Grok review 대기)
+### P1. 생성 당시 3D 씬 불러오기 — 완료 (S22)
 
 목표는 과거 키프레임의 구도를 수정해 새로운 생성 분기를 만들 수 있게 하는 것이다.
 
@@ -69,23 +71,23 @@
 4. [x] 스냅샷 scene ID, layout scene ID와 렌더 scene ID의 무결성을 서버와 브라우저에서
        검증한다.
 
-### P2. 장면 전체 Semantic Scene Spec
+### P2. 장면 전체 Semantic Scene Spec — 완료 (S23)
 
 현재 구현된 오브젝트별 `semantic.meaning`과 `generationNotes`를 장면 전체 연출 명세로
 확장한다.
 
-- 장면의 장소, 시간대, 분위기와 화풍 의도
-- 생성 전용 소품과 음식처럼 3D로 만들지 않은 요소
-- 배경 손님 등 엑스트라의 수, 위치 범위와 중요도
-- 인물 간 시선, 행동과 관계
-- 유지해야 할 요소와 변경 가능한 요소
-- 프로젝트 파일 저장, JSON import/export와 generation snapshot 포함
+- [x] 장면의 장소, 시간대, 분위기와 화풍 의도
+- [x] 생성 전용 소품과 음식처럼 3D로 만들지 않은 요소
+- [x] 배경 손님 등 엑스트라의 수, 위치 범위와 중요도
+- [x] 인물 간 시선, 행동과 관계
+- [x] 유지해야 할 요소와 변경 가능한 요소
+- [x] 프로젝트 파일 저장, JSON import/export와 generation snapshot 포함
 
 완료 기준:
 
-1. 사용자가 `배경 오른쪽에 손님 5~8명` 같은 지시를 구조화해 저장할 수 있다.
-2. 새 대화나 새로고침 후에도 명세가 프로젝트에서 복원된다.
-3. prompt는 채팅 기록이 아니라 저장된 명세를 기준으로 재생성할 수 있다.
+1. [x] 사용자가 `배경 오른쪽에 손님 5~8명` 같은 지시를 구조화해 저장할 수 있다.
+2. [x] 새 대화나 새로고침 후에도 명세가 프로젝트에서 복원된다.
+3. [x] prompt는 채팅 기록이 아니라 저장된 명세를 기준으로 재생성할 수 있다.
 
 ### P3. 대화형 변경 계약과 충돌 검사
 
@@ -152,7 +154,7 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 
 ## 5. 바로 다음 작업
 
-S22의 구현과 자동 검증은 완료했지만 필수 Grok spec review가 인증 blocker로 실행되지 않았다.
-다음 작업은 Grok CLI에 다시 인증한 뒤 현재 staged diff와 S22 명세만으로 initial review를 실행하고,
-필요하면 finding을 RED→GREEN으로 수정한 뒤 Grok과 Gemini closure를 모두 통과해 S22를 커밋하는
-것이다. 그 전에는 P1 완료를 선언하거나 P2로 넘어가지 않는다.
+S23은 버전이 있는 장면 전체 Semantic Scene Spec의 저장·복원, generation snapshot, 저장 명세
+기반 image-generation prompt와 Inspector 구조화 편집 UI를 실제 1280×720 Chromium 흐름까지
+검증해 P2를 종료했다. 다음 numbered phase는 P3이지만 아직 시작하지 않는다. 자연어 `specPatch`
+변환·자동 적용, 변경 카드와 revision/허용 경로 충돌 검사는 P3의 별도 범위다.

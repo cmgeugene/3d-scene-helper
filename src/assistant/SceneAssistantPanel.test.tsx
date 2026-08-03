@@ -283,6 +283,7 @@ describe('SceneAssistantPanel', () => {
       generationId: 'generation-layout-source',
       versionNumber: 7,
     };
+    sceneSnapshot.semanticSceneSpec.intent.location = '한국 노포 야외 치킨집';
     const layoutBlob = new Blob(['png'], { type: 'image/png' });
     const captureLayout = vi.fn(async () => layoutBlob);
     const createSceneRender = vi.fn(async () => ({
@@ -304,6 +305,9 @@ describe('SceneAssistantPanel', () => {
       prompt: '$imagegen test',
       layoutSpec: { ...TEST_LAYOUT_SPEC, sceneId: 'scene-1' },
       sceneSnapshot,
+      semanticSceneSpecSnapshot: structuredClone(
+        sceneSnapshot.semanticSceneSpec,
+      ),
       referenceSnapshots: [characterReference],
       parentGenerationId: null,
       versionNumber: 1,
@@ -399,6 +403,15 @@ describe('SceneAssistantPanel', () => {
     expect(startGeneration.mock.calls[0]?.[0].prompt).toContain(
       '3D 레이아웃과 최종 키프레임의 변환 계약',
     );
+    expect(startGeneration.mock.calls[0]?.[0].prompt).toContain(
+      '- 장소: 한국 노포 야외 치킨집',
+    );
+    expect(startGeneration.mock.calls[0]?.[0].prompt).not.toContain(
+      '[사용자 연출]',
+    );
+    expect(startGeneration.mock.calls[0]?.[0].prompt).not.toContain(
+      '이 구도로 저녁 치킨집 장면을 만들어줘.',
+    );
     expect(await screen.findByText(/이미지를 생성하고 있습니다/)).toBeVisible();
   });
 
@@ -417,6 +430,9 @@ describe('SceneAssistantPanel', () => {
       prompt: '$imagegen source',
       layoutSpec: { ...TEST_LAYOUT_SPEC, sceneId: 'scene-1' },
       sceneSnapshot,
+      semanticSceneSpecSnapshot: structuredClone(
+        sceneSnapshot.semanticSceneSpec,
+      ),
       referenceSnapshots: [characterReference],
       parentGenerationId: null,
       versionNumber: 1,

@@ -15,6 +15,7 @@ import {
   sceneDocumentSchema,
   type SceneDocument,
 } from '../src/editor/persistence/sceneSchema';
+import { semanticSceneSpecSchema } from '../src/editor/persistence/semanticSceneSpec';
 import { resolveProjectArtifact } from './projectArtifacts';
 import {
   publicReferenceSchema,
@@ -62,6 +63,7 @@ const generationSchema = z.object({
   prompt: z.string().min(1),
   layoutSpec: layoutSpecSchema.nullable().default(null),
   sceneSnapshot: sceneDocumentSchema.nullable().default(null),
+  semanticSceneSpecSnapshot: semanticSceneSpecSchema.nullable().default(null),
   referenceSnapshots: z.array(publicReferenceSchema).default([]),
   parentGenerationId: z.string().min(1).nullable().default(null),
   sourceGenerationId: z.string().min(1).nullable().default(null),
@@ -344,6 +346,7 @@ export class GenerationStore {
 
   private async createGenerationInternal(input: CreateGenerationInput) {
     const manifest = await this.readManifest();
+    const sceneSnapshot = sceneDocumentSchema.parse(input.sceneSnapshot);
     const parentGenerationId = input.parentGenerationId ?? null;
     const parent =
       parentGenerationId === null
@@ -386,8 +389,8 @@ export class GenerationStore {
       throw new ReferenceNotFoundError('레이아웃 렌더를 찾을 수 없습니다.');
     }
     if (
-      input.sceneSnapshot.id !== input.layoutSpec.sceneId ||
-      input.sceneSnapshot.id !== layoutRender.sceneId
+      sceneSnapshot.id !== input.layoutSpec.sceneId ||
+      sceneSnapshot.id !== layoutRender.sceneId
     ) {
       throw new ReferenceInputError(
         '장면 스냅샷, 레이아웃 렌더와 LayoutSpec의 장면 ID가 일치하지 않습니다.',
@@ -408,6 +411,10 @@ export class GenerationStore {
     const generation: GenerationRecord = generationSchema.parse({
       id: `generation_${randomUUID()}`,
       ...input,
+      sceneSnapshot,
+      semanticSceneSpecSnapshot: structuredClone(
+        sceneSnapshot.semanticSceneSpec,
+      ),
       parentGenerationId,
       sourceGenerationId,
       versionNumber:

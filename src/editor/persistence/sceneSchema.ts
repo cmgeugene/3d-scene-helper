@@ -11,6 +11,10 @@ import {
   SCENE_DOCUMENT_VERSION,
 } from '../constants';
 import { createMannequinPose } from '../mannequin/mannequinRig';
+import {
+  createDefaultSemanticSceneSpec,
+  semanticSceneSpecSchema,
+} from './semanticSceneSpec';
 
 const stableIdSchema = z.string().trim().min(1);
 
@@ -233,6 +237,9 @@ export const sceneDocumentSchema = z
     background: backgroundSchema,
     output: outputSchema,
     sceneNotes: z.string().max(MAX_SCENE_NOTES_LENGTH),
+    semanticSceneSpec: semanticSceneSpecSchema.default(
+      createDefaultSemanticSceneSpec(),
+    ),
     generationSource: generationSourceSchema.optional(),
     subjectMotionGuide: subjectMotionGuideSchema.optional(),
     cameraMotionGuide: cameraMotionGuideSchema.optional(),
@@ -261,6 +268,18 @@ export const sceneDocumentSchema = z
         path: ['subjectMotionGuide', 'subjectId'],
       });
     }
+
+    document.semanticSceneSpec.relationships.forEach((relationship, index) => {
+      for (const key of ['subjectObjectId', 'targetObjectId'] as const) {
+        if (!objectIds.has(relationship[key])) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Semantic relationships must reference existing objects',
+            path: ['semanticSceneSpec', 'relationships', index, key],
+          });
+        }
+      }
+    });
   });
 
 export type SceneDocument = z.infer<typeof sceneDocumentSchema>;
@@ -426,5 +445,6 @@ export function createStarterSceneDocument(
       mode: 'clean',
     },
     sceneNotes: '',
+    semanticSceneSpec: createDefaultSemanticSceneSpec(),
   });
 }
