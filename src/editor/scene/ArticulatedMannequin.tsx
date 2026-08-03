@@ -400,8 +400,8 @@ export function ArticulatedMannequin({
             name="Mannequin.upper-chest-plane"
             geometry="sphere"
             args={[0.075, 24]}
-            position={[0, 0.4, -0.144 * body.torso.z]}
-            scale={[2.05 * body.torso.x, 0.4, 0.22 * body.torso.z]}
+            position={[0, 0.4, -0.144 * body.torsoCue.z]}
+            scale={[2.05 * body.torsoCue.x, 0.4, 0.22 * body.torsoCue.z]}
           />
           <MeshPart
             {...common}
@@ -410,8 +410,8 @@ export function ArticulatedMannequin({
             unlit
             geometry="sphere"
             args={[0.03, 18]}
-            position={[0, 0.36, -0.16 * body.torso.z]}
-            scale={[0.46 * body.torso.x, 1.5, 0.24 * body.torso.z]}
+            position={[0, 0.36, -0.16 * body.torsoCue.z]}
+            scale={[0.46 * body.torsoCue.x, 1.5, 0.24 * body.torsoCue.z]}
           />
           <MeshPart
             {...common}
@@ -420,8 +420,8 @@ export function ArticulatedMannequin({
             unlit
             geometry="sphere"
             args={[0.025, 18]}
-            position={[0, 0.34, 0.134 * body.torso.z]}
-            scale={[0.48 * body.torso.x, 1.12, 0.25 * body.torso.z]}
+            position={[0, 0.34, 0.134 * body.torsoCue.z]}
+            scale={[0.48 * body.torsoCue.x, 1.12, 0.25 * body.torsoCue.z]}
           />
           <group
             name="Mannequin.neck-head-pivot"

@@ -4,6 +4,7 @@ import {
   createStudioMannequinGeometries,
   getSharedStudioMannequinGeometries,
 } from './mannequinAppearance';
+import { MANNEQUIN_BODY_PROPORTIONS } from './mannequinBodyType';
 
 function radialExtentAtY(
   geometry: BufferGeometry,
@@ -141,7 +142,7 @@ describe('studio mannequin appearance geometry', () => {
     );
     expect(size(heavy.torso).x).toBeGreaterThan(size(standard.torso).x * 1.25);
     expect(size(heavy.torso).z).toBeGreaterThan(size(athletic.torso).z * 1.15);
-    expect(size(heavy.thigh).x).toBeGreaterThan(size(standard.thigh).x * 1.15);
+    expect(size(heavy.thigh).x).toBeGreaterThan(size(standard.thigh).x * 1.4);
     expect(radialExtentAtY(athletic.torso, 0.12)).toBeGreaterThan(
       radialExtentAtY(athletic.torso, -0.08) * 1.25,
     );
@@ -154,6 +155,37 @@ describe('studio mannequin appearance geometry', () => {
     for (const geometries of [standard, athletic, heavy]) {
       for (const part of Object.values(geometries)) part.dispose();
     }
+  });
+
+  it('뚱뚱한 체형은 복부 중앙이 위아래보다 넓고 앞쪽으로 돌출된 항아리 실루엣이다', () => {
+    const heavy = createStudioMannequinGeometries('heavy');
+    const bellyWidth = radialExtentAtY(heavy.torso, -0.08);
+    const chestWidth = radialExtentAtY(heavy.torso, 0.12);
+    const lowerBellyWidth = radialExtentAtY(heavy.torso, -0.17);
+    const lowerTorsoWidth = radialExtentAtY(heavy.torso, -0.22);
+    const bellyDepth = depthExtentsAtY(heavy.torso, -0.08);
+    const chestDepth = depthExtentsAtY(heavy.torso, 0.12);
+    const standard = createStudioMannequinGeometries('standard');
+
+    expect(bellyWidth).toBeGreaterThan(
+      radialExtentAtY(standard.torso, -0.08) * 2.2,
+    );
+    expect(bellyDepth.front).toBeGreaterThan(
+      depthExtentsAtY(standard.torso, -0.08).front * 2.7,
+    );
+    expect(bellyWidth).toBeGreaterThan(chestWidth * 1.15);
+    expect(lowerBellyWidth).toBeGreaterThan(bellyWidth * 0.6);
+    expect(bellyWidth).toBeGreaterThan(lowerTorsoWidth * 1.5);
+    expect(bellyDepth.front).toBeGreaterThan(chestDepth.front * 1.15);
+    expect(bellyDepth.front).toBeGreaterThan(bellyDepth.back * 1.25);
+
+    for (const geometries of [standard, heavy]) {
+      for (const part of Object.values(geometries)) part.dispose();
+    }
+
+    expect(MANNEQUIN_BODY_PROPORTIONS.heavy.torsoCue.x).toBeLessThan(
+      MANNEQUIN_BODY_PROPORTIONS.heavy.torso.x * 0.8,
+    );
   });
 
   it('models a projected chest and lower face so front and back read differently', () => {

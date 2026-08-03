@@ -101,24 +101,28 @@ function createTorsoGeometry(bodyType: MannequinBodyTypeId) {
     } else {
       z *= 1 - upperChest * 0.035;
     }
-    const belly = Math.max(0, 1 - Math.abs(y + 0.04) / 0.2);
+    const belly = Math.max(0, 1 - Math.abs(y + 0.08) / 0.24);
     const widthScale =
       bodyType === 'athletic'
         ? 1.16 + upperChest * 0.12
         : bodyType === 'heavy'
-          ? 1.25 + belly
+          ? 1.08 + belly * 1.35
           : 1;
     const depthScale =
       bodyType === 'athletic'
         ? 1.14
         : bodyType === 'heavy'
-          ? 1.3 + belly * 1.2
+          ? z < 0
+            ? 1.12 + belly * 1.6
+            : 1.08 + belly * 0.65
           : 1;
+    const forwardBellyOffset =
+      bodyType === 'heavy' && z < 0 ? belly * 0.025 : 0;
     position.setXYZ(
       index,
       position.getX(index) * widthScale,
       y,
-      z * depthScale,
+      z * depthScale - forwardBellyOffset,
     );
   }
   geometry.computeVertexNormals();

@@ -13,6 +13,7 @@ export interface MannequinBodyRadialScale {
 
 export type MannequinBodyPart =
   | 'torso'
+  | 'torsoCue'
   | 'pelvis'
   | 'neck'
   | 'head'
@@ -30,6 +31,7 @@ export const MANNEQUIN_BODY_PROPORTIONS: Record<
 > = {
   standard: {
     torso: { x: 1, z: 1 },
+    torsoCue: { x: 1, z: 1 },
     pelvis: { x: 1, z: 1 },
     neck: { x: 1, z: 1 },
     head: { x: 1, z: 1 },
@@ -43,6 +45,7 @@ export const MANNEQUIN_BODY_PROPORTIONS: Record<
   },
   athletic: {
     torso: { x: 1.28, z: 1.14 },
+    torsoCue: { x: 1.28, z: 1.14 },
     pelvis: { x: 1.1, z: 1.08 },
     neck: { x: 1.08, z: 1.08 },
     head: { x: 1.03, z: 1.03 },
@@ -55,13 +58,14 @@ export const MANNEQUIN_BODY_PROPORTIONS: Record<
     foot: { x: 1.06, z: 1.04 },
   },
   heavy: {
-    torso: { x: 1.66, z: 1.75 },
+    torso: { x: 1.9, z: 1.9 },
+    torsoCue: { x: 1.32, z: 1.42 },
     pelvis: { x: 1.34, z: 1.42 },
     neck: { x: 1.12, z: 1.12 },
     head: { x: 1.08, z: 1.08 },
     upperArm: { x: 1.34, z: 1.38 },
     forearm: { x: 1.26, z: 1.3 },
-    thigh: { x: 1.3, z: 1.34 },
+    thigh: { x: 1.45, z: 1.48 },
     shin: { x: 1.2, z: 1.22 },
     hand: { x: 1.1, z: 1.08 },
     thumb: { x: 1.1, z: 1.08 },
