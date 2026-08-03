@@ -87,6 +87,13 @@ export type SceneRender = z.infer<typeof sceneRenderSchema>;
 export type GenerationRecord = z.infer<typeof generationSchema>;
 export type GenerationMode = GenerationRecord['generationMode'];
 
+export interface GenerationSceneIntegrity {
+  status: 'valid' | 'legacy' | 'mismatch';
+  snapshotSceneId: string | null;
+  layoutSpecSceneId: string | null;
+  layoutRenderSceneId: string | null;
+}
+
 export interface CreateGenerationInput {
   threadId: string;
   turnId: string;
@@ -122,9 +129,36 @@ export function toPublicSceneRender(render: SceneRender) {
   return publicRender;
 }
 
-export function toPublicGeneration(generation: GenerationRecord) {
+function assessSceneIntegrity(
+  generation: GenerationRecord,
+  layoutRender: SceneRender | undefined,
+): GenerationSceneIntegrity {
+  const snapshotSceneId = generation.sceneSnapshot?.id ?? null;
+  const layoutSpecSceneId = generation.layoutSpec?.sceneId ?? null;
+  const layoutRenderSceneId = layoutRender?.sceneId ?? null;
+  const status =
+    snapshotSceneId === null
+      ? 'legacy'
+      : layoutSpecSceneId === snapshotSceneId &&
+          layoutRenderSceneId === snapshotSceneId
+        ? 'valid'
+        : 'mismatch';
+
+  return {
+    status,
+    snapshotSceneId,
+    layoutSpecSceneId,
+    layoutRenderSceneId,
+  };
+}
+
+export function toPublicGeneration(
+  generation: GenerationRecord,
+  layoutRender: SceneRender | undefined,
+) {
   return {
     ...generation,
+    sceneIntegrity: assessSceneIntegrity(generation, layoutRender),
     result:
       generation.result === null
         ? null
@@ -143,7 +177,14 @@ export class GenerationStore {
 
   async listGenerations() {
     const manifest = await this.readManifest();
-    return manifest.generations.map(toPublicGeneration);
+    return manifest.generations.map((generation) =>
+      toPublicGeneration(
+        generation,
+        manifest.sceneRenders.find(
+          ({ id }) => id === generation.layoutRenderId,
+        ),
+      ),
+    );
   }
 
   importSceneRender(sceneId: string, data: Buffer) {
@@ -211,7 +252,12 @@ export class GenerationStore {
       generation.result.assetPath,
     );
     return {
-      generation: toPublicGeneration(generation),
+      generation: toPublicGeneration(
+        generation,
+        manifest.sceneRenders.find(
+          ({ id }) => id === generation.layoutRenderId,
+        ),
+      ),
       data: await readFile(filePath),
       mimeType: generation.result.mimeType,
     };
@@ -228,7 +274,12 @@ export class GenerationStore {
       );
     }
     return {
-      generation: toPublicGeneration(generation),
+      generation: toPublicGeneration(
+        generation,
+        manifest.sceneRenders.find(
+          ({ id }) => id === generation.layoutRenderId,
+        ),
+      ),
       assetPath: generation.result.assetPath,
     };
   }
@@ -346,7 +397,7 @@ export class GenerationStore {
       ...manifest,
       generations: [...manifest.generations, generation],
     });
-    return toPublicGeneration(generation);
+    return toPublicGeneration(generation, layoutRender);
   }
 
   private async importGenerationResultInternal(
@@ -406,7 +457,10 @@ export class GenerationStore {
       await unlink(destination).catch(() => undefined);
       throw error;
     }
-    return toPublicGeneration(updated);
+    return toPublicGeneration(
+      updated,
+      manifest.sceneRenders.find(({ id }) => id === updated.layoutRenderId),
+    );
   }
 
   private async completeTurnInternal(
@@ -420,7 +474,11 @@ export class GenerationStore {
     );
     if (index < 0) return null;
     const current = manifest.generations[index]!;
-    if (current.status !== 'inProgress') return toPublicGeneration(current);
+    const layoutRender = manifest.sceneRenders.find(
+      ({ id }) => id === current.layoutRenderId,
+    );
+    if (current.status !== 'inProgress')
+      return toPublicGeneration(current, layoutRender);
     const completedWithoutResult =
       status === 'completed' && current.result === null;
     const updated: GenerationRecord = {
@@ -434,7 +492,7 @@ export class GenerationStore {
     const generations = [...manifest.generations];
     generations[index] = updated;
     await this.writeManifest({ ...manifest, generations });
-    return toPublicGeneration(updated);
+    return toPublicGeneration(updated, layoutRender);
   }
 
   private async readManifest() {

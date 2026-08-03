@@ -122,6 +122,51 @@ describe('GenerationStore', () => {
     );
   });
 
+  it('저장된 snapshot·LayoutSpec·layout render scene ID 무결성을 재시작 뒤에도 판정한다', async () => {
+    const { root, store } = await createStore();
+    const render = await store.importSceneRender('scene-test', onePixelPng);
+    await store.createGeneration({
+      threadId: 'thread-integrity',
+      turnId: 'turn-integrity',
+      prompt: '$imagegen integrity',
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: createSceneSnapshot(),
+      referenceSnapshots: [],
+      layoutRenderId: render.id,
+      referenceIds: [],
+      attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+    });
+
+    await expect(new GenerationStore(root).listGenerations()).resolves.toEqual([
+      expect.objectContaining({
+        sceneIntegrity: {
+          status: 'valid',
+          snapshotSceneId: 'scene-test',
+          layoutSpecSceneId: 'scene-test',
+          layoutRenderSceneId: 'scene-test',
+        },
+      }),
+    ]);
+
+    const manifestPath = path.join(root, 'generations.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      sceneRenders: Array<{ sceneId: string }>;
+    };
+    manifest.sceneRenders[0]!.sceneId = 'scene-other';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    await expect(new GenerationStore(root).listGenerations()).resolves.toEqual([
+      expect.objectContaining({
+        sceneIntegrity: {
+          status: 'mismatch',
+          snapshotSceneId: 'scene-test',
+          layoutSpecSceneId: 'scene-test',
+          layoutRenderSceneId: 'scene-other',
+        },
+      }),
+    ]);
+  });
+
   it('존재하지 않는 저장 레이아웃 렌더 콘텐츠를 명확히 거부한다', async () => {
     const { store } = await createStore();
 

@@ -150,6 +150,12 @@ describe('EditorShell', () => {
       feedback: null,
       generationMode: 'fresh',
       layoutRenderId: 'render-selected',
+      sceneIntegrity: {
+        status: 'valid',
+        snapshotSceneId: 'scene-test',
+        layoutSpecSceneId: 'scene-test',
+        layoutRenderSceneId: 'scene-test',
+      },
       referenceIds: [],
       attachments: [{ type: 'layout', id: 'render-selected', kind: 'layout' }],
       revisedPrompt: null,
@@ -199,6 +205,14 @@ describe('EditorShell', () => {
     };
     const storage = createMemoryStorage();
     const store = createTestStore();
+    store.getState().addObject({ kind: 'cube', name: '현재 편집 큐브' });
+    store.getState().selectObject('mannequin-test');
+    const editorStateBeforePreview = {
+      document: store.getState().document,
+      history: store.getState().history,
+      selectedObjectId: store.getState().selectedObjectId,
+      isDirty: store.getState().isDirty,
+    };
 
     render(
       <EditorShell
@@ -230,13 +244,25 @@ describe('EditorShell', () => {
     expect(
       screen.queryByRole('button', { name: '삭제' }),
     ).not.toBeInTheDocument();
-    act(() => store.getState().selectObject('mannequin-test'));
     await user.keyboard('{Delete}');
     expect(
       store
         .getState()
         .document.objects.some(({ id }) => id === 'mannequin-test'),
     ).toBe(true);
+
+    await user.click(
+      screen.getByRole('button', { name: '생성 당시 3D 씬 미리보기' }),
+    );
+    expect(
+      screen.getByRole('img', { name: '생성 당시 3D 씬 읽기 전용 미리보기' }),
+    ).toBeVisible();
+    expect(store.getState().document).toBe(editorStateBeforePreview.document);
+    expect(store.getState().history).toBe(editorStateBeforePreview.history);
+    expect(store.getState().selectedObjectId).toBe(
+      editorStateBeforePreview.selectedObjectId,
+    );
+    expect(store.getState().isDirty).toBe(editorStateBeforePreview.isDirty);
 
     await user.click(
       await screen.findByRole('button', { name: '선택 결과로 보정' }),

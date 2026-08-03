@@ -980,6 +980,130 @@ p {
   gap: 0.2rem;
 }
 
+.generation-integrity-error,
+.scene-snapshot-inspector {
+  margin: 0 0 0.65rem;
+  padding: 0.6rem;
+  border: 1px solid #30435f;
+  border-radius: 0.55rem;
+  background: #101b2b;
+}
+
+.generation-integrity-error {
+  display: grid;
+  gap: 0.25rem;
+  border-color: #71483f;
+  color: #ffb3a4;
+  font-size: 0.65rem;
+  background: #2a1919;
+}
+
+.generation-integrity-error ul {
+  margin: 0.2rem 0 0;
+  padding-left: 1rem;
+}
+
+.scene-snapshot-inspector > header {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.scene-snapshot-inspector h4 {
+  margin: 0;
+  color: #d4e0f2;
+  font-size: 0.72rem;
+}
+
+.scene-snapshot-inspector header span,
+.scene-snapshot-inspector p,
+.scene-snapshot-differences {
+  color: #99a9bf;
+  font-size: 0.62rem;
+  line-height: 1.45;
+}
+
+.scene-snapshot-inspector header span {
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.scene-snapshot-inspector button {
+  flex: none;
+  border-color: #5378b6;
+  color: #eaf1ff;
+  font-size: 0.64rem;
+  background: #244574;
+}
+
+.scene-snapshot-inspector button:disabled {
+  border-color: #344157;
+  color: #6f7e92;
+  background: #182230;
+}
+
+.scene-snapshot-differences {
+  display: grid;
+  max-height: 8rem;
+  gap: 0.22rem;
+  margin: 0.55rem 0 0;
+  padding: 0.5rem 0.5rem 0.5rem 1.4rem;
+  overflow: auto;
+  border-radius: 0.4rem;
+  background: #0a121d;
+}
+
+.scene-snapshot-differences strong {
+  color: #c8d8ee;
+}
+
+.scene-snapshot-preview {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: min(18rem, 40vh);
+  min-height: 13rem;
+  margin-top: 0.6rem;
+  overflow: hidden;
+  border: 1px solid #40587a;
+  border-radius: 0.5rem;
+  background: #080d14;
+  pointer-events: none;
+}
+
+.scene-snapshot-preview .scene-viewport-surface {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.scene-snapshot-preview-fallback {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  padding: 1rem;
+  color: #8fa4c1;
+  font-size: 0.67rem;
+  text-align: center;
+}
+
+.scene-snapshot-preview-caption {
+  position: absolute;
+  z-index: 1;
+  right: 0.45rem;
+  bottom: 0.4rem;
+  max-width: calc(100% - 0.9rem);
+  padding: 0.25rem 0.4rem;
+  overflow: hidden;
+  border-radius: 0.3rem;
+  color: #c8d9f1;
+  font-size: 0.56rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgb(5 10 17 / 78%);
+}
+
 .keyframe-workspace-error,
 .generation-record-error {
   border-color: #71483f;

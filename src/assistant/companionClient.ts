@@ -92,6 +92,13 @@ const generationResultSchema = z.object({
   byteLength: z.number().int().positive(),
 });
 
+const generationSceneIntegritySchema = z.object({
+  status: z.enum(['valid', 'legacy', 'mismatch']),
+  snapshotSceneId: z.string().min(1).nullable(),
+  layoutSpecSceneId: z.string().min(1).nullable(),
+  layoutRenderSceneId: z.string().min(1).nullable(),
+});
+
 export const generationRecordSchema = z.object({
   id: z.string().min(1),
   threadId: z.string().min(1),
@@ -106,6 +113,7 @@ export const generationRecordSchema = z.object({
   feedback: z.string().min(1).nullable().default(null),
   generationMode: z.enum(['fresh', 'edit']).default('fresh'),
   layoutRenderId: z.string().min(1),
+  sceneIntegrity: generationSceneIntegritySchema.optional(),
   referenceIds: z.array(z.string().min(1)),
   attachments: z.array(
     z.object({

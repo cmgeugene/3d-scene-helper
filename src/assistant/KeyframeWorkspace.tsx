@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { SceneDocument } from '../editor/persistence/sceneSchema';
 import type { CompanionConnection } from './companionConnection';
 import {
   CompanionClient,
@@ -6,6 +7,10 @@ import {
   type GenerationRecord,
 } from './companionClient';
 import { parseGenerationUpdate } from './generationEvents';
+import {
+  assessGenerationSceneIntegrity,
+  compareSceneDocuments,
+} from './sceneSnapshotComparison';
 
 export const KEYFRAME_SELECTION_STORAGE_KEY =
   'i2v.keyframe-workspace.selection.v1';
@@ -16,6 +21,8 @@ interface KeyframeWorkspaceProps {
   clientFactory?: (connection: CompanionConnection) => CompanionBrowserClient;
   createObjectUrl?: (blob: Blob) => string;
   revokeObjectUrl?: (url: string) => void;
+  currentDocument?: SceneDocument;
+  renderScenePreview?: (document: SceneDocument) => ReactNode;
   onRefine: (generation: GenerationRecord) => void;
 }
 
@@ -68,6 +75,8 @@ export function KeyframeWorkspace({
   clientFactory = defaultClientFactory,
   createObjectUrl = defaultCreateObjectUrl,
   revokeObjectUrl = defaultRevokeObjectUrl,
+  currentDocument,
+  renderScenePreview,
   onRefine,
 }: KeyframeWorkspaceProps) {
   const client = useMemo(
@@ -82,6 +91,9 @@ export function KeyframeWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<ImageLoadState | null>(null);
   const [layoutImage, setLayoutImage] = useState<ImageLoadState | null>(null);
+  const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(
+    null,
+  );
   const resultUrlRef = useRef<string | null>(null);
   const layoutUrlRef = useRef<string | null>(null);
 
@@ -136,6 +148,20 @@ export function KeyframeWorkspace({
 
   const selected =
     generations.find((generation) => generation.id === selectedId) ?? null;
+  const sceneIntegrity =
+    selected === null ? null : assessGenerationSceneIntegrity(selected);
+  const sceneComparison =
+    selected?.sceneSnapshot === null ||
+    selected?.sceneSnapshot === undefined ||
+    currentDocument === undefined ||
+    sceneIntegrity?.status !== 'valid'
+      ? null
+      : compareSceneDocuments(currentDocument, selected.sceneSnapshot);
+  const previewEnabled =
+    selected?.sceneSnapshot !== null &&
+    selected?.sceneSnapshot !== undefined &&
+    sceneIntegrity?.status === 'valid';
+  const previewOpen = selected?.id === previewGenerationId && previewEnabled;
   const currentResultImage =
     resultImage?.generationId === selected?.id ? resultImage : null;
   const currentLayoutImage =
@@ -267,7 +293,10 @@ export function KeyframeWorkspace({
                       type="button"
                       aria-pressed={generation.id === selected?.id}
                       aria-label={`${generation.id} · v${generation.versionNumber} · ${STATUS_LABELS[generation.status]}`}
-                      onClick={() => setSelectedId(generation.id)}
+                      onClick={() => {
+                        setSelectedId(generation.id);
+                        setPreviewGenerationId(null);
+                      }}
                     >
                       <span className="generation-history-primary">
                         <strong>v{generation.versionNumber}</strong>
@@ -324,6 +353,84 @@ export function KeyframeWorkspace({
                   </span>
                 </div>
               ) : null}
+
+              {sceneIntegrity?.status !== 'mismatch' ? null : (
+                <div
+                  className="generation-integrity-error"
+                  role="alert"
+                  aria-label="장면 ID 무결성 오류"
+                >
+                  <strong>장면 ID 무결성 오류</strong>
+                  <span>
+                    저장된 3D 장면과 생성 당시 레이아웃의 출처가 일치하지 않아
+                    미리보기를 열지 않았습니다.
+                  </span>
+                  <ul>
+                    <li>
+                      SceneSnapshot · {sceneIntegrity.snapshotSceneId ?? '없음'}
+                    </li>
+                    <li>
+                      LayoutSpec · {sceneIntegrity.layoutSpecSceneId ?? '없음'}
+                    </li>
+                    <li>
+                      Layout render ·{' '}
+                      {sceneIntegrity.layoutRenderSceneId ?? '없음'}
+                    </li>
+                  </ul>
+                </div>
+              )}
+
+              <section
+                className="scene-snapshot-inspector"
+                aria-labelledby="scene-snapshot-title"
+              >
+                <header>
+                  <div>
+                    <h4 id="scene-snapshot-title">생성 당시 3D 씬</h4>
+                    <span>
+                      {sceneComparison === null
+                        ? selected.sceneSnapshot === null
+                          ? '스냅샷 없음'
+                          : sceneIntegrity?.status === 'mismatch'
+                            ? '무결성 확인 필요'
+                            : '현재 씬 비교 불가'
+                        : sceneComparison.changed
+                          ? '현재 씬과 변경 있음'
+                          : '현재 씬과 동일'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    aria-pressed={previewOpen}
+                    disabled={!previewEnabled}
+                    onClick={() =>
+                      setPreviewGenerationId((current) =>
+                        current === selected.id ? null : selected.id,
+                      )
+                    }
+                  >
+                    생성 당시 3D 씬 미리보기
+                  </button>
+                </header>
+                {sceneComparison === null ? null : sceneComparison.differences
+                    .length === 0 ? (
+                  <p>카메라, 출력 설정과 장면 오브젝트가 현재 씬과 같습니다.</p>
+                ) : (
+                  <ul className="scene-snapshot-differences">
+                    {sceneComparison.differences.map((difference) => (
+                      <li key={difference.id}>
+                        <strong>{difference.label}</strong> ·{' '}
+                        {difference.detail}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {!previewOpen ||
+                selected.sceneSnapshot === null ||
+                renderScenePreview === undefined
+                  ? null
+                  : renderScenePreview(selected.sceneSnapshot)}
+              </section>
 
               {error === null ? null : (
                 <p className="keyframe-workspace-error" role="alert">

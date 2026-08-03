@@ -72,6 +72,12 @@ function generation(
     feedback: null,
     generationMode: 'fresh',
     layoutRenderId: `render-${overrides.id}`,
+    sceneIntegrity: {
+      status: 'valid',
+      snapshotSceneId: 'scene-test',
+      layoutSpecSceneId: 'scene-test',
+      layoutRenderSceneId: 'scene-test',
+    },
     referenceIds: [reference.id],
     attachments: [
       { type: 'layout', id: `render-${overrides.id}`, kind: 'layout' },
@@ -146,6 +152,12 @@ describe('KeyframeWorkspace', () => {
       id: 'generation-legacy',
       sceneSnapshot: null,
       layoutSpec: null,
+      sceneIntegrity: {
+        status: 'legacy',
+        snapshotSceneId: null,
+        layoutSpecSceneId: null,
+        layoutRenderSceneId: 'scene-test',
+      },
       referenceSnapshots: [],
     });
     const storage = createMemoryStorage({
@@ -206,6 +218,132 @@ describe('KeyframeWorkspace', () => {
       await screen.findByText('구형 기록 · 3D 장면 복원 제한'),
     ).toBeVisible();
     expect(screen.getByText(/SceneDocument 스냅샷이 없어/)).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: '생성 당시 3D 씬 미리보기' }),
+    ).toBeDisabled();
+  });
+
+  it('snapshot을 별도 read-only preview로 열고 현재 씬과 주요 차이를 설명한다', async () => {
+    const user = userEvent.setup();
+    const selected = generation({ id: 'generation-preview' });
+    const snapshot = structuredClone(selected.sceneSnapshot!);
+    snapshot.outputCamera = {
+      position: { x: 2, y: 2.4, z: -7 },
+      target: { x: 0.5, y: 1.2, z: 0 },
+      focalLengthMm: 35,
+      rollDeg: 3,
+    };
+    snapshot.output = {
+      aspectRatioId: '2.39:1',
+      width: 1920,
+      height: 804,
+      mode: 'reference',
+    };
+    snapshot.objects[1] = {
+      ...snapshot.objects[1]!,
+      name: '과거 정민',
+      semantic: {
+        meaning: '문을 바라보는 주인공',
+        generationNotes: '실루엣 유지',
+      },
+      transform: {
+        ...snapshot.objects[1]!.transform,
+        position: { x: -1.25, y: 0.85, z: 1.5 },
+      },
+    };
+    selected.sceneSnapshot = snapshot;
+    const current = createStarterSceneDocument({
+      documentId: 'scene-test',
+      floorId: 'floor-test',
+      mannequinId: 'mannequin-test',
+    });
+    current.objects.push({
+      ...structuredClone(current.objects[0]!),
+      id: 'cube-current',
+      kind: 'cube',
+      name: '현재 씬 큐브',
+      dimensions: { x: 1, y: 1, z: 1 },
+      transform: {
+        position: { x: 2, y: 0.5, z: 0 },
+        rotationDeg: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    });
+    const renderPreview = vi.fn((document) => (
+      <div data-testid="snapshot-preview">
+        {document.outputCamera.focalLengthMm}mm
+      </div>
+    ));
+
+    render(
+      <KeyframeWorkspace
+        connection={connection}
+        storage={createMemoryStorage()}
+        currentDocument={current}
+        clientFactory={() => clientWith([selected])}
+        createObjectUrl={() => 'blob:test'}
+        revokeObjectUrl={() => undefined}
+        renderScenePreview={renderPreview}
+        onRefine={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText('현재 씬과 변경 있음')).toBeVisible();
+    const differenceItem = (pattern: RegExp) =>
+      screen.getByText(
+        (_content, element) =>
+          element?.tagName === 'LI' && pattern.test(element.textContent ?? ''),
+      );
+    expect(differenceItem(/카메라.*35mm/)).toBeVisible();
+    expect(differenceItem(/출력.*2.39:1.*1920×804/)).toBeVisible();
+    expect(differenceItem(/과거 정민.*변형/)).toBeVisible();
+    expect(differenceItem(/과거 정민.*의미/)).toBeVisible();
+    expect(differenceItem(/현재 씬 큐브.*현재 씬에 추가/)).toBeVisible();
+
+    const previewButton = screen.getByRole('button', {
+      name: '생성 당시 3D 씬 미리보기',
+    });
+    await user.click(previewButton);
+    expect(previewButton).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('snapshot-preview')).toHaveTextContent('35mm');
+    expect(renderPreview).toHaveBeenCalledWith(snapshot);
+    expect(current.outputCamera.focalLengthMm).toBe(50);
+    expect(current.objects).toHaveLength(3);
+  });
+
+  it('browser가 scene ID mismatch를 재검증해 preview를 안전하게 막는다', async () => {
+    const mismatched = generation({
+      id: 'generation-mismatch',
+      layoutSpec: { ...TEST_LAYOUT_SPEC, sceneId: 'scene-other' },
+      sceneIntegrity: {
+        status: 'valid',
+        snapshotSceneId: 'scene-test',
+        layoutSpecSceneId: 'scene-other',
+        layoutRenderSceneId: 'scene-test',
+      },
+    });
+
+    render(
+      <KeyframeWorkspace
+        connection={connection}
+        storage={createMemoryStorage()}
+        currentDocument={mismatched.sceneSnapshot!}
+        clientFactory={() => clientWith([mismatched])}
+        createObjectUrl={() => 'blob:test'}
+        revokeObjectUrl={() => undefined}
+        renderScenePreview={() => <div>should not render</div>}
+        onRefine={() => undefined}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('alert', { name: '장면 ID 무결성 오류' }),
+    ).toHaveTextContent('scene-test');
+    expect(screen.getByText(/LayoutSpec.*scene-other/)).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: '생성 당시 3D 씬 미리보기' }),
+    ).toBeDisabled();
+    expect(screen.queryByText('should not render')).not.toBeInTheDocument();
   });
 
   it('완료 결과가 아닌 generation에서는 보정 진입과 결과 이미지를 제공하지 않는다', async () => {

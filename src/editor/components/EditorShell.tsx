@@ -14,6 +14,7 @@ import { useStore, type StoreApi } from 'zustand';
 import { SceneAssistantPanel } from '../../assistant/SceneAssistantPanel';
 import { KeyframeWorkspace } from '../../assistant/KeyframeWorkspace';
 import { ReferenceManager } from '../../assistant/ReferenceManager';
+import { SceneSnapshotPreview } from '../../assistant/SceneSnapshotPreview';
 import type {
   CompanionBrowserClient,
   GenerationRecord,
@@ -181,6 +182,7 @@ export function EditorShell({
   const resizeStart = useRef({ pointerX: 0, width: assistantPanelWidth });
   const widthBeforeExpand = useRef(assistantPanelWidth);
   const sceneObjects = useStore(store, (state) => state.document.objects);
+  const sceneDocument = useStore(store, (state) => state.document);
   const referenceTargets = useMemo(
     () =>
       sceneObjects
@@ -482,9 +484,16 @@ export function EditorShell({
           <KeyframeWorkspace
             connection={companionConnection}
             storage={storage}
+            currentDocument={sceneDocument}
             clientFactory={assistantClientFactory}
             createObjectUrl={createAssistantObjectUrl}
             revokeObjectUrl={revokeAssistantObjectUrl}
+            renderScenePreview={(document) => (
+              <SceneSnapshotPreview
+                document={document}
+                canvasEnabled={canvasEnabled && webGLState === 'available'}
+              />
+            )}
             onRefine={(generation) => {
               setRefinementSource(generation);
               setWorkspaceMode('scene');
