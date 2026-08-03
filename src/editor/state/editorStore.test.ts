@@ -7,6 +7,7 @@ import {
 } from '../mannequin/mannequinRig';
 import { CAMERA_SHOT_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
+import { getSceneObjectBounds } from '../scene/sceneObjectModel';
 import {
   createEditorStore,
   DOCUMENT_MUTATION_KINDS,
@@ -306,6 +307,8 @@ describe('editorStore', () => {
     ).toMatchObject({
       mannequinBodyType: 'athletic',
       mannequinPose: originalPose,
+      dimensions: { y: 1.8 },
+      transform: { position: { y: 0.9 } },
     });
 
     documentChanges = 0;
@@ -313,22 +316,89 @@ describe('editorStore', () => {
     expect(documentChanges).toBe(0);
     store.getState().applyMannequinBodyTypePreset('heavy');
     expect(documentChanges).toBe(1);
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.dimensions.y,
+    ).toBe(1.7);
 
     store.getState().undo();
     expect(
       store
         .getState()
-        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
-        ?.mannequinBodyType,
-    ).toBe('athletic');
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId),
+    ).toMatchObject({
+      mannequinBodyType: 'athletic',
+      dimensions: { y: 1.8 },
+      transform: { position: { y: 0.9 } },
+    });
     store.getState().redo();
     expect(
       store
         .getState()
-        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
-        ?.mannequinBodyType,
-    ).toBe('heavy');
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId),
+    ).toMatchObject({
+      mannequinBodyType: 'heavy',
+      dimensions: { y: 1.7 },
+      transform: { position: { y: 0.85 } },
+    });
     unsubscribe();
+  });
+
+  it('회전·비균일 scale에서도 체형 키 변경 전후의 바닥 위치를 보존한다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    store.getState().beginTransform();
+    store.getState().commitTransform({
+      position: { x: 0.4, y: 1.7, z: -0.3 },
+      rotationDeg: { x: 20, y: 10, z: 15 },
+      scale: { x: 1.2, y: 2, z: 0.8 },
+    });
+    const selected = () => {
+      const object = store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId);
+      if (object === undefined) throw new Error('mannequin required');
+      return object;
+    };
+    const originalFloorY = getSceneObjectBounds(selected()).min.y;
+
+    for (const bodyType of ['athletic', 'heavy', 'athletic'] as const) {
+      store.getState().applyMannequinBodyTypePreset(bodyType);
+      expect(getSceneObjectBounds(selected()).min.y).toBeCloseTo(
+        originalFloorY,
+        10,
+      );
+    }
+  });
+
+  it('키가 잘못 저장된 동일 체형 preset도 바닥을 유지하며 목표 키로 교정한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    const mannequin = document.objects.find(
+      ({ id }) => id === STARTER_IDS.mannequinId,
+    );
+    if (mannequin === undefined) throw new Error('mannequin required');
+    mannequin.mannequinBodyType = 'athletic';
+    mannequin.dimensions.y = 1.7;
+    mannequin.transform.scale.y = 1.5;
+    store = createEditorStore({
+      initialDocument: document,
+      idFactory: () => 'unused-id',
+    });
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    const originalFloorY = getSceneObjectBounds(mannequin).min.y;
+
+    store.getState().applyMannequinBodyTypePreset('athletic');
+    const corrected = store
+      .getState()
+      .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId);
+    if (corrected === undefined)
+      throw new Error('corrected mannequin required');
+    expect(corrected.dimensions.y).toBe(1.8);
+    expect(getSceneObjectBounds(corrected).min.y).toBeCloseTo(
+      originalFloorY,
+      10,
+    );
   });
 
   it('4개 mannequin pose preset을 한 번 commit하고 undo/redo로 보존한다', () => {

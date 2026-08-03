@@ -64,6 +64,7 @@ describe('sceneObjectModel', () => {
       kind: 'mannequin',
     });
     athletic.mannequinBodyType = 'athletic';
+    athletic.dimensions.y = 1.8;
     heavy.mannequinBodyType = 'heavy';
 
     const standardBounds = getSceneObjectBounds(standard);
@@ -73,7 +74,7 @@ describe('sceneObjectModel', () => {
     expect(athleticBounds.size.x).toBeGreaterThan(standardBounds.size.x + 0.01);
     expect(heavyBounds.size.x).toBeGreaterThan(standardBounds.size.x + 0.01);
     expect(heavyBounds.size.z).toBeGreaterThan(athleticBounds.size.z + 0.03);
-    expect(athleticBounds.size.y).toBeCloseTo(standardBounds.size.y, 10);
+    expect(athleticBounds.size.y).toBeCloseTo(1.8, 10);
     expect(heavyBounds.size.y).toBeCloseTo(standardBounds.size.y, 10);
   });
 

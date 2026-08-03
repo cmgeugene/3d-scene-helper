@@ -308,15 +308,38 @@ export function createEditorStore(options: EditorStoreOptions) {
         const preset = MANNEQUIN_BODY_TYPE_PRESETS.find(
           ({ id }) => id === bodyType,
         );
-        if (preset === undefined || selected.mannequinBodyType === bodyType) {
+        if (
+          preset === undefined ||
+          (selected.mannequinBodyType === bodyType &&
+            selected.dimensions.y === preset.heightMeters)
+        ) {
           return state;
         }
+        const resizedSelected: SceneObject = {
+          ...selected,
+          mannequinBodyType: bodyType,
+          dimensions: {
+            ...selected.dimensions,
+            y: preset.heightMeters,
+          },
+        };
+        const floorOffset =
+          getSceneObjectBounds(selected).min.y -
+          getSceneObjectBounds(resizedSelected).min.y;
+        const groundedSelected: SceneObject = {
+          ...resizedSelected,
+          transform: {
+            ...resizedSelected.transform,
+            position: {
+              ...resizedSelected.transform.position,
+              y: resizedSelected.transform.position.y + floorOffset,
+            },
+          },
+        };
         const nextDocument = sceneDocumentSchema.parse({
           ...state.document,
           objects: state.document.objects.map((object) =>
-            object.id === selected.id
-              ? { ...object, mannequinBodyType: bodyType }
-              : object,
+            object.id === selected.id ? groundedSelected : object,
           ),
         });
         return {

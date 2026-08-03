@@ -39,6 +39,8 @@ test('체형 preset이 포즈와 관절 길이를 유지하며 실제 WebGL 실�
     const value = await runtimeCanvas.getAttribute('data-mannequin-bounds');
     if (value === null) throw new Error('마네킹 runtime bounds가 없습니다.');
     return JSON.parse(value) as {
+      min: { x: number; y: number; z: number };
+      max: { x: number; y: number; z: number };
       size: { x: number; y: number; z: number };
     };
   };
@@ -69,7 +71,10 @@ test('체형 preset이 포즈와 관절 길이를 유지하며 실제 WebGL 실�
   expect(athleticBounds.size.x).toBeGreaterThan(standardBounds.size.x + 0.01);
   expect(heavyBounds.size.x).toBeGreaterThan(standardBounds.size.x + 0.01);
   expect(heavyBounds.size.z).toBeGreaterThan(athleticBounds.size.z + 0.03);
-  expect(athleticBounds.size.y).toBeCloseTo(standardBounds.size.y, 3);
+  expect(athleticBounds.size.y).toBeCloseTo(1.8, 3);
+  expect(athleticBounds.min.y).toBeCloseTo(standardBounds.min.y, 3);
+  expect(athleticBounds.max.y).toBeCloseTo(1.8, 3);
+  expect(athleticBounds.size.y).toBeGreaterThan(standardBounds.size.y + 0.09);
   expect(heavyBounds.size.y).toBeCloseTo(standardBounds.size.y, 3);
   expect(changedPixelCount(standardFrame, athleticFrame)).toBeGreaterThan(500);
   expect(changedPixelCount(athleticFrame, heavyFrame)).toBeGreaterThan(500);

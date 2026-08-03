@@ -74,10 +74,11 @@ export const MANNEQUIN_BODY_PROPORTIONS: Record<
 };
 
 export const MANNEQUIN_BODY_TYPE_PRESETS = [
-  { id: 'standard', label: '일반 체형' },
-  { id: 'athletic', label: '건장한 체형' },
-  { id: 'heavy', label: '뚱뚱한 체형' },
+  { id: 'standard', label: '일반 체형', heightMeters: 1.7 },
+  { id: 'athletic', label: '건장한 체형', heightMeters: 1.8 },
+  { id: 'heavy', label: '뚱뚱한 체형', heightMeters: 1.7 },
 ] as const satisfies ReadonlyArray<{
   id: MannequinBodyTypeId;
   label: string;
+  heightMeters: number;
 }>;
