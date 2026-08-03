@@ -170,6 +170,9 @@ describe('studio mannequin appearance geometry', () => {
     expect(bellyWidth).toBeGreaterThan(
       radialExtentAtY(standard.torso, -0.08) * 2.2,
     );
+    expect(bellyWidth).toBeLessThan(
+      radialExtentAtY(standard.torso, -0.08) * 2.35,
+    );
     expect(bellyDepth.front).toBeGreaterThan(
       depthExtentsAtY(standard.torso, -0.08).front * 1.9,
     );

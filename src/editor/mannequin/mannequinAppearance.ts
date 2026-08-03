@@ -127,7 +127,7 @@ function createTorsoGeometry(bodyType: MannequinBodyTypeId) {
     const belly = Math.max(0, 1 - Math.abs(y + 0.08) / 0.24);
     const sourceRadius = Math.hypot(sourceX, sourceZ / 0.72);
     const roundedHeavyWidth =
-      0.14 + 0.22 * Math.exp(-Math.pow((y + 0.06) / 0.17, 2));
+      0.14 + 0.19 * Math.exp(-Math.pow((y + 0.06) / 0.17, 2));
     const widthScale =
       bodyType === 'athletic'
         ? 1.16 + upperChest * 0.12
