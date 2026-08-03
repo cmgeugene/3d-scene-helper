@@ -107,6 +107,7 @@ function PanelHeading({ phase }: { phase: ConnectionPhase }) {
       <span
         className={`assistant-connection assistant-connection--${phase}`}
         role="status"
+        aria-label="Companion 연결 상태"
       >
         {connectionLabel(phase)}
       </span>
@@ -509,6 +510,10 @@ function ConnectedSceneAssistant({
         sceneSnapshot: scene,
         referenceIds: selectedReferences.map(({ id }) => id),
         parentGenerationId: sourceGeneration?.id ?? null,
+        sourceGenerationId:
+          sourceGeneration === null
+            ? (scene.generationSource?.generationId ?? null)
+            : null,
         feedback: sourceGeneration === null ? null : message,
         generationMode: sourceGeneration === null ? 'fresh' : 'edit',
       });
@@ -722,6 +727,19 @@ function ConnectedSceneAssistant({
               </figcaption>
             </figure>
           ) : null}
+
+          <p
+            className="assistant-generation-lineage"
+            role="status"
+            aria-label="이미지 생성 계보"
+          >
+            {refinementSource === null
+              ? currentScene.success &&
+                currentScene.data.generationSource !== undefined
+                ? `fresh 새 생성 · 3D 출처 ${currentScene.data.generationSource.generationId} · 기존 결과 이미지 미사용`
+                : 'fresh 새 생성 · 현재 3D 레이아웃 · 기존 결과 이미지 미사용'
+              : `edit 보정 · 기존 결과 이미지 ${refinementSource.id} 기반`}
+          </p>
 
           {refinementSource === null ? null : (
             <div className="assistant-refinement-mode" role="status">

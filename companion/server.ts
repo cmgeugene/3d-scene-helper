@@ -62,6 +62,7 @@ const generationBodySchema = z
     layoutSpec: layoutSpecSchema,
     sceneSnapshot: sceneDocumentSchema,
     parentGenerationId: z.string().min(1).nullable().default(null),
+    sourceGenerationId: z.string().min(1).nullable().default(null),
     feedback: z.string().trim().min(1).max(4_000).nullable().default(null),
     generationMode: z.enum(['fresh', 'edit']).default('fresh'),
     layoutRenderId: z.string().min(1),
@@ -87,6 +88,14 @@ const generationBodySchema = z
         code: 'custom',
         path: ['parentGenerationId'],
         message: '새 생성에는 부모 키프레임을 지정할 수 없습니다.',
+      });
+    }
+    if (editing && body.sourceGenerationId !== null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['sourceGenerationId'],
+        message:
+          '보정 생성은 parentGenerationId만 사용하며 3D 레이아웃 출처를 별도로 지정하지 않습니다.',
       });
     }
     const maximumReferences = getMaximumReferenceImages({
@@ -457,6 +466,7 @@ export async function startCompanionServer(
             sceneSnapshot: body.sceneSnapshot,
             referenceSnapshots: references.map(toPublicReference),
             parentGenerationId: body.parentGenerationId,
+            sourceGenerationId: body.sourceGenerationId,
             feedback: body.feedback,
             generationMode: body.generationMode,
             layoutRenderId: body.layoutRenderId,

@@ -641,6 +641,17 @@ p {
   background: #213a62;
 }
 
+.assistant-generation-lineage {
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #38557d;
+  border-radius: 0.4rem;
+  color: #afc5e3;
+  font-size: 0.59rem;
+  line-height: 1.4;
+  background: #142238;
+}
+
 .assistant-refinement-mode {
   display: flex;
   gap: 0.55rem;
@@ -1056,6 +1067,56 @@ p {
 
 .scene-snapshot-differences strong {
   color: #c8d8ee;
+}
+
+.generation-apply-dialog-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  padding: 1rem;
+  overflow: auto;
+  place-items: center;
+  background: rgb(3 7 12 / 78%);
+  backdrop-filter: blur(2px);
+}
+
+.generation-apply-dialog-card {
+  width: min(42rem, calc(100vw - 2rem));
+  max-height: min(38rem, calc(100vh - 2rem));
+  padding: 1rem;
+  overflow: auto;
+  border: 1px solid #6e89b5;
+  border-radius: 0.75rem;
+  color: #dce7f7;
+  background: #111b29;
+  box-shadow: 0 1.25rem 4rem rgb(0 0 0 / 55%);
+}
+
+.generation-apply-dialog-card h3,
+.generation-apply-dialog-card p {
+  margin-top: 0;
+}
+
+.generation-apply-dialog-card ul {
+  max-height: 14rem;
+  padding: 0.65rem 0.65rem 0.65rem 1.8rem;
+  overflow: auto;
+  border-radius: 0.5rem;
+  color: #aebed4;
+  background: #0a121d;
+}
+
+.generation-apply-dialog-card > div:last-child {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.generation-apply-dialog-card button:last-child {
+  border-color: #7a98ce;
+  color: #eef4ff;
+  background: #294f85;
 }
 
 .scene-snapshot-preview {
@@ -1556,6 +1617,32 @@ p {
     linear-gradient(45deg, rgb(255 255 255 / 2%) 25%, transparent 25%) 0 0 /
       24px 24px,
     #080c13;
+}
+
+.scene-generation-provenance {
+  position: absolute;
+  z-index: 6;
+  top: 0.55rem;
+  right: 0.55rem;
+  left: 0.55rem;
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid #496b9d;
+  border-radius: 0.45rem;
+  color: #d4e3f8;
+  font-size: 0.62rem;
+  background: rgb(14 30 51 / 92%);
+  box-shadow: 0 0.3rem 1rem rgb(0 0 0 / 28%);
+}
+
+.scene-generation-provenance button {
+  flex: none;
+  border-color: #718fc1;
+  color: #edf4ff;
+  background: #294f85;
 }
 
 .scene-viewport-surface {

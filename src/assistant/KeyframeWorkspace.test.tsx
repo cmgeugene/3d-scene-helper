@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { createStarterSceneDocument } from '../editor/persistence/sceneSchema';
@@ -148,6 +148,12 @@ describe('KeyframeWorkspace', () => {
       feedback: '전봇대 가림을 줄여줘.',
       error: '생성이 중단되었습니다.',
     });
+    const appliedLayoutFresh = generation({
+      id: 'generation-from-applied-layout',
+      sourceGenerationId: parent.id,
+      versionNumber: 1,
+      generationMode: 'fresh',
+    });
     const legacy = generation({
       id: 'generation-legacy',
       sceneSnapshot: null,
@@ -170,7 +176,9 @@ describe('KeyframeWorkspace', () => {
       <KeyframeWorkspace
         connection={connection}
         storage={storage}
-        clientFactory={() => clientWith([parent, child, legacy])}
+        clientFactory={() =>
+          clientWith([parent, child, appliedLayoutFresh, legacy])
+        }
         createObjectUrl={(blob: Blob) => {
           const url = `blob:${urls.length + 1}:${blob.size}`;
           urls.push(url);
@@ -185,10 +193,11 @@ describe('KeyframeWorkspace', () => {
       await screen.findByRole('heading', { name: '키프레임 작업 공간' }),
     ).toBeVisible();
     const history = screen.getByRole('list', { name: 'Generation 이력' });
-    expect(within(history).getAllByRole('button')).toHaveLength(3);
-    expect(within(history).getAllByText('완료')).toHaveLength(2);
+    expect(within(history).getAllByRole('button')).toHaveLength(4);
+    expect(within(history).getAllByText('완료')).toHaveLength(3);
     expect(within(history).getByText('실패')).toBeVisible();
     expect(within(history).getByText('부모 v1')).toBeVisible();
+    expect(within(history).getByText('3D 출처 v1 · fresh root')).toBeVisible();
     expect(within(history).getByText(/자식 1/)).toBeVisible();
 
     expect(
@@ -344,6 +353,143 @@ describe('KeyframeWorkspace', () => {
       screen.getByRole('button', { name: '생성 당시 3D 씬 미리보기' }),
     ).toBeDisabled();
     expect(screen.queryByText('should not render')).not.toBeInTheDocument();
+  });
+
+  it('현재 씬 불러오기 dialog 취소는 적용 callback과 현재 document를 변경하지 않는다', async () => {
+    const user = userEvent.setup();
+    const selected = generation({ id: 'generation-apply-cancel' });
+    const current = createStarterSceneDocument({
+      documentId: 'scene-current',
+      floorId: 'floor-current',
+      mannequinId: 'mannequin-current',
+    });
+    const before = JSON.stringify(current);
+    const applyScene = vi.fn();
+
+    render(
+      <KeyframeWorkspace
+        connection={connection}
+        storage={createMemoryStorage()}
+        currentDocument={current}
+        clientFactory={() => clientWith([selected])}
+        createObjectUrl={() => 'blob:test'}
+        revokeObjectUrl={() => undefined}
+        onApplyScene={applyScene}
+        onRefine={() => undefined}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole('button', { name: '현재 씬으로 불러오기' }),
+    );
+    const dialog = screen.getByRole('dialog', {
+      name: '현재 씬 덮어쓰기 확인',
+    });
+    expect(dialog).toHaveTextContent('generation-apply-cancel');
+    expect(dialog).toHaveTextContent('v1');
+    expect(dialog).toHaveTextContent('장면 ID');
+    expect(applyScene).not.toHaveBeenCalled();
+    expect(JSON.stringify(current)).toBe(before);
+
+    await user.click(within(dialog).getByRole('button', { name: '취소' }));
+    expect(
+      screen.queryByRole('dialog', { name: '현재 씬 덮어쓰기 확인' }),
+    ).not.toBeInTheDocument();
+    expect(applyScene).not.toHaveBeenCalled();
+    expect(JSON.stringify(current)).toBe(before);
+  });
+
+  it('dialog가 열린 뒤 선택 generation이 바뀌면 stale 적용을 fail-closed로 거부한다', async () => {
+    const user = userEvent.setup();
+    const first = generation({ id: 'generation-first' });
+    const second = generation({ id: 'generation-second', versionNumber: 2 });
+    const applyScene = vi.fn();
+
+    render(
+      <KeyframeWorkspace
+        connection={connection}
+        storage={createMemoryStorage()}
+        currentDocument={first.sceneSnapshot!}
+        clientFactory={() => clientWith([first, second])}
+        createObjectUrl={() => 'blob:test'}
+        revokeObjectUrl={() => undefined}
+        onApplyScene={applyScene}
+        onRefine={() => undefined}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole('button', { name: /generation-first/ }),
+    );
+    await user.click(
+      screen.getByRole('button', { name: '현재 씬으로 불러오기' }),
+    );
+    const dialog = screen.getByRole('dialog', {
+      name: '현재 씬 덮어쓰기 확인',
+    });
+    await user.click(screen.getByRole('button', { name: /generation-second/ }));
+    await user.click(
+      within(dialog).getByRole('button', { name: '현재 씬으로 적용' }),
+    );
+
+    expect(applyScene).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      '선택한 generation이 변경되었습니다',
+    );
+  });
+
+  it('dialog가 열린 뒤 같은 generation의 snapshot 무결성이 바뀌면 확인 시 재검증해 거부한다', async () => {
+    const user = userEvent.setup();
+    const original = generation({ id: 'generation-integrity-race' });
+    let emit: ((event: { event: string; data: unknown }) => void) | undefined;
+    const client: CompanionBrowserClient = {
+      ...clientWith([original]),
+      subscribe: (listener) => {
+        emit = listener;
+        return () => undefined;
+      },
+    };
+    const applyScene = vi.fn();
+
+    render(
+      <KeyframeWorkspace
+        connection={connection}
+        storage={createMemoryStorage()}
+        currentDocument={original.sceneSnapshot!}
+        clientFactory={() => client}
+        createObjectUrl={() => 'blob:test'}
+        revokeObjectUrl={() => undefined}
+        onApplyScene={applyScene}
+        onRefine={() => undefined}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole('button', { name: '현재 씬으로 불러오기' }),
+    );
+    const dialog = screen.getByRole('dialog', {
+      name: '현재 씬 덮어쓰기 확인',
+    });
+    const changed = generation({
+      id: original.id,
+      updatedAt: '2026-08-03T00:05:00.000Z',
+      layoutSpec: { ...TEST_LAYOUT_SPEC, sceneId: 'scene-tampered' },
+      sceneIntegrity: {
+        status: 'mismatch',
+        snapshotSceneId: 'scene-test',
+        layoutSpecSceneId: 'scene-tampered',
+        layoutRenderSceneId: 'scene-test',
+      },
+    });
+    act(() => emit?.({ event: 'generation', data: changed }));
+    await user.click(
+      within(dialog).getByRole('button', { name: '현재 씬으로 적용' }),
+    );
+
+    expect(applyScene).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      '무결성을 다시 확인할 수 없습니다',
+    );
   });
 
   it('완료 결과가 아닌 generation에서는 보정 진입과 결과 이미지를 제공하지 않는다', async () => {

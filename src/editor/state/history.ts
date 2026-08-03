@@ -3,6 +3,7 @@ export const HISTORY_LIMIT = 50 as const;
 export interface HistoryEntry<Document, MutationKind extends string = string> {
   document: Document;
   mutationKind: MutationKind;
+  selectedObjectId?: string | null;
 }
 
 export interface DocumentHistory<
@@ -25,6 +26,7 @@ export function recordDocumentHistory<Document, MutationKind extends string>(
   document: Document,
   mutationKind: MutationKind,
   allowlist: readonly MutationKind[],
+  selectedObjectId?: string | null,
 ): DocumentHistory<Document, MutationKind> {
   if (!allowlist.includes(mutationKind)) {
     return history;
@@ -33,7 +35,11 @@ export function recordDocumentHistory<Document, MutationKind extends string>(
   return {
     past: [
       ...history.past.slice(-(HISTORY_LIMIT - 1)),
-      { document: structuredClone(document), mutationKind },
+      {
+        document: structuredClone(document),
+        mutationKind,
+        selectedObjectId,
+      },
     ],
     future: [],
   };
@@ -45,9 +51,11 @@ export function undoDocumentHistory<
 >(
   history: DocumentHistory<Document, MutationKind>,
   currentDocument: Document,
+  currentSelectedObjectId?: string | null,
 ): {
   document: Document;
   mutationKind: MutationKind;
+  selectedObjectId?: string | null;
   history: DocumentHistory<Document, MutationKind>;
 } | null {
   const entry = history.past.at(-1);
@@ -56,6 +64,7 @@ export function undoDocumentHistory<
   return {
     document: structuredClone(entry.document),
     mutationKind: entry.mutationKind,
+    selectedObjectId: entry.selectedObjectId,
     history: {
       past: history.past.slice(0, -1),
       future: [
@@ -63,6 +72,7 @@ export function undoDocumentHistory<
         {
           document: structuredClone(currentDocument),
           mutationKind: entry.mutationKind,
+          selectedObjectId: currentSelectedObjectId,
         },
       ],
     },
@@ -75,9 +85,11 @@ export function redoDocumentHistory<
 >(
   history: DocumentHistory<Document, MutationKind>,
   currentDocument: Document,
+  currentSelectedObjectId?: string | null,
 ): {
   document: Document;
   mutationKind: MutationKind;
+  selectedObjectId?: string | null;
   history: DocumentHistory<Document, MutationKind>;
 } | null {
   const entry = history.future.at(-1);
@@ -86,12 +98,14 @@ export function redoDocumentHistory<
   return {
     document: structuredClone(entry.document),
     mutationKind: entry.mutationKind,
+    selectedObjectId: entry.selectedObjectId,
     history: {
       past: [
         ...history.past,
         {
           document: structuredClone(currentDocument),
           mutationKind: entry.mutationKind,
+          selectedObjectId: currentSelectedObjectId,
         },
       ].slice(-HISTORY_LIMIT),
       future: history.future.slice(0, -1),

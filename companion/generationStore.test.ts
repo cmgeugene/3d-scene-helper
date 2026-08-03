@@ -251,7 +251,7 @@ describe('GenerationStore', () => {
       referenceSnapshots: [referenceSnapshot],
       parentGenerationId: parent.id,
       feedback: '전봇대 가림 비율만 줄여줘.',
-      generationMode: 'fresh',
+      generationMode: 'edit',
       layoutRenderId: render.id,
       referenceIds: ['ref-1'],
       attachments: [
@@ -268,8 +268,104 @@ describe('GenerationStore', () => {
       parentGenerationId: parent.id,
       versionNumber: 2,
       feedback: '전봇대 가림 비율만 줄여줘.',
+      generationMode: 'edit',
+    });
+  });
+
+  it('적용한 3D snapshot 출처는 fresh root의 sourceGenerationId로 저장하고 edit parent와 구분한다', async () => {
+    const { store } = await createStore();
+    const render = await store.importSceneRender('scene-test', onePixelPng);
+    const source = await store.createGeneration({
+      threadId: 'thread-source',
+      turnId: 'turn-source',
+      prompt: '$imagegen source',
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: createSceneSnapshot(),
+      referenceSnapshots: [],
+      layoutRenderId: render.id,
+      referenceIds: [],
+      attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+    });
+
+    const fresh = await store.createGeneration({
+      threadId: 'thread-fresh',
+      turnId: 'turn-fresh',
+      prompt: '$imagegen applied layout',
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: createSceneSnapshot(),
+      referenceSnapshots: [],
+      parentGenerationId: null,
+      sourceGenerationId: source.id,
+      generationMode: 'fresh',
+      layoutRenderId: render.id,
+      referenceIds: [],
+      attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+    });
+    const edit = await store.createGeneration({
+      threadId: 'thread-edit',
+      turnId: 'turn-edit',
+      prompt: '$imagegen edit source image',
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: createSceneSnapshot(),
+      referenceSnapshots: [],
+      parentGenerationId: source.id,
+      sourceGenerationId: null,
+      feedback: '기존 결과 이미지만 보정',
+      generationMode: 'edit',
+      layoutRenderId: render.id,
+      referenceIds: [],
+      attachments: [
+        { type: 'sourceGeneration', id: source.id, kind: null },
+        { type: 'layout', id: render.id, kind: 'layout' },
+      ],
+    });
+
+    expect(fresh).toMatchObject({
+      parentGenerationId: null,
+      sourceGenerationId: source.id,
+      versionNumber: 1,
       generationMode: 'fresh',
     });
+    expect(edit).toMatchObject({
+      parentGenerationId: source.id,
+      sourceGenerationId: null,
+      versionNumber: 2,
+      generationMode: 'edit',
+    });
+    await expect(
+      store.createGeneration({
+        threadId: 'thread-invalid-fresh-parent',
+        turnId: 'turn-invalid-fresh-parent',
+        prompt: '$imagegen invalid fresh parent',
+        layoutSpec: TEST_LAYOUT_SPEC,
+        sceneSnapshot: createSceneSnapshot(),
+        referenceSnapshots: [],
+        parentGenerationId: source.id,
+        sourceGenerationId: null,
+        feedback: null,
+        generationMode: 'fresh',
+        layoutRenderId: render.id,
+        referenceIds: [],
+        attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+      }),
+    ).rejects.toThrow('새 생성에는 부모');
+    await expect(
+      store.createGeneration({
+        threadId: 'thread-invalid-edit-source',
+        turnId: 'turn-invalid-edit-source',
+        prompt: '$imagegen invalid edit source',
+        layoutSpec: TEST_LAYOUT_SPEC,
+        sceneSnapshot: createSceneSnapshot(),
+        referenceSnapshots: [],
+        parentGenerationId: source.id,
+        sourceGenerationId: source.id,
+        feedback: 'edit',
+        generationMode: 'edit',
+        layoutRenderId: render.id,
+        referenceIds: [],
+        attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+      }),
+    ).rejects.toThrow('보정 생성에는 3D snapshot 출처');
   });
 
   it('이전 generation record에는 스냅샷과 계보 기본값을 적용한다', async () => {
@@ -294,6 +390,7 @@ describe('GenerationStore', () => {
       'sceneSnapshot',
       'referenceSnapshots',
       'parentGenerationId',
+      'sourceGenerationId',
       'versionNumber',
       'feedback',
       'generationMode',
@@ -307,6 +404,7 @@ describe('GenerationStore', () => {
         sceneSnapshot: null,
         referenceSnapshots: [],
         parentGenerationId: null,
+        sourceGenerationId: null,
         versionNumber: 1,
         feedback: null,
         generationMode: 'fresh',

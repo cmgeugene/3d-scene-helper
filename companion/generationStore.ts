@@ -64,6 +64,7 @@ const generationSchema = z.object({
   sceneSnapshot: sceneDocumentSchema.nullable().default(null),
   referenceSnapshots: z.array(publicReferenceSchema).default([]),
   parentGenerationId: z.string().min(1).nullable().default(null),
+  sourceGenerationId: z.string().min(1).nullable().default(null),
   versionNumber: z.number().int().positive().default(1),
   feedback: z.string().trim().min(1).max(4_000).nullable().default(null),
   generationMode: z.enum(['fresh', 'edit']).default('fresh'),
@@ -102,6 +103,7 @@ export interface CreateGenerationInput {
   sceneSnapshot: SceneDocument;
   referenceSnapshots: PublicReference[];
   parentGenerationId?: string | null;
+  sourceGenerationId?: string | null;
   feedback?: string | null;
   generationMode?: GenerationMode;
   layoutRenderId: string;
@@ -352,6 +354,31 @@ export class GenerationStore {
         '부모 키프레임 생성 기록을 찾을 수 없습니다.',
       );
     }
+    const sourceGenerationId = input.sourceGenerationId ?? null;
+    const generationMode = input.generationMode ?? 'fresh';
+    if (generationMode === 'fresh' && parentGenerationId !== null) {
+      throw new ReferenceInputError(
+        '새 생성에는 부모 키프레임을 지정할 수 없습니다.',
+      );
+    }
+    if (generationMode === 'edit' && parentGenerationId === null) {
+      throw new ReferenceInputError(
+        '보정 생성에는 부모 키프레임이 필요합니다.',
+      );
+    }
+    if (generationMode === 'edit' && sourceGenerationId !== null) {
+      throw new ReferenceInputError(
+        '보정 생성에는 3D snapshot 출처를 별도로 지정할 수 없습니다.',
+      );
+    }
+    if (
+      sourceGenerationId !== null &&
+      !manifest.generations.some(({ id }) => id === sourceGenerationId)
+    ) {
+      throw new ReferenceInputError(
+        '3D 레이아웃 출처 generation 기록을 찾을 수 없습니다.',
+      );
+    }
     const layoutRender = manifest.sceneRenders.find(
       ({ id }) => id === input.layoutRenderId,
     );
@@ -382,10 +409,11 @@ export class GenerationStore {
       id: `generation_${randomUUID()}`,
       ...input,
       parentGenerationId,
+      sourceGenerationId,
       versionNumber:
         parent === null || parent === undefined ? 1 : parent.versionNumber + 1,
       feedback: input.feedback ?? null,
-      generationMode: input.generationMode ?? 'fresh',
+      generationMode,
       status: 'inProgress',
       revisedPrompt: null,
       result: null,

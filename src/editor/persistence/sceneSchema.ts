@@ -217,6 +217,11 @@ const cameraMotionGuideSchema = z.strictObject({
   label: z.string().trim().min(1),
 });
 
+const generationSourceSchema = z.strictObject({
+  generationId: stableIdSchema,
+  versionNumber: z.number().int().positive(),
+});
+
 export const sceneDocumentSchema = z
   .strictObject({
     version: z.literal(SCENE_DOCUMENT_VERSION),
@@ -228,6 +233,7 @@ export const sceneDocumentSchema = z
     background: backgroundSchema,
     output: outputSchema,
     sceneNotes: z.string().max(MAX_SCENE_NOTES_LENGTH),
+    generationSource: generationSourceSchema.optional(),
     subjectMotionGuide: subjectMotionGuideSchema.optional(),
     cameraMotionGuide: cameraMotionGuideSchema.optional(),
   })

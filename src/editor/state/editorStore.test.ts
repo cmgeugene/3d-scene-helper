@@ -465,6 +465,7 @@ describe('editorStore', () => {
       'update-output',
       'update-motion-metadata',
       'commit-mannequin-pose',
+      'apply-generation-snapshot',
     ]);
   });
 
@@ -931,6 +932,46 @@ describe('editorStore', () => {
         .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
         ?.name,
     ).toBe(`Actor ${HISTORY_LIMIT + 5}`);
+  });
+
+  it('generation snapshot 적용을 단일 history action으로 기록하고 undo가 직전 scene과 selection을 정확히 복원한다', () => {
+    const previousDocument = structuredClone(store.getState().document);
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    const snapshot = createStarterSceneDocument({
+      documentId: 'scene-generation',
+      floorId: 'generation-floor',
+      mannequinId: 'generation-mannequin',
+    });
+    snapshot.outputCamera.position = { x: 2, y: 2.4, z: -7 };
+
+    store.getState().applyGenerationSnapshot(snapshot, {
+      generationId: 'generation-source',
+      versionNumber: 3,
+    });
+
+    expect(store.getState().document).toMatchObject({
+      id: 'scene-generation',
+      generationSource: {
+        generationId: 'generation-source',
+        versionNumber: 3,
+      },
+      outputCamera: { position: { x: 2, y: 2.4, z: -7 } },
+    });
+    expect(store.getState().selectedObjectId).toBeNull();
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'apply-generation-snapshot',
+    );
+    expect(store.getState().history.past).toHaveLength(1);
+
+    store.getState().undo();
+
+    expect(store.getState().document).toEqual(previousDocument);
+    expect(store.getState().selectedObjectId).toBe(STARTER_IDS.mannequinId);
+    expect(store.getState().navigation).toMatchObject({
+      position: previousDocument.outputCamera.position,
+      target: previousDocument.outputCamera.target,
+      isInteracting: false,
+    });
   });
 
   it('validated scene replacement는 transient/history를 정리하고 정확한 persisted snapshot만 dirty를 해제한다', () => {

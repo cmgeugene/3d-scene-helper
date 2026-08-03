@@ -87,7 +87,9 @@ describe('SceneAssistantPanel', () => {
     );
 
     expect(await screen.findByText('ChatGPT · prolite')).toBeVisible();
-    expect(screen.getByRole('status')).toHaveTextContent('연결됨');
+    expect(
+      screen.getByRole('status', { name: 'Companion 연결 상태' }),
+    ).toHaveTextContent('연결됨');
   });
 
   it('연결 정보를 지울 수 있다', async () => {
@@ -277,6 +279,10 @@ describe('SceneAssistantPanel', () => {
       floorId: 'floor-1',
       mannequinId: 'mannequin-blue',
     });
+    sceneSnapshot.generationSource = {
+      generationId: 'generation-layout-source',
+      versionNumber: 7,
+    };
     const layoutBlob = new Blob(['png'], { type: 'image/png' });
     const captureLayout = vi.fn(async () => layoutBlob);
     const createSceneRender = vi.fn(async () => ({
@@ -366,6 +372,11 @@ describe('SceneAssistantPanel', () => {
     expect(within(contract!).getByText('Mannequin')).toBeVisible();
     expect(within(contract!).getByText(/toward-camera/)).toBeVisible();
     await user.click(screen.getByRole('tab', { name: '대화' }));
+    expect(
+      screen.getByRole('status', { name: '이미지 생성 계보' }),
+    ).toHaveTextContent(
+      'fresh 새 생성 · 3D 출처 generation-layout-source · 기존 결과 이미지 미사용',
+    );
     await user.click(screen.getByRole('button', { name: '이미지 생성' }));
 
     expect(captureLayout).toHaveBeenCalledOnce();
@@ -378,6 +389,7 @@ describe('SceneAssistantPanel', () => {
       sceneSnapshot: expect.objectContaining({ id: 'scene-1' }),
       referenceIds: ['ref-character'],
       parentGenerationId: null,
+      sourceGenerationId: 'generation-layout-source',
       feedback: null,
       generationMode: 'fresh',
     });
@@ -505,6 +517,9 @@ describe('SceneAssistantPanel', () => {
 
     expect(await screen.findByText('키프레임 보정 모드')).toBeVisible();
     expect(
+      screen.getByRole('status', { name: '이미지 생성 계보' }),
+    ).toHaveTextContent('edit 보정 · 기존 결과 이미지 generation-source 기반');
+    expect(
       screen.queryByRole('button', { name: '이 결과를 기반으로 보정' }),
     ).not.toBeInTheDocument();
     expect(screen.getByText(/레퍼런스 최대 3장/)).toBeVisible();
@@ -526,6 +541,7 @@ describe('SceneAssistantPanel', () => {
       sceneSnapshot: expect.objectContaining({ id: 'scene-1' }),
       referenceIds: ['ref-character'],
       parentGenerationId: 'generation-source',
+      sourceGenerationId: null,
       feedback: '전봇대가 가리는 비율만 줄여줘.',
       generationMode: 'edit',
     });

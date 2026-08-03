@@ -2,7 +2,7 @@
 
 > 기준일: 2026-08-03
 >
-> 현재 기준: S21 sceneSnapshot 읽기 전용 미리보기 완료
+> 현재 기준: S21 sceneSnapshot 읽기 전용 미리보기 완료; S22 안전 적용은 구현·검증 완료 후 Grok review 대기
 >
 > 이 문서는 앞으로의 구현 순서와 완료 기준을 관리하는 단일 로드맵이다. 세부 설계는
 > `ai-scene-assistant.md`, 완료된 작업의 검증 기록은 `session-handoffs/`를 따른다.
@@ -49,23 +49,23 @@
 3. 선택한 과거 generation을 기준으로 보정해도 올바른 부모 ID와 버전이 기록된다.
 4. 스냅샷이 없는 구형 기록은 복원 제한을 명확히 표시하고 앱을 깨뜨리지 않는다.
 
-### P1. 생성 당시 3D 씬 불러오기 — 진행 중 (S21 미리보기 완료)
+### P1. 생성 당시 3D 씬 불러오기 — 진행 중 (S22 구현·검증 완료, Grok review 대기)
 
 목표는 과거 키프레임의 구도를 수정해 새로운 생성 분기를 만들 수 있게 하는 것이다.
 
 - [x] generation의 `sceneSnapshot`을 격리된 store의 읽기 전용 3D 미리보기로 열기
 - [x] 현재 씬과 스냅샷의 카메라·출력·오브젝트·의미 등 주요 차이 표시
 - [x] snapshot, `LayoutSpec`, 저장된 layout render scene ID를 Companion과 브라우저에서 검증
-- [ ] 명시적인 `현재 씬으로 불러오기` 동작 제공
-- [ ] 불러오기 전에 현재 씬을 autosave하고 덮어쓰기 경고 제공
-- [ ] 불러온 씬에서 만든 결과는 선택 generation을 출처로 기록하되 `fresh`와 `edit`의 의미를
+- [x] 명시적인 `현재 씬으로 불러오기` 동작 제공
+- [x] 불러오기 전에 현재 씬을 autosave하고 덮어쓰기 경고 제공
+- [x] 불러온 씬에서 만든 결과는 선택 generation을 출처로 기록하되 `fresh`와 `edit`의 의미를
       구분
 
 완료 기준:
 
 1. [x] 결과 카드에서 생성 당시 카메라와 오브젝트 배치를 재현할 수 있다.
-2. [ ] 취소하면 현재 편집 중인 씬이 바뀌지 않는다.
-3. [ ] 적용 후 undo 또는 autosave 복구 경로가 존재한다.
+2. [x] 취소하면 현재 편집 중인 씬이 바뀌지 않는다.
+3. [x] 적용 후 단일 undo와 별도 durable pre-apply autosave 복구 경로가 존재한다.
 4. [x] 스냅샷 scene ID, layout scene ID와 렌더 scene ID의 무결성을 서버와 브라우저에서
        검증한다.
 
@@ -152,8 +152,7 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 
 ## 5. 바로 다음 작업
 
-다음 개발 세션은 **P1 생성 당시 3D 씬 불러오기의 적용 슬라이스**를 진행한다. 선택한
-generation을 명시적으로 `현재 씬으로 불러오기` 전에 현재 SceneDocument를 autosave하고,
-덮어쓰기 경고와 취소, undo 또는 autosave 복구를 하나의 안전한 흐름으로 설계한다. 적용
-결과의 출처와 `fresh`/`edit` 정책을 기존 계보 계약에 맞게 검증한다. P2의 Semantic Scene
-Spec과 `specPatch`, 충돌 검사는 진행하지 않는다.
+S22의 구현과 자동 검증은 완료했지만 필수 Grok spec review가 인증 blocker로 실행되지 않았다.
+다음 작업은 Grok CLI에 다시 인증한 뒤 현재 staged diff와 S22 명세만으로 initial review를 실행하고,
+필요하면 finding을 RED→GREEN으로 수정한 뒤 Grok과 Gemini closure를 모두 통과해 S22를 커밋하는
+것이다. 그 전에는 P1 완료를 선언하거나 P2로 넘어가지 않는다.

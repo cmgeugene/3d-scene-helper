@@ -109,6 +109,7 @@ export const generationRecordSchema = z.object({
   sceneSnapshot: sceneDocumentSchema.nullable().default(null),
   referenceSnapshots: z.array(referenceArtifactSchema).default([]),
   parentGenerationId: z.string().min(1).nullable().default(null),
+  sourceGenerationId: z.string().min(1).nullable().optional(),
   versionNumber: z.number().int().positive().default(1),
   feedback: z.string().min(1).nullable().default(null),
   generationMode: z.enum(['fresh', 'edit']).default('fresh'),
@@ -140,6 +141,7 @@ export interface StartGenerationInput {
   sceneSnapshot: SceneDocument;
   referenceIds?: string[];
   parentGenerationId?: string | null;
+  sourceGenerationId?: string | null;
   feedback?: string | null;
   generationMode?: GenerationRecord['generationMode'];
 }

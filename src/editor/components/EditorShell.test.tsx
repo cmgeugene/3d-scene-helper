@@ -14,6 +14,7 @@ import {
   SCENE_STORAGE_KEY,
 } from '../constants';
 import { encodeSceneDocument } from '../persistence/sceneCodec';
+import { PRE_APPLY_RECOVERY_STORAGE_KEY } from '../persistence/sceneRecovery';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
 import { createEditorStore } from '../state/editorStore';
 import { EditorShell } from './EditorShell';
@@ -61,6 +62,85 @@ function createMemoryStorage(initial: Record<string, string> = {}): Storage {
     key: (index) => [...values.keys()][index] ?? null,
     removeItem: (key) => values.delete(key),
     setItem: (key, value) => values.set(key, value),
+  };
+}
+
+function createGenerationFixture(id = 'generation-apply'): GenerationRecord {
+  const scene = createStarterSceneDocument({
+    documentId: 'scene-generation',
+    floorId: 'floor-generation',
+    mannequinId: 'mannequin-generation',
+  });
+  return {
+    id,
+    threadId: 'thread-test',
+    turnId: `turn-${id}`,
+    status: 'completed',
+    prompt: '$imagegen apply',
+    layoutSpec: { ...TEST_LAYOUT_SPEC, sceneId: scene.id },
+    sceneSnapshot: scene,
+    referenceSnapshots: [],
+    parentGenerationId: null,
+    versionNumber: 3,
+    feedback: null,
+    generationMode: 'fresh',
+    layoutRenderId: `render-${id}`,
+    sceneIntegrity: {
+      status: 'valid',
+      snapshotSceneId: scene.id,
+      layoutSpecSceneId: scene.id,
+      layoutRenderSceneId: scene.id,
+    },
+    referenceIds: [],
+    attachments: [{ type: 'layout', id: `render-${id}`, kind: 'layout' }],
+    revisedPrompt: null,
+    result: {
+      artifactId: `artifact-${id}`,
+      contentHash: `sha256:${'a'.repeat(64)}`,
+      mimeType: 'image/png',
+      width: 1920,
+      height: 1080,
+      byteLength: 3,
+    },
+    error: null,
+    createdAt: '2026-08-03T00:00:00.000Z',
+    updatedAt: '2026-08-03T00:01:00.000Z',
+  };
+}
+
+function clientWithGeneration(
+  generation: GenerationRecord,
+): CompanionBrowserClient {
+  return {
+    getRuntime: async () => ({
+      state: 'ready',
+      version: 'codex-test',
+      account: { type: 'chatgpt', email: null, planType: 'plus' },
+      requiresOpenaiAuth: true,
+      error: null,
+    }),
+    startThread: async () => 'thread-test',
+    startTurn: async () => 'turn-test',
+    interruptTurn: async () => undefined,
+    listReferences: async () => [],
+    importReference: async () => {
+      throw new Error('not used');
+    },
+    updateReference: async () => {
+      throw new Error('not used');
+    },
+    loadReferenceBlob: async () => new Blob(),
+    createSceneRender: async () => {
+      throw new Error('not used');
+    },
+    loadSceneRenderBlob: async () =>
+      new Blob(['layout'], { type: 'image/png' }),
+    listGenerations: async () => [generation],
+    startGeneration: async () => {
+      throw new Error('not used');
+    },
+    loadGenerationBlob: async () => new Blob(['result'], { type: 'image/png' }),
+    subscribe: () => () => undefined,
   };
 }
 
@@ -270,6 +350,138 @@ describe('EditorShell', () => {
     expect(screen.getByRole('region', { name: '장면 뷰포트' })).toBeVisible();
     expect(await screen.findByText('키프레임 보정 모드')).toBeVisible();
     expect(screen.getByText(/v1.*generation-selected.*결과/)).toBeVisible();
+  });
+
+  it('pre-apply save 실패 시 live scene, selection, history, dirty와 autosave를 전혀 변경하지 않는다', async () => {
+    const user = userEvent.setup();
+    const store = createTestStore();
+    store.getState().addObject({ kind: 'cube', name: '현재 편집 큐브' });
+    store.getState().selectObject('mannequin-test');
+    const validAutosave = encodeSceneDocument(store.getState().document);
+    const base = createMemoryStorage({ [SCENE_STORAGE_KEY]: validAutosave });
+    const storage: Storage = {
+      ...base,
+      setItem(key, value) {
+        if (key === PRE_APPLY_RECOVERY_STORAGE_KEY) {
+          throw new Error('forced recovery write failure');
+        }
+        base.setItem(key, value);
+      },
+    };
+    const before = {
+      document: store.getState().document,
+      selectedObjectId: store.getState().selectedObjectId,
+      history: store.getState().history,
+      isDirty: store.getState().isDirty,
+      autosave: storage.getItem(SCENE_STORAGE_KEY),
+    };
+    const generation = createGenerationFixture();
+
+    render(
+      <EditorShell
+        store={store}
+        webGLState="available"
+        storage={storage}
+        companionConnection={{
+          version: 1,
+          url: 'http://127.0.0.1:61234',
+          token: 'a'.repeat(43),
+        }}
+        assistantClientFactory={() => clientWithGeneration(generation)}
+        createAssistantObjectUrl={() => 'blob:test'}
+        revokeAssistantObjectUrl={() => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '키프레임' }));
+    await user.click(
+      await screen.findByRole('button', { name: '현재 씬으로 불러오기' }),
+    );
+    await user.click(screen.getByRole('button', { name: '현재 씬으로 적용' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '적용 전 복구 지점을 브라우저에 저장하지 못했습니다',
+    );
+    expect(store.getState().document).toBe(before.document);
+    expect(store.getState().selectedObjectId).toBe(before.selectedObjectId);
+    expect(store.getState().history).toBe(before.history);
+    expect(store.getState().isDirty).toBe(before.isDirty);
+    expect(storage.getItem(SCENE_STORAGE_KEY)).toBe(before.autosave);
+  });
+
+  it('snapshot 적용 후 3D 모드와 provenance를 표시하고 undo 및 reload-safe recovery로 직전 상태를 복원한다', async () => {
+    const user = userEvent.setup();
+    const store = createTestStore();
+    store.getState().addObject({ kind: 'cube', name: '복원할 큐브' });
+    store.getState().selectObject('mannequin-test');
+    const beforeDocument = structuredClone(store.getState().document);
+    const beforeSelection = store.getState().selectedObjectId;
+    const storage = createMemoryStorage({
+      [SCENE_STORAGE_KEY]: encodeSceneDocument(beforeDocument),
+    });
+    const generation = createGenerationFixture('generation-safe-apply');
+    const view = render(
+      <EditorShell
+        store={store}
+        webGLState="available"
+        storage={storage}
+        companionConnection={{
+          version: 1,
+          url: 'http://127.0.0.1:61234',
+          token: 'a'.repeat(43),
+        }}
+        assistantClientFactory={() => clientWithGeneration(generation)}
+        createAssistantObjectUrl={() => 'blob:test'}
+        revokeAssistantObjectUrl={() => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '키프레임' }));
+    await user.click(
+      await screen.findByRole('button', { name: '현재 씬으로 불러오기' }),
+    );
+    await user.click(screen.getByRole('button', { name: '현재 씬으로 적용' }));
+
+    expect(screen.getByRole('region', { name: '장면 뷰포트' })).toBeVisible();
+    expect(store.getState().document).toMatchObject({
+      id: 'scene-generation',
+      generationSource: {
+        generationId: 'generation-safe-apply',
+        versionNumber: 3,
+      },
+    });
+    expect(
+      screen.getByRole('status', { name: '적용된 generation 출처' }),
+    ).toHaveTextContent('generation-safe-apply · v3 · fresh');
+    expect(storage.getItem(PRE_APPLY_RECOVERY_STORAGE_KEY)).not.toBeNull();
+    expect(JSON.parse(storage.getItem(SCENE_STORAGE_KEY)!)).toEqual(
+      beforeDocument,
+    );
+
+    await user.click(screen.getByRole('button', { name: '실행 취소' }));
+    expect(store.getState().document).toEqual(beforeDocument);
+    expect(store.getState().selectedObjectId).toBe(beforeSelection);
+
+    store.getState().redo();
+    const appliedDocument = structuredClone(store.getState().document);
+    storage.setItem(SCENE_STORAGE_KEY, encodeSceneDocument(appliedDocument));
+    view.unmount();
+    const reloadStore = createEditorStore({
+      initialDocument: appliedDocument,
+      idFactory: () => 'reload-generated',
+    });
+    render(
+      <EditorShell
+        store={reloadStore}
+        webGLState="available"
+        storage={storage}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '적용 전 씬 복구' }));
+    expect(reloadStore.getState().document).toEqual(beforeDocument);
+    expect(reloadStore.getState().selectedObjectId).toBe(beforeSelection);
+    expect(storage.getItem(PRE_APPLY_RECOVERY_STORAGE_KEY)).toBeNull();
   });
 
   it('우측 패널 너비를 키보드로 조절하고 확장·접기 상태를 저장한다', async () => {

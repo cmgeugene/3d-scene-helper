@@ -388,6 +388,51 @@ describe('Companion loopback API', () => {
     expect(layoutContent.headers.get('content-type')).toBe('image/png');
     expect(Buffer.from(await layoutContent.arrayBuffer())).toEqual(onePixelPng);
 
+    runtime.startTurn.mockResolvedValueOnce('turn_fresh_from_layout');
+    const freshFromAppliedLayout = await fetch(
+      `${server.url}/api/generations`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          threadId: 'thread_1',
+          prompt: '$imagegen 적용한 3D 구도에서 새로 생성해 주세요.',
+          layoutSpec: TEST_LAYOUT_SPEC,
+          sceneSnapshot: createStarterSceneDocument({
+            documentId: 'scene-test',
+            floorId: 'floor-test',
+            mannequinId: 'mannequin-test',
+          }),
+          layoutRenderId: render.render.id,
+          referenceIds: [importedReference.reference.id],
+          parentGenerationId: null,
+          sourceGenerationId: started.generation.id,
+          generationMode: 'fresh',
+        }),
+      },
+    );
+    expect(freshFromAppliedLayout.status).toBe(202);
+    await expect(freshFromAppliedLayout.json()).resolves.toMatchObject({
+      turnId: 'turn_fresh_from_layout',
+      generation: {
+        parentGenerationId: null,
+        sourceGenerationId: started.generation.id,
+        versionNumber: 1,
+        generationMode: 'fresh',
+        attachments: [
+          { type: 'layout', id: render.render.id, kind: 'layout' },
+          {
+            type: 'reference',
+            id: importedReference.reference.id,
+            kind: 'character',
+          },
+        ],
+      },
+    });
+
     runtime.startTurn.mockResolvedValueOnce('turn_2');
     const refinementResponse = await fetch(`${server.url}/api/generations`, {
       method: 'POST',

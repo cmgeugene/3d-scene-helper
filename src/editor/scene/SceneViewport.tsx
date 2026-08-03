@@ -166,7 +166,7 @@ function clearPreviewObjectsDiagnostic(canvas: HTMLCanvasElement) {
   delete canvas.dataset.previewObjects;
 }
 
-function ReadOnlySceneDiagnostic({
+function SceneObjectsDiagnostic({
   objects,
 }: {
   objects: SceneDocument['objects'];
@@ -311,11 +311,8 @@ function RuntimeScene({
         </>
       ) : null}
       {motionGuidesVisible ? <MotionGuides document={document} /> : null}
-      {readOnly ? (
-        <ReadOnlySceneDiagnostic objects={objects} />
-      ) : (
-        <EditorHelpers />
-      )}
+      <SceneObjectsDiagnostic objects={objects} />
+      {readOnly ? null : <EditorHelpers />}
     </>
   );
 }

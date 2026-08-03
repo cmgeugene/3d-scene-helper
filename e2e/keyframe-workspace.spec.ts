@@ -1,4 +1,4 @@
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
 import { TEST_LAYOUT_SPEC } from '../shared/layoutSpecTestFixture';
@@ -7,6 +7,7 @@ import {
   createStarterSceneDocument,
 } from '../src/editor/persistence/sceneSchema';
 import { SCENE_STORAGE_KEY } from '../src/editor/constants';
+import { PRE_APPLY_RECOVERY_STORAGE_KEY } from '../src/editor/persistence/sceneRecovery';
 
 const token = 'e2e-keyframe-token-'.padEnd(43, 'x');
 const onePixelPng = Buffer.from(
@@ -70,6 +71,7 @@ function generation(
     sceneSnapshot: legacy ? null : sceneSnapshot,
     referenceSnapshots: [],
     parentGenerationId: null,
+    sourceGenerationId: null,
     versionNumber: 1,
     feedback: null,
     generationMode: 'fresh',
@@ -111,6 +113,7 @@ const generations = [
   generation('generation-legacy', 'legacy'),
   generation('generation-mismatch', 'mismatch'),
 ];
+const eventResponses = new Set<ServerResponse>();
 let server: Server;
 let companionUrl: string;
 
@@ -124,6 +127,11 @@ function sendJson(
     Vary: 'Origin',
   });
   response.end(JSON.stringify(value));
+}
+
+function emitGeneration(value: (typeof generations)[number]) {
+  const payload = `event: generation\ndata: ${JSON.stringify(value)}\n\n`;
+  for (const response of eventResponses) response.write(payload);
 }
 
 function createMockCompanionServer() {
@@ -174,6 +182,8 @@ function createMockCompanionServer() {
         'Access-Control-Allow-Origin': 'http://127.0.0.1:4173',
       });
       response.write(': connected\n\n');
+      eventResponses.add(response);
+      request.on('close', () => eventResponses.delete(response));
       return;
     }
     if (
@@ -398,5 +408,232 @@ test('sceneSnapshot preview가 과거 구도를 재현하고 live scene 상태�
   );
   await expect(page.getByText('키프레임 보정 모드')).toBeVisible();
   expect(await readEditorEvidence()).toEqual(afterRefreshBaseline);
+  expect(browserProblems).toEqual([]);
+});
+
+test('sceneSnapshot apply는 cancel/save 실패/race를 닫고 undo와 durable recovery를 실제 Chromium에서 보존한다', async ({
+  page,
+}) => {
+  const browserProblems: string[] = [];
+  page.on('pageerror', (error) =>
+    browserProblems.push(`pageerror: ${error.message}`),
+  );
+  page.on('console', (message) => {
+    const text = message.text();
+    if (
+      (message.type() === 'warning' &&
+        (text.includes('THREE.Clock: This module has been deprecated') ||
+          text.includes('GPU stall due to ReadPixels'))) ||
+      (message.type() === 'error' &&
+        text.includes('net::ERR_INCOMPLETE_CHUNKED_ENCODING'))
+    ) {
+      return;
+    }
+    if (message.type() === 'warning' || message.type() === 'error') {
+      browserProblems.push(`${message.type()}: ${text}`);
+    }
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const encoded = Buffer.from(
+    JSON.stringify({ version: 1, url: companionUrl, token }),
+  ).toString('base64url');
+  await page.goto(`/#companion=${encoded}`);
+
+  const readEvidence = () =>
+    page.evaluate(
+      ({ recoveryKey, sceneKey }) => {
+        const runtime = globalThis as unknown as {
+          __I2V_EDITOR_STORE__?: {
+            getState(): {
+              document: unknown;
+              history: { past: unknown[]; future: unknown[] };
+              selectedObjectId: string | null;
+              isDirty: boolean;
+            };
+          };
+        };
+        const state = runtime.__I2V_EDITOR_STORE__?.getState();
+        if (state === undefined) throw new Error('editor test bridge missing');
+        const autosave = localStorage.getItem(sceneKey);
+        return {
+          document: JSON.stringify(state.document),
+          history: JSON.stringify(state.history),
+          pastCount: state.history.past.length,
+          selectedObjectId: state.selectedObjectId,
+          isDirty: state.isDirty,
+          autosave:
+            autosave === null ? null : JSON.stringify(JSON.parse(autosave)),
+          recovery: localStorage.getItem(recoveryKey),
+        };
+      },
+      {
+        recoveryKey: PRE_APPLY_RECOVERY_STORAGE_KEY,
+        sceneKey: SCENE_STORAGE_KEY,
+      },
+    );
+
+  await page.evaluate(() => {
+    const runtime = globalThis as unknown as {
+      __I2V_EDITOR_STORE__?: {
+        getState(): {
+          document: { objects: Array<{ id: string; kind: string }> };
+          addObject(input: { kind: 'cube'; name: string }): string;
+          selectObject(id: string | null): void;
+        };
+      };
+    };
+    const state = runtime.__I2V_EDITOR_STORE__?.getState();
+    if (state === undefined) throw new Error('editor test bridge missing');
+    state.addObject({ kind: 'cube', name: '적용 직전 큐브' });
+    state.selectObject(
+      state.document.objects.find(({ kind }) => kind === 'mannequin')?.id ??
+        null,
+    );
+  });
+  await expect.poll(async () => (await readEvidence()).isDirty).toBe(false);
+  const beforeApply = await readEvidence();
+  expect(beforeApply.autosave).not.toBeNull();
+  expect(beforeApply.recovery).toBeNull();
+
+  await page.getByRole('button', { name: '키프레임' }).click();
+  const complete = page.getByRole('button', { name: /generation-complete/ });
+  await complete.click();
+  const openApply = page.getByRole('button', { name: '현재 씬으로 불러오기' });
+  await openApply.click();
+  const dialog = page.getByRole('dialog', { name: '현재 씬 덮어쓰기 확인' });
+  await expect(dialog).toContainText('generation-complete');
+  await expect(dialog).toContainText('과거 정민');
+  const cancel = dialog.getByRole('button', { name: '취소' });
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(
+    dialog.getByRole('button', { name: '현재 씬으로 적용' }),
+  ).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  expect(await readEvidence()).toEqual(beforeApply);
+
+  await page.evaluate((recoveryKey) => {
+    const target = globalThis as typeof globalThis & {
+      __originalStorageSetItem__?: typeof Storage.prototype.setItem;
+    };
+    target.__originalStorageSetItem__ = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === recoveryKey)
+        throw new DOMException('quota e2e', 'QuotaExceededError');
+      return target.__originalStorageSetItem__!.call(this, key, value);
+    };
+  }, PRE_APPLY_RECOVERY_STORAGE_KEY);
+  await openApply.click();
+  await dialog.getByRole('button', { name: '현재 씬으로 적용' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('저장하지 못했습니다');
+  expect(await readEvidence()).toEqual(beforeApply);
+  await page.evaluate(() => {
+    const target = globalThis as typeof globalThis & {
+      __originalStorageSetItem__?: typeof Storage.prototype.setItem;
+    };
+    if (target.__originalStorageSetItem__ !== undefined) {
+      Storage.prototype.setItem = target.__originalStorageSetItem__;
+      delete target.__originalStorageSetItem__;
+    }
+  });
+  await cancel.click();
+
+  await openApply.click();
+  const raced = generation('generation-complete', 'mismatch');
+  generations[0] = raced;
+  emitGeneration(raced);
+  await dialog.getByRole('button', { name: '현재 씬으로 적용' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('무결성');
+  expect(await readEvidence()).toEqual(beforeApply);
+  await cancel.click();
+  const restored = generation('generation-complete');
+  generations[0] = restored;
+  emitGeneration(restored);
+  await expect(openApply).toBeEnabled();
+
+  await openApply.click();
+  await dialog.getByRole('button', { name: '현재 씬으로 적용' }).dblclick();
+  await expect(page.getByRole('button', { name: '3D 씬' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(
+    page.getByRole('status', { name: '적용된 generation 출처' }),
+  ).toContainText('generation-complete · v1 · fresh');
+  const applied = await readEvidence();
+  expect(applied.pastCount).toBe(beforeApply.pastCount + 1);
+  expect(applied.selectedObjectId).toBeNull();
+  expect(applied.recovery).not.toBeNull();
+  expect(JSON.parse(applied.document)).toMatchObject({
+    id: 'scene-e2e',
+    generationSource: {
+      generationId: 'generation-complete',
+      versionNumber: 1,
+    },
+  });
+
+  const liveCanvas = page
+    .getByRole('img', { name: '3D 장면 캔버스' })
+    .locator('canvas');
+  await expect(liveCanvas).toBeVisible();
+  await expect
+    .poll(() => liveCanvas.getAttribute('data-runtime-camera'))
+    .not.toBeNull();
+  expect(
+    JSON.parse((await liveCanvas.getAttribute('data-runtime-camera'))!),
+  ).toMatchObject({
+    position: { x: 2, y: 2.4, z: -7 },
+    focalLengthMm: 35,
+  });
+  expect(
+    JSON.parse((await liveCanvas.getAttribute('data-preview-objects'))!),
+  ).toContainEqual(
+    expect.objectContaining({
+      id: 'starter-mannequin',
+      position: { x: -1.25, y: 0.85, z: 1.5 },
+    }),
+  );
+
+  await page.getByRole('button', { name: '실행 취소' }).click();
+  const afterUndo = await readEvidence();
+  expect(afterUndo.document).toBe(beforeApply.document);
+  expect(afterUndo.selectedObjectId).toBe(beforeApply.selectedObjectId);
+
+  await page.getByRole('button', { name: '다시 실행' }).click();
+  await expect
+    .poll(async () => {
+      const state = await readEvidence();
+      return state.autosave === state.document && !state.isDirty;
+    })
+    .toBe(true);
+  const appliedBeforeReload = await readEvidence();
+  expect(appliedBeforeReload.recovery).not.toBeNull();
+
+  const companionPort = Number(new URL(companionUrl).port);
+  await closeMockCompanion();
+  await listenMockCompanion(companionPort);
+  await page.reload();
+  await expect(
+    page.getByRole('status', { name: '적용된 generation 출처' }),
+  ).toContainText('generation-complete');
+  await page.getByRole('button', { name: '적용 전 씬 복구' }).click();
+  await expect
+    .poll(async () => {
+      const state = await readEvidence();
+      return state.autosave === state.document && !state.isDirty;
+    })
+    .toBe(true);
+  const recovered = await readEvidence();
+  expect(recovered.document).toBe(beforeApply.document);
+  expect(recovered.selectedObjectId).toBe(beforeApply.selectedObjectId);
+  expect(recovered.recovery).toBeNull();
+  expect(
+    await page.evaluate(
+      'document.documentElement.scrollWidth <= window.innerWidth',
+    ),
+  ).toBe(true);
   expect(browserProblems).toEqual([]);
 });

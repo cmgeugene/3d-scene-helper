@@ -57,6 +57,7 @@ export const DOCUMENT_MUTATION_KINDS = [
   'update-output',
   'update-motion-metadata',
   'commit-mannequin-pose',
+  'apply-generation-snapshot',
 ] as const;
 
 export type DocumentMutationKind = (typeof DOCUMENT_MUTATION_KINDS)[number];
@@ -133,6 +134,10 @@ export interface EditorStore {
   setStatusMessage: (statusMessage: string | null) => void;
   replaceDocument: (document: SceneDocument, persisted: boolean) => void;
   markDocumentPersisted: (document: SceneDocument) => void;
+  applyGenerationSnapshot: (
+    document: SceneDocument,
+    source: NonNullable<SceneDocument['generationSource']>,
+  ) => void;
   undo: () => void;
   redo: () => void;
 }
@@ -732,19 +737,60 @@ export function createEditorStore(options: EditorStoreOptions) {
       persistedDocument = structuredClone(state.document);
       set({ isDirty: false });
     },
+    applyGenerationSnapshot: (snapshot, source) => {
+      const nextDocument = sceneDocumentSchema.parse({
+        ...structuredClone(snapshot),
+        generationSource: source,
+      });
+      set((state) => {
+        const history = recordDocumentHistory(
+          state.history,
+          state.document,
+          'apply-generation-snapshot',
+          DOCUMENT_MUTATION_KINDS,
+          state.selectedObjectId,
+        );
+        return {
+          document: nextDocument,
+          history,
+          canUndo: true,
+          canRedo: false,
+          selectedObjectId: null,
+          hoveredObjectId: null,
+          inProgressTransform: null,
+          inProgressMannequinPose: null,
+          navigation: {
+            position: structuredClone(nextDocument.outputCamera.position),
+            target: structuredClone(nextDocument.outputCamera.target),
+            isInteracting: false,
+          },
+          isDirty: !documentsEqual(nextDocument, persistedDocument),
+          statusMessage: `generation v${source.versionNumber}의 3D 씬을 적용했습니다.`,
+        };
+      });
+    },
     undo: () => {
       set((state) => {
-        const result = undoDocumentHistory(state.history, state.document);
+        const result = undoDocumentHistory(
+          state.history,
+          state.document,
+          state.selectedObjectId,
+        );
         if (result === null) return state;
         const nextDocument = sceneDocumentSchema.parse(result.document);
         const navigation =
-          result.mutationKind === 'commit-camera'
+          result.mutationKind === 'commit-camera' ||
+          result.mutationKind === 'apply-generation-snapshot'
             ? {
                 position: structuredClone(nextDocument.outputCamera.position),
                 target: structuredClone(nextDocument.outputCamera.target),
                 isInteracting: false,
               }
             : state.navigation;
+        const selectedObjectId =
+          result.mutationKind === 'apply-generation-snapshot'
+            ? (result.selectedObjectId ?? null)
+            : state.selectedObjectId;
 
         return {
           document: nextDocument,
@@ -753,9 +799,9 @@ export function createEditorStore(options: EditorStoreOptions) {
           canUndo: result.history.past.length > 0,
           canRedo: result.history.future.length > 0,
           selectedObjectId: nextDocument.objects.some(
-            ({ id }) => id === state.selectedObjectId,
+            ({ id }) => id === selectedObjectId,
           )
-            ? state.selectedObjectId
+            ? selectedObjectId
             : null,
           hoveredObjectId: nextDocument.objects.some(
             ({ id }) => id === state.hoveredObjectId,
@@ -771,11 +817,16 @@ export function createEditorStore(options: EditorStoreOptions) {
     },
     redo: () => {
       set((state) => {
-        const result = redoDocumentHistory(state.history, state.document);
+        const result = redoDocumentHistory(
+          state.history,
+          state.document,
+          state.selectedObjectId,
+        );
         if (result === null) return state;
         const nextDocument = sceneDocumentSchema.parse(result.document);
         const navigation =
-          result.mutationKind === 'commit-camera'
+          result.mutationKind === 'commit-camera' ||
+          result.mutationKind === 'apply-generation-snapshot'
             ? {
                 position: structuredClone(nextDocument.outputCamera.position),
                 target: structuredClone(nextDocument.outputCamera.target),

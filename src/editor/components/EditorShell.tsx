@@ -26,6 +26,12 @@ import {
   getMaximumReferenceImages,
 } from '../../../shared/imageInputBudget';
 import type { FrameExportHandler } from '../export/exportFrame';
+import {
+  PRE_APPLY_RECOVERY_STORAGE_KEY,
+  loadPreApplySceneRecovery,
+  saveSceneBeforeGenerationApply,
+  type PreApplySceneRecovery,
+} from '../persistence/sceneRecovery';
 import type { EditorStore } from '../state/editorStore';
 import { AssetPanel } from './AssetPanel';
 import {
@@ -171,6 +177,11 @@ export function EditorShell({
   const [workspaceMode, setWorkspaceMode] = useState<'scene' | 'keyframe'>(() =>
     readWorkspaceMode(storage),
   );
+  const [preApplyRecovery, setPreApplyRecovery] =
+    useState<PreApplySceneRecovery | null>(() =>
+      loadPreApplySceneRecovery(storage),
+    );
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [assistantPanelWidth, setAssistantPanelWidth] = useState(() =>
     readAssistantPanelWidth(storage),
   );
@@ -385,6 +396,51 @@ export function EditorShell({
               <Outliner store={store} />
             </aside>
             <section className="viewport-panel" aria-label="장면 뷰포트">
+              {sceneDocument.generationSource === undefined &&
+              preApplyRecovery === null ? null : (
+                <aside
+                  className="scene-generation-provenance"
+                  role="status"
+                  aria-label="적용된 generation 출처"
+                >
+                  {sceneDocument.generationSource === undefined ? null : (
+                    <span>
+                      출처 {sceneDocument.generationSource.generationId} · v
+                      {sceneDocument.generationSource.versionNumber} · fresh
+                    </span>
+                  )}
+                  {preApplyRecovery === null ? null : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          storage.removeItem(PRE_APPLY_RECOVERY_STORAGE_KEY);
+                        } catch {
+                          setRecoveryError(
+                            '적용 전 복구 지점을 지우지 못해 현재 씬을 변경하지 않았습니다.',
+                          );
+                          return;
+                        }
+                        const recovery = preApplyRecovery;
+                        store
+                          .getState()
+                          .replaceDocument(recovery.document, false);
+                        store
+                          .getState()
+                          .selectObject(recovery.selectedObjectId);
+                        setPreApplyRecovery(null);
+                        setRecoveryError(null);
+                        setRefinementSource(null);
+                      }}
+                    >
+                      적용 전 씬 복구
+                    </button>
+                  )}
+                  {recoveryError === null ? null : (
+                    <span role="alert">{recoveryError}</span>
+                  )}
+                </aside>
+              )}
               {canvasEnabled && webGLState === 'available' ? (
                 <SceneErrorBoundary onError={handleViewportError}>
                   <Suspense
@@ -494,6 +550,30 @@ export function EditorShell({
                 canvasEnabled={canvasEnabled && webGLState === 'available'}
               />
             )}
+            onApplyScene={(generation) => {
+              if (generation.sceneSnapshot === null) {
+                throw new Error(
+                  '선택한 generation에는 적용할 SceneDocument가 없습니다.',
+                );
+              }
+              const state = store.getState();
+              const recovery = saveSceneBeforeGenerationApply(storage, {
+                document: state.document,
+                selectedObjectId: state.selectedObjectId,
+                targetGenerationId: generation.id,
+                targetVersionNumber: generation.versionNumber,
+              });
+              state.markDocumentPersisted(state.document);
+              store
+                .getState()
+                .applyGenerationSnapshot(generation.sceneSnapshot, {
+                  generationId: generation.id,
+                  versionNumber: generation.versionNumber,
+                });
+              setPreApplyRecovery(recovery);
+              setRefinementSource(null);
+              setWorkspaceMode('scene');
+            }}
             onRefine={(generation) => {
               setRefinementSource(generation);
               setWorkspaceMode('scene');

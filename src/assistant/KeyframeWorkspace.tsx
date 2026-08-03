@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { SceneDocument } from '../editor/persistence/sceneSchema';
+import {
+  sceneDocumentSchema,
+  type SceneDocument,
+} from '../editor/persistence/sceneSchema';
 import type { CompanionConnection } from './companionConnection';
 import {
   CompanionClient,
@@ -23,6 +26,7 @@ interface KeyframeWorkspaceProps {
   revokeObjectUrl?: (url: string) => void;
   currentDocument?: SceneDocument;
   renderScenePreview?: (document: SceneDocument) => ReactNode;
+  onApplyScene?: (generation: GenerationRecord) => void;
   onRefine: (generation: GenerationRecord) => void;
 }
 
@@ -77,6 +81,7 @@ export function KeyframeWorkspace({
   revokeObjectUrl = defaultRevokeObjectUrl,
   currentDocument,
   renderScenePreview,
+  onApplyScene,
   onRefine,
 }: KeyframeWorkspaceProps) {
   const client = useMemo(
@@ -94,8 +99,13 @@ export function KeyframeWorkspace({
   const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(
     null,
   );
+  const [pendingApply, setPendingApply] = useState<GenerationRecord | null>(
+    null,
+  );
+  const [applyError, setApplyError] = useState<string | null>(null);
   const resultUrlRef = useRef<string | null>(null);
   const layoutUrlRef = useRef<string | null>(null);
+  const applyInFlightRef = useRef(false);
 
   useEffect(() => {
     if (client === null) {
@@ -157,6 +167,13 @@ export function KeyframeWorkspace({
     sceneIntegrity?.status !== 'valid'
       ? null
       : compareSceneDocuments(currentDocument, selected.sceneSnapshot);
+  const pendingSceneComparison =
+    pendingApply?.sceneSnapshot === null ||
+    pendingApply?.sceneSnapshot === undefined ||
+    currentDocument === undefined ||
+    assessGenerationSceneIntegrity(pendingApply).status !== 'valid'
+      ? null
+      : compareSceneDocuments(currentDocument, pendingApply.sceneSnapshot);
   const previewEnabled =
     selected?.sceneSnapshot !== null &&
     selected?.sceneSnapshot !== undefined &&
@@ -287,6 +304,11 @@ export function KeyframeWorkspace({
                     ? null
                     : byId.get(generation.parentGenerationId);
                 const childCount = childCounts.get(generation.id) ?? 0;
+                const source =
+                  generation.sourceGenerationId === undefined ||
+                  generation.sourceGenerationId === null
+                    ? null
+                    : byId.get(generation.sourceGenerationId);
                 return (
                   <li key={generation.id}>
                     <button
@@ -308,11 +330,16 @@ export function KeyframeWorkspace({
                         </span>
                       </span>
                       <span className="generation-history-lineage">
-                        {parent === null || parent === undefined
-                          ? generation.parentGenerationId === null
-                            ? '루트 generation'
-                            : '부모 기록 없음'
-                          : `부모 v${parent.versionNumber}`}
+                        {generation.sourceGenerationId !== undefined &&
+                        generation.sourceGenerationId !== null
+                          ? source === null || source === undefined
+                            ? '3D 출처 기록 없음 · fresh root'
+                            : `3D 출처 v${source.versionNumber} · fresh root`
+                          : parent === null || parent === undefined
+                            ? generation.parentGenerationId === null
+                              ? '루트 generation'
+                              : '부모 기록 없음'
+                            : `부모 v${parent.versionNumber}`}
                         {childCount === 0 ? '' : ` · 자식 ${childCount}`}
                       </span>
                       <span>{formatTimestamp(generation.updatedAt)}</span>
@@ -411,6 +438,19 @@ export function KeyframeWorkspace({
                   >
                     생성 당시 3D 씬 미리보기
                   </button>
+                  {onApplyScene === undefined ? null : (
+                    <button
+                      type="button"
+                      disabled={!previewEnabled}
+                      onClick={() => {
+                        applyInFlightRef.current = false;
+                        setApplyError(null);
+                        setPendingApply(selected);
+                      }}
+                    >
+                      현재 씬으로 불러오기
+                    </button>
+                  )}
                 </header>
                 {sceneComparison === null ? null : sceneComparison.differences
                     .length === 0 ? (
@@ -530,6 +570,121 @@ export function KeyframeWorkspace({
               </div>
             </article>
           )}
+        </div>
+      )}
+      {pendingApply === null ? null : (
+        <div
+          className="generation-apply-dialog-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="generation-apply-dialog-title"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              applyInFlightRef.current = false;
+              setPendingApply(null);
+              setApplyError(null);
+              return;
+            }
+            if (event.key !== 'Tab') return;
+            const controls = [
+              ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                'button:not(:disabled)',
+              ),
+            ];
+            if (controls.length === 0) return;
+            const first = controls[0];
+            const last = controls.at(-1);
+            if (event.shiftKey && document.activeElement === first) {
+              event.preventDefault();
+              last?.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+              event.preventDefault();
+              first?.focus();
+            }
+          }}
+        >
+          <div className="generation-apply-dialog-card">
+            <h3 id="generation-apply-dialog-title">현재 씬 덮어쓰기 확인</h3>
+            <p>
+              v{pendingApply.versionNumber} · {pendingApply.id}의 생성 당시 3D
+              씬으로 현재 편집 내용을 덮어씁니다.
+            </p>
+            {pendingSceneComparison?.differences.length === 0 ? (
+              <p>현재 씬과 주요 차이가 없습니다.</p>
+            ) : (
+              <ul>
+                {pendingSceneComparison?.differences
+                  .slice(0, 6)
+                  .map((difference) => (
+                    <li key={difference.id}>
+                      <strong>{difference.label}</strong> · {difference.detail}
+                    </li>
+                  ))}
+              </ul>
+            )}
+            {applyError === null ? null : <p role="alert">{applyError}</p>}
+            <div>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => {
+                  applyInFlightRef.current = false;
+                  setPendingApply(null);
+                  setApplyError(null);
+                }}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (applyInFlightRef.current) return;
+                  if (selected?.id !== pendingApply.id) {
+                    setApplyError(
+                      '선택한 generation이 변경되었습니다. 다시 선택하고 확인해 주세요.',
+                    );
+                    return;
+                  }
+                  const currentIntegrity =
+                    assessGenerationSceneIntegrity(selected);
+                  if (
+                    currentIntegrity.status !== 'valid' ||
+                    selected.sceneSnapshot === null ||
+                    !sceneDocumentSchema.safeParse(selected.sceneSnapshot)
+                      .success
+                  ) {
+                    setApplyError(
+                      '선택한 generation의 snapshot 무결성을 다시 확인할 수 없습니다. 현재 씬은 변경하지 않았습니다.',
+                    );
+                    return;
+                  }
+                  if (
+                    JSON.stringify(selected) !== JSON.stringify(pendingApply)
+                  ) {
+                    setApplyError(
+                      '선택한 generation 기록이 변경되었습니다. 다시 선택하고 확인해 주세요.',
+                    );
+                    return;
+                  }
+                  applyInFlightRef.current = true;
+                  try {
+                    onApplyScene?.(selected);
+                    setPendingApply(null);
+                  } catch (reason) {
+                    applyInFlightRef.current = false;
+                    setApplyError(
+                      reason instanceof Error
+                        ? reason.message
+                        : '3D 씬을 적용하지 못했습니다.',
+                    );
+                  }
+                }}
+              >
+                현재 씬으로 적용
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>
