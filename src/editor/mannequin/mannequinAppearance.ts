@@ -77,24 +77,47 @@ function createHeadGeometry() {
 }
 
 function createTorsoGeometry(bodyType: MannequinBodyTypeId) {
+  const profile =
+    bodyType === 'heavy'
+      ? ([
+          [0.122, -0.25],
+          [0.112, -0.22],
+          [0.122, -0.2],
+          [0.13, -0.17],
+          [0.138, -0.14],
+          [0.143, -0.11],
+          [0.145, -0.08],
+          [0.16, -0.04],
+          [0.17, 0],
+          [0.176, 0.03],
+          [0.178, 0.06],
+          [0.185, 0.09],
+          [0.19, 0.12],
+          [0.172, 0.19],
+          [0.147, 0.205],
+          [0.122, 0.22],
+        ] as const)
+      : ([
+          [0.122, -0.25],
+          [0.112, -0.22],
+          [0.118, -0.17],
+          [0.145, -0.08],
+          [0.178, 0.06],
+          [0.19, 0.12],
+          [0.172, 0.19],
+          [0.122, 0.22],
+        ] as const);
   const geometry = createProfileGeometry(
-    [
-      [0.122, -0.25],
-      [0.112, -0.22],
-      [0.118, -0.17],
-      [0.145, -0.08],
-      [0.178, 0.06],
-      [0.19, 0.12],
-      [0.172, 0.19],
-      [0.122, 0.22],
-    ],
-    28,
+    profile,
+    bodyType === 'heavy' ? 40 : 28,
     0.72,
   );
   const position = geometry.getAttribute('position');
   for (let index = 0; index < position.count; index += 1) {
     const y = position.getY(index);
-    let z = position.getZ(index);
+    const sourceX = position.getX(index);
+    const sourceZ = position.getZ(index);
+    let z = sourceZ;
     const upperChest = Math.max(0, 1 - Math.abs(y - 0.11) / 0.2);
     if (z < 0) {
       z = z * (1 + upperChest * 0.12) - upperChest * 0.004;
@@ -102,25 +125,30 @@ function createTorsoGeometry(bodyType: MannequinBodyTypeId) {
       z *= 1 - upperChest * 0.035;
     }
     const belly = Math.max(0, 1 - Math.abs(y + 0.08) / 0.24);
+    const sourceRadius = Math.hypot(sourceX, sourceZ / 0.72);
+    const roundedHeavyWidth =
+      0.14 + 0.22 * Math.exp(-Math.pow((y + 0.06) / 0.17, 2));
     const widthScale =
       bodyType === 'athletic'
         ? 1.16 + upperChest * 0.12
         : bodyType === 'heavy'
-          ? 1.08 + belly * 1.35
+          ? sourceRadius > 1e-6
+            ? roundedHeavyWidth / sourceRadius
+            : 1
           : 1;
     const depthScale =
       bodyType === 'athletic'
         ? 1.14
         : bodyType === 'heavy'
           ? z < 0
-            ? 1.12 + belly * 1.6
-            : 1.08 + belly * 0.65
+            ? 0.9 + belly * 1.05
+            : 1.02 + belly * 0.5
           : 1;
     const forwardBellyOffset =
-      bodyType === 'heavy' && z < 0 ? belly * 0.025 : 0;
+      bodyType === 'heavy' && z < 0 ? belly * 0.0125 : 0;
     position.setXYZ(
       index,
-      position.getX(index) * widthScale,
+      sourceX * widthScale,
       y,
       z * depthScale - forwardBellyOffset,
     );

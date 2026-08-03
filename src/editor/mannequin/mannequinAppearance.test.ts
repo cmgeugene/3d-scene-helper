@@ -162,7 +162,7 @@ describe('studio mannequin appearance geometry', () => {
     const bellyWidth = radialExtentAtY(heavy.torso, -0.08);
     const chestWidth = radialExtentAtY(heavy.torso, 0.12);
     const lowerBellyWidth = radialExtentAtY(heavy.torso, -0.17);
-    const lowerTorsoWidth = radialExtentAtY(heavy.torso, -0.22);
+    const lowerTorsoWidth = radialExtentAtY(heavy.torso, -0.25);
     const bellyDepth = depthExtentsAtY(heavy.torso, -0.08);
     const chestDepth = depthExtentsAtY(heavy.torso, 0.12);
     const standard = createStudioMannequinGeometries('standard');
@@ -171,13 +171,22 @@ describe('studio mannequin appearance geometry', () => {
       radialExtentAtY(standard.torso, -0.08) * 2.2,
     );
     expect(bellyDepth.front).toBeGreaterThan(
-      depthExtentsAtY(standard.torso, -0.08).front * 2.7,
+      depthExtentsAtY(standard.torso, -0.08).front * 1.9,
     );
     expect(bellyWidth).toBeGreaterThan(chestWidth * 1.15);
     expect(lowerBellyWidth).toBeGreaterThan(bellyWidth * 0.6);
     expect(bellyWidth).toBeGreaterThan(lowerTorsoWidth * 1.5);
     expect(bellyDepth.front).toBeGreaterThan(chestDepth.front * 1.15);
+    expect(bellyDepth.front).toBeLessThan(chestDepth.front * 1.3);
     expect(bellyDepth.front).toBeGreaterThan(bellyDepth.back * 1.25);
+    const roundedLowerBellyWidths = [
+      -0.08, -0.11, -0.14, -0.17, -0.2, -0.22,
+    ].map((y) => radialExtentAtY(heavy.torso, y));
+    for (let index = 1; index < roundedLowerBellyWidths.length; index += 1) {
+      expect(roundedLowerBellyWidths[index]).toBeGreaterThan(
+        roundedLowerBellyWidths[index - 1] * 0.84,
+      );
+    }
 
     for (const geometries of [standard, heavy]) {
       for (const part of Object.values(geometries)) part.dispose();
