@@ -609,12 +609,23 @@ test('knee IK exposes constrained bend and lateral rotation rings', async ({
     /right-knee/,
   );
 
-  const handleProjections = JSON.parse(
-    (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
-  ) as Record<'right-knee', { x: number; y: number }>;
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
   if (box === null) return;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, 300);
+  await expect
+    .poll(async () => {
+      const projections = JSON.parse(
+        (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
+      ) as Partial<Record<'right-foot', { x: number; y: number }>>;
+      const foot = projections['right-foot'];
+      return foot !== undefined && foot.y >= 0 && foot.y <= box.height;
+    })
+    .toBe(true);
+  const handleProjections = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-ik-joint-projections')) ?? '{}',
+  ) as Record<'right-knee', { x: number; y: number }>;
   await page.mouse.move(
     box.x + handleProjections['right-knee'].x,
     box.y + handleProjections['right-knee'].y,

@@ -304,18 +304,16 @@ export function SceneViewport({
     const surface = surfaceRef.current;
     if (surface === null) return;
 
-    const updateFrame = () => {
-      if (surface.clientWidth <= 0 || surface.clientHeight <= 0) return;
-      setFrame(
-        computeLetterbox(
-          surface.clientWidth,
-          surface.clientHeight,
-          outputAspect,
-        ),
-      );
+    const updateFrame = (width: number, height: number) => {
+      if (width <= 0 || height <= 0) return;
+      setFrame(computeLetterbox(width, height, outputAspect));
     };
-    updateFrame();
-    const observer = new ResizeObserver(updateFrame);
+    const bounds = surface.getBoundingClientRect();
+    updateFrame(bounds.width, bounds.height);
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry === undefined) return;
+      updateFrame(entry.contentRect.width, entry.contentRect.height);
+    });
     observer.observe(surface);
     return () => {
       observer.disconnect();

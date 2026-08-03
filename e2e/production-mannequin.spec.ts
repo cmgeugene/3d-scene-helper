@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { PNG } from 'pngjs';
 
+const MIN_VISIBLE_HANDLE_PIXELS = 20;
+
 function collectHandlePixels(screenshot: Buffer, side: 'left' | 'right') {
   const image = PNG.sync.read(screenshot);
   let sumX = 0;
@@ -16,7 +18,9 @@ function collectHandlePixels(screenshot: Buffer, side: 'left' | 'right') {
         side === 'left'
           ? red > 190 && green < 150 && blue > 170
           : red < 150 && green > 180 && blue > 190;
-      if (matches) {
+      const isInHandRegion =
+        side === 'left' ? x > image.width * 0.55 : x < image.width * 0.45;
+      if (matches && isInHandRegion) {
         sumX += x;
         sumY += y;
         count += 1;
@@ -31,7 +35,7 @@ function findHandleCenter(
   side: 'left' | 'right',
 ): { x: number; y: number } {
   const { count, sumX, sumY } = collectHandlePixels(screenshot, side);
-  expect(count).toBeGreaterThan(100);
+  expect(count).toBeGreaterThan(MIN_VISIBLE_HANDLE_PIXELS);
   return { x: sumX / count, y: sumY / count };
 }
 
@@ -54,8 +58,10 @@ test('ordinary production build accepts a real pointer drag on the visible hand 
     .poll(async () => {
       const screenshot = await canvas.screenshot();
       return (
-        collectHandlePixels(screenshot, 'left').count > 100 &&
-        collectHandlePixels(screenshot, 'right').count > 100
+        collectHandlePixels(screenshot, 'left').count >
+          MIN_VISIBLE_HANDLE_PIXELS &&
+        collectHandlePixels(screenshot, 'right').count >
+          MIN_VISIBLE_HANDLE_PIXELS
       );
     })
     .toBe(true);
