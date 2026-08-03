@@ -7,6 +7,7 @@ import {
   OUTPUT_DIMENSION_RANGE,
   SCENE_DOCUMENT_VERSION,
 } from '../constants';
+import { MANNEQUIN_BODY_TYPE_IDS } from '../mannequin/mannequinBodyType';
 import { createMannequinPose } from '../mannequin/mannequinRig';
 
 const stableIdSchema = z.string().trim().min(1);
@@ -80,7 +81,7 @@ export const mannequinPoseSchema = z.strictObject({
   }),
 });
 
-const sceneObjectSchema = z
+const validatedSceneObjectSchema = z
   .strictObject({
     id: stableIdSchema,
     kind: z.enum([
@@ -99,6 +100,7 @@ const sceneObjectSchema = z
     visible: z.boolean(),
     exportable: z.boolean(),
     mannequinPose: mannequinPoseSchema.optional(),
+    mannequinBodyType: z.enum(MANNEQUIN_BODY_TYPE_IDS).optional(),
   })
   .superRefine((object, context) => {
     if (object.kind === 'mannequin' && object.mannequinPose === undefined) {
@@ -115,7 +117,25 @@ const sceneObjectSchema = z
         path: ['mannequinPose'],
       });
     }
+    if (object.kind !== 'mannequin' && object.mannequinBodyType !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Only mannequin objects may contain a mannequin body type',
+        path: ['mannequinBodyType'],
+      });
+    }
   });
+
+const sceneObjectSchema = z.preprocess((value) => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return value;
+  }
+  const object = value as Record<string, unknown>;
+  if (object.kind === 'mannequin' && object.mannequinBodyType === undefined) {
+    return { ...object, mannequinBodyType: 'standard' };
+  }
+  return value;
+}, validatedSceneObjectSchema);
 
 const outputCameraSchema = z.strictObject({
   position: vector3Schema,
@@ -356,7 +376,10 @@ export function createSceneObject(
     visible: true,
     exportable: true,
     ...(input.kind === 'mannequin'
-      ? { mannequinPose: createMannequinPose('default') }
+      ? {
+          mannequinPose: createMannequinPose('default'),
+          mannequinBodyType: 'standard',
+        }
       : {}),
   });
 }

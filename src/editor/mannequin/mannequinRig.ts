@@ -1,4 +1,8 @@
 import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from 'three';
+import {
+  MANNEQUIN_BODY_PROPORTIONS,
+  type MannequinBodyTypeId,
+} from './mannequinBodyType';
 
 export interface MannequinVector3 {
   x: number;
@@ -1045,7 +1049,9 @@ export interface MannequinPoseBounds {
 
 export function computeMannequinPoseBounds(
   pose: MannequinPose,
+  bodyType: MannequinBodyTypeId = 'standard',
 ): MannequinPoseBounds {
+  const body = MANNEQUIN_BODY_PROPORTIONS[bodyType];
   const min = new Vector3(Infinity, Infinity, Infinity);
   const max = new Vector3(-Infinity, -Infinity, -Infinity);
   const include = (point: Vector3, radius = 0) => {
@@ -1086,24 +1092,27 @@ export function computeMannequinPoseBounds(
       quaternion,
     );
 
-  includeBox(new Vector3(0, PELVIS_ORIGIN.y, 0), new Vector3(0.15, 0.1, 0.096));
+  includeBox(
+    new Vector3(0, PELVIS_ORIGIN.y, 0),
+    new Vector3(0.15 * body.pelvis.x, 0.1, 0.096 * body.pelvis.z),
+  );
 
   const torsoQuaternion = quaternionFromDegrees(pose.torsoRotationDeg);
   includeChildBox(
-    new Vector3(0, 0.265, -0.0145),
-    new Vector3(0.19, 0.235, 0.1555),
+    new Vector3(0, 0.265, -0.0145 * body.torso.z),
+    new Vector3(0.19 * body.torso.x, 0.235, 0.1555 * body.torso.z),
     PELVIS_ORIGIN,
     torsoQuaternion,
   );
   includeChildBox(
-    new Vector3(0, 0.36, -0.16),
-    new Vector3(0.015, 0.045, 0.008),
+    new Vector3(0, 0.36, -0.16 * body.torso.z),
+    new Vector3(0.015 * body.torso.x, 0.045, 0.008 * body.torso.z),
     PELVIS_ORIGIN,
     torsoQuaternion,
   );
   includeChildBox(
-    new Vector3(0, 0.34, 0.134),
-    new Vector3(0.013, 0.029, 0.007),
+    new Vector3(0, 0.34, 0.134 * body.torso.z),
+    new Vector3(0.013 * body.torso.x, 0.029, 0.007 * body.torso.z),
     PELVIS_ORIGIN,
     torsoQuaternion,
   );
@@ -1118,13 +1127,13 @@ export function computeMannequinPoseBounds(
     .multiply(quaternionFromDegrees({ x: 0, y: pose.headRotationDeg.y, z: 0 }));
   includeChildBox(
     new Vector3(0, -0.1025, 0),
-    new Vector3(0.057, 0.0675, 0.053),
+    new Vector3(0.057 * body.neck.x, 0.0675, 0.053 * body.neck.z),
     headOrigin,
     headQuaternion,
   );
   includeChildBox(
-    new Vector3(0, 0, 0.008),
-    new Vector3(0.119, 0.13, 0.11),
+    new Vector3(0, 0, 0.008 * body.head.z),
+    new Vector3(0.119 * body.head.x, 0.13, 0.11 * body.head.z),
     headOrigin,
     headQuaternion,
   );
@@ -1145,7 +1154,11 @@ export function computeMannequinPoseBounds(
           DOWN.clone().applyQuaternion(arm.shoulderQuaternion),
           MANNEQUIN_ARM_LENGTHS.upperArm / 2,
         ),
-      new Vector3(0.061, MANNEQUIN_ARM_LENGTHS.upperArm / 2, 0.061),
+      new Vector3(
+        0.061 * body.upperArm.x,
+        MANNEQUIN_ARM_LENGTHS.upperArm / 2,
+        0.061 * body.upperArm.z,
+      ),
       arm.shoulderQuaternion,
     );
     include(arm.elbow, 0.048);
@@ -1156,18 +1169,22 @@ export function computeMannequinPoseBounds(
           DOWN.clone().applyQuaternion(arm.elbowQuaternion),
           MANNEQUIN_ARM_LENGTHS.forearm / 2,
         ),
-      new Vector3(0.058, MANNEQUIN_ARM_LENGTHS.forearm / 2, 0.058),
+      new Vector3(
+        0.058 * body.forearm.x,
+        MANNEQUIN_ARM_LENGTHS.forearm / 2,
+        0.058 * body.forearm.z,
+      ),
       arm.elbowQuaternion,
     );
     includeChildBox(
       new Vector3(0, -0.065, 0),
-      new Vector3(0.046, 0.08, 0.029),
+      new Vector3(0.046 * body.hand.x, 0.08, 0.029 * body.hand.z),
       arm.wrist,
       arm.wristQuaternion,
     );
     includeChildBox(
       new Vector3(side === 'left' ? 0.027 : -0.027, -0.05, -0.003),
-      new Vector3(0.009, 0.021, 0.009),
+      new Vector3(0.009 * body.thumb.x, 0.021, 0.009 * body.thumb.z),
       arm.wrist,
       arm.wristQuaternion
         .clone()
@@ -1184,7 +1201,7 @@ export function computeMannequinPoseBounds(
       hip
         .clone()
         .addScaledVector(DOWN.clone().applyQuaternion(hipQuaternion), 0.185),
-      new Vector3(0.078, 0.185, 0.072),
+      new Vector3(0.078 * body.thigh.x, 0.185, 0.072 * body.thigh.z),
       hipQuaternion,
     );
     include(knee, 0.048);
@@ -1192,12 +1209,16 @@ export function computeMannequinPoseBounds(
       knee
         .clone()
         .addScaledVector(DOWN.clone().applyQuaternion(kneeQuaternion), 0.185),
-      new Vector3(0.064, 0.185, 0.061),
+      new Vector3(0.064 * body.shin.x, 0.185, 0.061 * body.shin.z),
       kneeQuaternion,
     );
     includeChildBox(
-      new Vector3(0, -0.05, -0.085),
-      new Vector3(0.08, 0.07, 0.15),
+      new Vector3(0, -0.05, -0.085 * body.foot.z),
+      new Vector3(
+        0.08 * body.foot.x,
+        0.07,
+        0.15 * body.foot.z + (bodyType === 'standard' ? 0 : 1e-6),
+      ),
       ankle,
       footQuaternion,
     );

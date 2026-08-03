@@ -53,6 +53,30 @@ describe('sceneObjectModel', () => {
     expect(getSceneObjectBounds(mannequin).max.y).toBeCloseTo(1.7);
   });
 
+  it('체형별 절차형 실루엣을 frame/selection bounds에 반영한다', () => {
+    const standard = createSceneObject('standard-mannequin-bounds', {
+      kind: 'mannequin',
+    });
+    const athletic = createSceneObject('athletic-mannequin-bounds', {
+      kind: 'mannequin',
+    });
+    const heavy = createSceneObject('heavy-mannequin-bounds', {
+      kind: 'mannequin',
+    });
+    athletic.mannequinBodyType = 'athletic';
+    heavy.mannequinBodyType = 'heavy';
+
+    const standardBounds = getSceneObjectBounds(standard);
+    const athleticBounds = getSceneObjectBounds(athletic);
+    const heavyBounds = getSceneObjectBounds(heavy);
+
+    expect(athleticBounds.size.x).toBeGreaterThan(standardBounds.size.x + 0.01);
+    expect(heavyBounds.size.x).toBeGreaterThan(standardBounds.size.x + 0.01);
+    expect(heavyBounds.size.z).toBeGreaterThan(athleticBounds.size.z + 0.03);
+    expect(athleticBounds.size.y).toBeCloseTo(standardBounds.size.y, 10);
+    expect(heavyBounds.size.y).toBeCloseTo(standardBounds.size.y, 10);
+  });
+
   it('마네킹 pose의 비대칭 local envelope를 root transform한 world bounds로 사용한다', () => {
     const mannequin = createSceneObject('posed-mannequin-bounds', {
       kind: 'mannequin',

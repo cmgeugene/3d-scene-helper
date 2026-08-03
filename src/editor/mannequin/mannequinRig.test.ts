@@ -11,6 +11,10 @@ import {
 import { mannequinPoseSchema } from '../persistence/sceneSchema';
 import { createStudioMannequinGeometries } from './mannequinAppearance';
 import {
+  MANNEQUIN_BODY_TYPE_IDS,
+  type MannequinBodyTypeId,
+} from './mannequinBodyType';
+import {
   MANNEQUIN_ARM_ANCHORS,
   MANNEQUIN_ARM_LENGTHS,
   MANNEQUIN_FORWARD_AXIS,
@@ -39,8 +43,9 @@ function vectorDistance(
 function renderedShinAndFootBounds(
   pose: ReturnType<typeof createMannequinPose>,
   side: 'left' | 'right',
+  bodyType: MannequinBodyTypeId = 'standard',
 ) {
-  const geometries = createStudioMannequinGeometries();
+  const geometries = createStudioMannequinGeometries(bodyType);
   const pelvis = new Group();
   pelvis.position.y = 0.06;
   const hip = new Group();
@@ -72,6 +77,30 @@ function renderedShinAndFootBounds(
   ankle.add(new Mesh(geometries.foot));
   hip.add(knee);
   pelvis.add(hip);
+  pelvis.updateWorldMatrix(true, true);
+  const bounds = new Box3().setFromObject(pelvis);
+  for (const geometry of Object.values(geometries)) geometry.dispose();
+  return bounds;
+}
+
+function renderedTorsoBounds(
+  pose: ReturnType<typeof createMannequinPose>,
+  bodyType: MannequinBodyTypeId,
+) {
+  const geometries = createStudioMannequinGeometries(bodyType);
+  const pelvis = new Group();
+  pelvis.position.y = 0.06;
+  const torsoPivot = new Group();
+  torsoPivot.rotation.set(
+    MathUtils.degToRad(pose.torsoRotationDeg.x),
+    MathUtils.degToRad(pose.torsoRotationDeg.y),
+    MathUtils.degToRad(pose.torsoRotationDeg.z),
+    'XYZ',
+  );
+  const torso = new Mesh(geometries.torso);
+  torso.position.y = 0.28;
+  torsoPivot.add(torso);
+  pelvis.add(torsoPivot);
   pelvis.updateWorldMatrix(true, true);
   const bounds = new Box3().setFromObject(pelvis);
   for (const geometry of Object.values(geometries)) geometry.dispose();
@@ -948,6 +977,47 @@ describe('direct elbow and knee targets', () => {
 });
 
 describe('posed mannequin bounds', () => {
+  it.each(
+    MANNEQUIN_BODY_TYPE_IDS.flatMap((bodyType) => [
+      { bodyType, torsoRotationDeg: { x: 0, y: 0, z: 0 } },
+      { bodyType, torsoRotationDeg: { x: 20, y: 35, z: -10 } },
+    ]),
+  )(
+    'contains the rendered $bodyType torso at $torsoRotationDeg',
+    ({ bodyType, torsoRotationDeg }) => {
+      const pose = createMannequinPose('default');
+      pose.torsoRotationDeg = torsoRotationDeg;
+      pose.arms.left.shoulderRotationDeg.z = 0;
+      pose.arms.right.shoulderRotationDeg.z = 0;
+      const rendered = renderedTorsoBounds(pose, bodyType);
+      const computed = computeMannequinPoseBounds(pose, bodyType);
+
+      expect(computed.min.x).toBeLessThanOrEqual(rendered.min.x);
+      expect(computed.min.y).toBeLessThanOrEqual(rendered.min.y);
+      expect(computed.min.z).toBeLessThanOrEqual(rendered.min.z);
+      expect(computed.max.x).toBeGreaterThanOrEqual(rendered.max.x);
+      expect(computed.max.y).toBeGreaterThanOrEqual(rendered.max.y);
+      expect(computed.max.z).toBeGreaterThanOrEqual(rendered.max.z);
+    },
+  );
+
+  it.each(MANNEQUIN_BODY_TYPE_IDS)(
+    'contains the rendered %s foot envelope after a 180° ankle yaw',
+    (bodyType) => {
+      const pose = createMannequinPose('default');
+      pose.legs.left.ankleRotationDeg.y = 180;
+      const rendered = renderedShinAndFootBounds(pose, 'left', bodyType);
+      const computed = computeMannequinPoseBounds(pose, bodyType);
+
+      expect(computed.min.x).toBeLessThanOrEqual(rendered.min.x);
+      expect(computed.min.y).toBeLessThanOrEqual(rendered.min.y);
+      expect(computed.min.z).toBeLessThanOrEqual(rendered.min.z);
+      expect(computed.max.x).toBeGreaterThanOrEqual(rendered.max.x);
+      expect(computed.max.y).toBeGreaterThanOrEqual(rendered.max.y);
+      expect(computed.max.z).toBeGreaterThanOrEqual(rendered.max.z);
+    },
+  );
+
   it.each([
     { side: 'right' as const, deviationDeg: 5, hipZDeg: -24, bendDeg: 68 },
     { side: 'left' as const, deviationDeg: -5, hipZDeg: 24, bendDeg: 112 },

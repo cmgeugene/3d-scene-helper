@@ -14,6 +14,10 @@ import {
   type StudioMannequinGeometries,
 } from '../mannequin/mannequinAppearance';
 import {
+  MANNEQUIN_BODY_PROPORTIONS,
+  type MannequinBodyTypeId,
+} from '../mannequin/mannequinBodyType';
+import {
   MANNEQUIN_ARM_ANCHORS,
   MANNEQUIN_ARM_LENGTHS,
   MANNEQUIN_LEG_ANCHORS,
@@ -26,6 +30,7 @@ import {
 interface ArticulatedMannequinProps {
   color: string;
   dimensions: { x: number; y: number; z: number };
+  bodyType: MannequinBodyTypeId;
   pose: MannequinPose;
   selected: boolean;
   castShadow: boolean;
@@ -289,12 +294,14 @@ function Leg({
 function publishMannequinDiagnostics(
   canvas: HTMLCanvasElement,
   poseId: MannequinPose['id'],
+  bodyType: MannequinBodyTypeId,
   bounds: Box3,
   size: Vector3,
   center: Vector3,
 ) {
   canvas.dataset.mannequinRig = 'articulated';
   canvas.dataset.mannequinPose = poseId;
+  canvas.dataset.mannequinBodyType = bodyType;
   canvas.dataset.mannequinPivots = [
     'left-shoulder',
     'left-elbow',
@@ -316,6 +323,7 @@ function publishMannequinDiagnostics(
 function clearMannequinDiagnostics(canvas: HTMLCanvasElement) {
   delete canvas.dataset.mannequinRig;
   delete canvas.dataset.mannequinPose;
+  delete canvas.dataset.mannequinBodyType;
   delete canvas.dataset.mannequinPivots;
   delete canvas.dataset.mannequinBounds;
 }
@@ -323,6 +331,7 @@ function clearMannequinDiagnostics(canvas: HTMLCanvasElement) {
 export function ArticulatedMannequin({
   color,
   dimensions,
+  bodyType,
   pose,
   selected,
   castShadow,
@@ -330,7 +339,8 @@ export function ArticulatedMannequin({
 }: ArticulatedMannequinProps) {
   const contentRef = useRef<Group>(null);
   const canvas = useThree((state) => state.gl.domElement);
-  const geometries = getSharedStudioMannequinGeometries();
+  const geometries = getSharedStudioMannequinGeometries(bodyType);
+  const body = MANNEQUIN_BODY_PROPORTIONS[bodyType];
   const jointColor = useMemo(
     () => `#${new Color(color).multiplyScalar(0.9).getHexString()}`,
     [color],
@@ -350,11 +360,18 @@ export function ArticulatedMannequin({
     const bounds = new Box3().setFromObject(contentRef.current);
     const size = bounds.getSize(new Vector3());
     const center = bounds.getCenter(new Vector3());
-    publishMannequinDiagnostics(canvas, pose.id, bounds, size, center);
+    publishMannequinDiagnostics(
+      canvas,
+      pose.id,
+      bodyType,
+      bounds,
+      size,
+      center,
+    );
     return () => {
       clearMannequinDiagnostics(canvas);
     };
-  }, [canvas, dimensions, pose, selected]);
+  }, [bodyType, canvas, dimensions, pose, selected]);
 
   return (
     <group
@@ -383,8 +400,8 @@ export function ArticulatedMannequin({
             name="Mannequin.upper-chest-plane"
             geometry="sphere"
             args={[0.075, 24]}
-            position={[0, 0.4, -0.144]}
-            scale={[2.05, 0.4, 0.22]}
+            position={[0, 0.4, -0.144 * body.torso.z]}
+            scale={[2.05 * body.torso.x, 0.4, 0.22 * body.torso.z]}
           />
           <MeshPart
             {...common}
@@ -393,8 +410,8 @@ export function ArticulatedMannequin({
             unlit
             geometry="sphere"
             args={[0.03, 18]}
-            position={[0, 0.36, -0.16]}
-            scale={[0.46, 1.5, 0.24]}
+            position={[0, 0.36, -0.16 * body.torso.z]}
+            scale={[0.46 * body.torso.x, 1.5, 0.24 * body.torso.z]}
           />
           <MeshPart
             {...common}
@@ -403,8 +420,8 @@ export function ArticulatedMannequin({
             unlit
             geometry="sphere"
             args={[0.025, 18]}
-            position={[0, 0.34, 0.134]}
-            scale={[0.48, 1.12, 0.25]}
+            position={[0, 0.34, 0.134 * body.torso.z]}
+            scale={[0.48 * body.torso.x, 1.12, 0.25 * body.torso.z]}
           />
           <group
             name="Mannequin.neck-head-pivot"
@@ -426,16 +443,16 @@ export function ArticulatedMannequin({
               name="Mannequin.face-plane"
               geometry="sphere"
               args={[0.052, 22]}
-              position={[0, -0.02, -0.084]}
-              scale={[1.42, 1.28, 0.22]}
+              position={[0, -0.02, -0.084 * body.head.z]}
+              scale={[1.42 * body.head.x, 1.28, 0.22 * body.head.z]}
             />
             <MeshPart
               {...common}
               name="Mannequin.brow-ridge"
               geometry="sphere"
               args={[0.032, 20]}
-              position={[0, 0.035, -0.094]}
-              scale={[2.15, 0.34, 0.28]}
+              position={[0, 0.035, -0.094 * body.head.z]}
+              scale={[2.15 * body.head.x, 0.34, 0.28 * body.head.z]}
             />
             <MeshPart
               {...common}

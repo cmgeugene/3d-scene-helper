@@ -72,7 +72,10 @@ export function getSceneObjectModel(object: SceneObject): SceneObjectModel {
 export function getSceneObjectBounds(object: SceneObject): SceneObjectBounds {
   const localBounds =
     object.kind === 'mannequin' && object.mannequinPose !== undefined
-      ? computeMannequinPoseBounds(object.mannequinPose)
+      ? computeMannequinPoseBounds(
+          object.mannequinPose,
+          object.mannequinBodyType ?? 'standard',
+        )
       : {
           min: {
             x: -object.dimensions.x / 2,

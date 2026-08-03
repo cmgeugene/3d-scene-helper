@@ -7,6 +7,22 @@ import {
   SphereGeometry,
   Vector2,
 } from 'three';
+import {
+  MANNEQUIN_BODY_PROPORTIONS,
+  type MannequinBodyRadialScale,
+  type MannequinBodyTypeId,
+} from './mannequinBodyType';
+
+function applyRadialScale<T extends BufferGeometry>(
+  geometry: T,
+  { x, z }: MannequinBodyRadialScale,
+) {
+  geometry.scale(x, 1, z);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
 
 const createProfileGeometry = (
   profile: ReadonlyArray<readonly [radius: number, y: number]>,
@@ -60,7 +76,7 @@ function createHeadGeometry() {
   return geometry;
 }
 
-function createTorsoGeometry() {
+function createTorsoGeometry(bodyType: MannequinBodyTypeId) {
   const geometry = createProfileGeometry(
     [
       [0.122, -0.25],
@@ -85,7 +101,25 @@ function createTorsoGeometry() {
     } else {
       z *= 1 - upperChest * 0.035;
     }
-    position.setZ(index, z);
+    const belly = Math.max(0, 1 - Math.abs(y + 0.04) / 0.2);
+    const widthScale =
+      bodyType === 'athletic'
+        ? 1.16 + upperChest * 0.12
+        : bodyType === 'heavy'
+          ? 1.25 + belly
+          : 1;
+    const depthScale =
+      bodyType === 'athletic'
+        ? 1.14
+        : bodyType === 'heavy'
+          ? 1.3 + belly * 1.2
+          : 1;
+    position.setXYZ(
+      index,
+      position.getX(index) * widthScale,
+      y,
+      z * depthScale,
+    );
   }
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
@@ -156,82 +190,109 @@ function createFootGeometry() {
   return geometry;
 }
 
-export function createStudioMannequinGeometries() {
+export function createStudioMannequinGeometries(
+  bodyType: MannequinBodyTypeId = 'standard',
+) {
+  const scales = MANNEQUIN_BODY_PROPORTIONS[bodyType];
   return {
-    torso: createTorsoGeometry(),
-    pelvis: createProfileGeometry(
-      [
-        [0.1, -0.1],
-        [0.132, -0.065],
-        [0.15, 0.005],
-        [0.142, 0.06],
-        [0.112, 0.1],
-      ],
-      28,
-      0.64,
+    torso: createTorsoGeometry(bodyType),
+    pelvis: applyRadialScale(
+      createProfileGeometry(
+        [
+          [0.1, -0.1],
+          [0.132, -0.065],
+          [0.15, 0.005],
+          [0.142, 0.06],
+          [0.112, 0.1],
+        ],
+        28,
+        0.64,
+      ),
+      scales.pelvis,
     ),
-    neck: createProfileGeometry(
-      [
-        [0.046, -0.17],
-        [0.05, -0.145],
-        [0.057, -0.125],
-        [0.055, -0.055],
-        [0.046, -0.035],
-      ],
-      20,
-      0.92,
+    neck: applyRadialScale(
+      createProfileGeometry(
+        [
+          [0.046, -0.17],
+          [0.05, -0.145],
+          [0.057, -0.125],
+          [0.055, -0.055],
+          [0.046, -0.035],
+        ],
+        20,
+        0.92,
+      ),
+      scales.neck,
     ),
-    head: createHeadGeometry(),
-    upperArm: createProfileGeometry([
-      [0.048, 0],
-      [0.061, -0.055],
-      [0.059, -0.13],
-      [0.052, -0.22],
-      [0.042, -0.31],
-    ]),
-    forearm: createProfileGeometry([
-      [0.05, 0],
-      [0.057, -0.055],
-      [0.058, -0.12],
-      [0.052, -0.205],
-      [0.034, -0.29],
-    ]),
-    thigh: createProfileGeometry(
-      [
-        [0.066, 0],
-        [0.078, -0.07],
-        [0.075, -0.17],
-        [0.064, -0.27],
-        [0.05, -0.37],
-      ],
-      26,
-      0.92,
+    head: applyRadialScale(createHeadGeometry(), scales.head),
+    upperArm: applyRadialScale(
+      createProfileGeometry([
+        [0.048, 0],
+        [0.061, -0.055],
+        [0.059, -0.13],
+        [0.052, -0.22],
+        [0.042, -0.31],
+      ]),
+      scales.upperArm,
     ),
-    shin: createProfileGeometry(
-      [
-        [0.052, 0],
-        [0.058, -0.055],
-        [0.064, -0.14],
-        [0.053, -0.235],
-        [0.035, -0.37],
-      ],
-      26,
-      0.94,
+    forearm: applyRadialScale(
+      createProfileGeometry([
+        [0.05, 0],
+        [0.057, -0.055],
+        [0.058, -0.12],
+        [0.052, -0.205],
+        [0.034, -0.29],
+      ]),
+      scales.forearm,
     ),
-    hand: createProfileGeometry(
-      [
-        [0.024, 0.015],
-        [0.04, -0.02],
-        [0.046, -0.075],
-        [0.035, -0.12],
-        [0.01, -0.145],
-      ],
-      20,
-      0.62,
+    thigh: applyRadialScale(
+      createProfileGeometry(
+        [
+          [0.066, 0],
+          [0.078, -0.07],
+          [0.075, -0.17],
+          [0.064, -0.27],
+          [0.05, -0.37],
+        ],
+        26,
+        0.92,
+      ),
+      scales.thigh,
     ),
-    thumb: new CapsuleGeometry(0.009, 0.024, 4, 10),
+    shin: applyRadialScale(
+      createProfileGeometry(
+        [
+          [0.052, 0],
+          [0.058, -0.055],
+          [0.064, -0.14],
+          [0.053, -0.235],
+          [0.035, -0.37],
+        ],
+        26,
+        0.94,
+      ),
+      scales.shin,
+    ),
+    hand: applyRadialScale(
+      createProfileGeometry(
+        [
+          [0.024, 0.015],
+          [0.04, -0.02],
+          [0.046, -0.075],
+          [0.035, -0.12],
+          [0.01, -0.145],
+        ],
+        20,
+        0.62,
+      ),
+      scales.hand,
+    ),
+    thumb: applyRadialScale(
+      new CapsuleGeometry(0.009, 0.024, 4, 10),
+      scales.thumb,
+    ),
     nose: new ConeGeometry(0.024, 0.068, 14).rotateX(-Math.PI / 2),
-    foot: createFootGeometry(),
+    foot: applyRadialScale(createFootGeometry(), scales.foot),
   };
 }
 
@@ -239,9 +300,17 @@ export type StudioMannequinGeometries = ReturnType<
   typeof createStudioMannequinGeometries
 >;
 
-let sharedStudioMannequinGeometries: StudioMannequinGeometries | undefined;
+const sharedStudioMannequinGeometries = new Map<
+  MannequinBodyTypeId,
+  StudioMannequinGeometries
+>();
 
-export function getSharedStudioMannequinGeometries() {
-  sharedStudioMannequinGeometries ??= createStudioMannequinGeometries();
-  return sharedStudioMannequinGeometries;
+export function getSharedStudioMannequinGeometries(
+  bodyType: MannequinBodyTypeId = 'standard',
+) {
+  const existing = sharedStudioMannequinGeometries.get(bodyType);
+  if (existing !== undefined) return existing;
+  const geometries = createStudioMannequinGeometries(bodyType);
+  sharedStudioMannequinGeometries.set(bodyType, geometries);
+  return geometries;
 }

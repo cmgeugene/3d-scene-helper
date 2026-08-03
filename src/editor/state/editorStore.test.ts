@@ -284,6 +284,53 @@ describe('editorStore', () => {
     expect(state.selectedObjectId).toBe(duplicateId);
   });
 
+  it('마네킹 체형 preset을 한 번 commit하고 undo/redo로 보존한다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+    const originalPose = structuredClone(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.mannequinPose,
+    );
+    let documentChanges = 0;
+    const unsubscribe = store.subscribe((state, previousState) => {
+      if (state.document !== previousState.document) documentChanges += 1;
+    });
+
+    store.getState().applyMannequinBodyTypePreset('athletic');
+    expect(documentChanges).toBe(1);
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId),
+    ).toMatchObject({
+      mannequinBodyType: 'athletic',
+      mannequinPose: originalPose,
+    });
+
+    documentChanges = 0;
+    store.getState().applyMannequinBodyTypePreset('athletic');
+    expect(documentChanges).toBe(0);
+    store.getState().applyMannequinBodyTypePreset('heavy');
+    expect(documentChanges).toBe(1);
+
+    store.getState().undo();
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.mannequinBodyType,
+    ).toBe('athletic');
+    store.getState().redo();
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.mannequinBodyType,
+    ).toBe('heavy');
+    unsubscribe();
+  });
+
   it('4개 mannequin pose preset을 한 번 commit하고 undo/redo로 보존한다', () => {
     store.getState().selectObject(STARTER_IDS.mannequinId);
     let documentChanges = 0;

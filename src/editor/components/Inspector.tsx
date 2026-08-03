@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { SceneObject } from '../persistence/sceneSchema';
+import { MANNEQUIN_BODY_TYPE_PRESETS } from '../mannequin/mannequinBodyType';
 import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
 import type { EditorStore } from '../state/editorStore';
@@ -600,45 +601,69 @@ export function Inspector({ store }: InspectorProps) {
               </div>
             </fieldset>
             {selectedObject?.kind === 'mannequin' ? (
-              <fieldset className="object-controls">
-                <legend>마네킹 포즈</legend>
-                <div className="shot-grid">
-                  {MANNEQUIN_POSE_OPTIONS.map((preset) => (
+              <>
+                <fieldset className="object-controls">
+                  <legend>마네킹 체형</legend>
+                  <div className="shot-grid">
+                    {MANNEQUIN_BODY_TYPE_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        aria-pressed={
+                          (selectedObject.mannequinBodyType ?? 'standard') ===
+                          preset.id
+                        }
+                        onClick={() => {
+                          store
+                            .getState()
+                            .applyMannequinBodyTypePreset(preset.id);
+                        }}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                <fieldset className="object-controls">
+                  <legend>마네킹 포즈</legend>
+                  <div className="shot-grid">
+                    {MANNEQUIN_POSE_OPTIONS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        aria-pressed={
+                          selectedObject.mannequinPose?.id === preset.id
+                        }
+                        onClick={() => {
+                          store.getState().applyMannequinPosePreset(preset.id);
+                        }}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="object-actions">
                     <button
-                      key={preset.id}
                       type="button"
-                      aria-pressed={
-                        selectedObject.mannequinPose?.id === preset.id
-                      }
+                      aria-pressed={mannequinTool === 'object'}
                       onClick={() => {
-                        store.getState().applyMannequinPosePreset(preset.id);
+                        store.getState().setMannequinTool('object');
                       }}
                     >
-                      {preset.label}
+                      오브젝트 변형
                     </button>
-                  ))}
-                </div>
-                <div className="object-actions">
-                  <button
-                    type="button"
-                    aria-pressed={mannequinTool === 'object'}
-                    onClick={() => {
-                      store.getState().setMannequinTool('object');
-                    }}
-                  >
-                    오브젝트 변형
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={mannequinTool === 'ik'}
-                    onClick={() => {
-                      store.getState().setMannequinTool('ik');
-                    }}
-                  >
-                    손 IK · 발/팔꿈치/무릎
-                  </button>
-                </div>
-              </fieldset>
+                    <button
+                      type="button"
+                      aria-pressed={mannequinTool === 'ik'}
+                      onClick={() => {
+                        store.getState().setMannequinTool('ik');
+                      }}
+                    >
+                      손 IK · 발/팔꿈치/무릎
+                    </button>
+                  </div>
+                </fieldset>
+              </>
             ) : null}
             <SubjectMotionControls
               store={store}

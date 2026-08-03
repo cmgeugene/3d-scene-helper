@@ -118,6 +118,44 @@ describe('studio mannequin appearance geometry', () => {
     for (const part of Object.values(geometry)) part.dispose();
   });
 
+  it('건장한 체형과 뚱뚱한 체형이 관절 길이는 유지하면서 서로 다른 실루엣을 만든다', () => {
+    const standard = createStudioMannequinGeometries('standard');
+    const athletic = createStudioMannequinGeometries('athletic');
+    const heavy = createStudioMannequinGeometries('heavy');
+    const size = (geometry: BufferGeometry) => {
+      geometry.computeBoundingBox();
+      const bounds = geometry.boundingBox;
+      if (bounds === null) throw new Error('geometry bounds가 없습니다.');
+      return {
+        x: bounds.max.x - bounds.min.x,
+        y: bounds.max.y - bounds.min.y,
+        z: bounds.max.z - bounds.min.z,
+      };
+    };
+
+    expect(size(athletic.torso).x).toBeGreaterThan(
+      size(standard.torso).x * 1.15,
+    );
+    expect(size(athletic.upperArm).x).toBeGreaterThan(
+      size(standard.upperArm).x * 1.15,
+    );
+    expect(size(heavy.torso).x).toBeGreaterThan(size(standard.torso).x * 1.25);
+    expect(size(heavy.torso).z).toBeGreaterThan(size(athletic.torso).z * 1.15);
+    expect(size(heavy.thigh).x).toBeGreaterThan(size(standard.thigh).x * 1.15);
+    expect(radialExtentAtY(athletic.torso, 0.12)).toBeGreaterThan(
+      radialExtentAtY(athletic.torso, -0.08) * 1.25,
+    );
+    expect(radialExtentAtY(heavy.torso, -0.08)).toBeGreaterThan(
+      radialExtentAtY(heavy.torso, 0.12) * 1.03,
+    );
+    expect(size(athletic.upperArm).y).toBeCloseTo(size(standard.upperArm).y, 8);
+    expect(size(heavy.thigh).y).toBeCloseTo(size(standard.thigh).y, 8);
+
+    for (const geometries of [standard, athletic, heavy]) {
+      for (const part of Object.values(geometries)) part.dispose();
+    }
+  });
+
   it('models a projected chest and lower face so front and back read differently', () => {
     const geometry = createStudioMannequinGeometries();
     const upperChest = depthExtentsAtY(geometry.torso, 0.12);

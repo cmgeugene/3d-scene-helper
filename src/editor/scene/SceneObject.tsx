@@ -119,6 +119,7 @@ function Primitive({
         <ArticulatedMannequin
           color={object.color}
           dimensions={dimensions}
+          bodyType={object.mannequinBodyType ?? 'standard'}
           pose={
             runtimeMannequinPose ??
             object.mannequinPose ??
@@ -151,7 +152,10 @@ function SelectionHelper({ object }: { object: SceneObjectData }) {
         size: object.dimensions,
       };
     }
-    const bounds = computeMannequinPoseBounds(object.mannequinPose);
+    const bounds = computeMannequinPoseBounds(
+      object.mannequinPose,
+      object.mannequinBodyType ?? 'standard',
+    );
     return {
       center: {
         x: bounds.center.x * (object.dimensions.x / 0.5),

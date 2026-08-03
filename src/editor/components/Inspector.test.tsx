@@ -160,6 +160,24 @@ describe('Inspector', () => {
     expect(store.getState().document.objects).toHaveLength(2);
   });
 
+  it('selected mannequin에 3개 체형 preset을 제공하고 선택 체형을 저장한다', async () => {
+    const user = userEvent.setup();
+    render(<Inspector store={store} />);
+
+    const bodyTypeGroup = screen.getByRole('group', { name: '마네킹 체형' });
+    for (const label of ['일반 체형', '건장한 체형', '뚱뚱한 체형']) {
+      expect(
+        within(bodyTypeGroup).getByRole('button', { name: label }),
+      ).toBeVisible();
+    }
+    await user.click(
+      within(bodyTypeGroup).getByRole('button', { name: '건장한 체형' }),
+    );
+    expect(
+      store.getState().document.objects.find(({ id }) => id === MANNEQUIN_ID),
+    ).toMatchObject({ mannequinBodyType: 'athletic' });
+  });
+
   it('selected mannequin에 4개 pose preset과 object/hand IK tool을 제공한다', async () => {
     const user = userEvent.setup();
     render(<Inspector store={store} />);

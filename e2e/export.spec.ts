@@ -102,6 +102,29 @@ function frontCuePixelCount(image: PNG) {
   return count;
 }
 
+test('body type presets remain visibly distinct in clean PNG exports', async ({
+  page,
+}) => {
+  await openExportEditor(page);
+  await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
+  const bodyTypeGroup = page.getByRole('group', { name: '마네킹 체형' });
+
+  const standard = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+  await bodyTypeGroup.getByRole('button', { name: '건장한 체형' }).click();
+  const athletic = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+  await bodyTypeGroup.getByRole('button', { name: '뚱뚱한 체형' }).click();
+  const heavy = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+
+  expect(changedPixelRatio(standard, athletic)).toBeGreaterThan(0.0005);
+  expect(changedPixelRatio(athletic, heavy)).toBeGreaterThan(0.0005);
+});
+
 test('export presets produce sanitized, exact-resolution PNG downloads', async ({
   page,
 }) => {

@@ -42,6 +42,7 @@ describe('sceneDocumentSchema', () => {
     ).toMatchObject({
       id: 'object-mannequin',
       dimensions: { x: 0.5, y: 1.7, z: 0.3 },
+      mannequinBodyType: 'standard',
       mannequinPose: {
         id: 'default',
         arms: {
@@ -59,6 +60,25 @@ describe('sceneDocumentSchema', () => {
       focalLengthMm: 50,
       rollDeg: 0,
     });
+  });
+
+  it('기존 마네킹 JSON에 체형이 없으면 일반 체형으로 복원한다', () => {
+    const legacyDocument = createStarterSceneDocument(STARTER_IDS);
+    const legacyMannequin = legacyDocument.objects.find(
+      ({ kind }) => kind === 'mannequin',
+    );
+    if (legacyMannequin === undefined)
+      throw new Error('starter mannequin 누락');
+    delete legacyMannequin.mannequinBodyType;
+
+    const parsed = sceneDocumentSchema.parse(
+      JSON.parse(JSON.stringify(legacyDocument)),
+    );
+
+    expect(
+      parsed.objects.find(({ kind }) => kind === 'mannequin')
+        ?.mannequinBodyType,
+    ).toBe('standard');
   });
 
   it('중복 object ID를 거부한다', () => {

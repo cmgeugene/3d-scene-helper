@@ -14,6 +14,10 @@ import {
   type MannequinPosePresetId,
 } from '../mannequin/mannequinRig';
 import {
+  MANNEQUIN_BODY_TYPE_PRESETS,
+  type MannequinBodyTypeId,
+} from '../mannequin/mannequinBodyType';
+import {
   CAMERA_SHOT_PRESETS,
   LENS_PRESETS,
   type CameraShotPreset,
@@ -95,6 +99,7 @@ export interface EditorStore {
   renameObject: (id: string, name: string) => void;
   setObjectColor: (id: string, color: string) => void;
   setObjectVisibility: (id: string, visible: boolean) => void;
+  applyMannequinBodyTypePreset: (bodyType: MannequinBodyTypeId) => void;
   applyMannequinPosePreset: (presetId: MannequinPosePresetId) => void;
   beginMannequinPose: () => void;
   cancelMannequinPose: () => void;
@@ -293,6 +298,32 @@ export function createEditorStore(options: EditorStoreOptions) {
     },
     setObjectVisibility: (id, visible) => {
       updateObject(set, id, { visible });
+    },
+    applyMannequinBodyTypePreset: (bodyType) => {
+      set((state) => {
+        const selected = state.document.objects.find(
+          ({ id }) => id === state.selectedObjectId,
+        );
+        if (selected?.kind !== 'mannequin') return state;
+        const preset = MANNEQUIN_BODY_TYPE_PRESETS.find(
+          ({ id }) => id === bodyType,
+        );
+        if (preset === undefined || selected.mannequinBodyType === bodyType) {
+          return state;
+        }
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          objects: state.document.objects.map((object) =>
+            object.id === selected.id
+              ? { ...object, mannequinBodyType: bodyType }
+              : object,
+          ),
+        });
+        return {
+          ...recordMutation(state, nextDocument, 'update-object-property'),
+          statusMessage: `${selected.name}에 ${preset.label}을 적용했습니다.`,
+        };
+      });
     },
     applyMannequinPosePreset: (presetId) => {
       set((state) => {

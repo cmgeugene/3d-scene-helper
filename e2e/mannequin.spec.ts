@@ -30,6 +30,93 @@ function changedPixelCount(before: Buffer, after: Buffer) {
   return changed;
 }
 
+test('체형 preset이 포즈와 관절 길이를 유지하며 실제 WebGL 실루엣을 바꾼다', async ({
+  page,
+}) => {
+  const { canvas, runtimeCanvas } = await openMannequin(page);
+  const bodyTypeGroup = page.getByRole('group', { name: '마네킹 체형' });
+  const readBounds = async () => {
+    const value = await runtimeCanvas.getAttribute('data-mannequin-bounds');
+    if (value === null) throw new Error('마네킹 runtime bounds가 없습니다.');
+    return JSON.parse(value) as {
+      size: { x: number; y: number; z: number };
+    };
+  };
+
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-mannequin-body-type',
+    'standard',
+  );
+  const standardBounds = await readBounds();
+  const standardFrame = await canvas.screenshot();
+
+  await bodyTypeGroup.getByRole('button', { name: '건장한 체형' }).click();
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-mannequin-body-type',
+    'athletic',
+  );
+  const athleticBounds = await readBounds();
+  const athleticFrame = await canvas.screenshot();
+
+  await bodyTypeGroup.getByRole('button', { name: '뚱뚱한 체형' }).click();
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-mannequin-body-type',
+    'heavy',
+  );
+  const heavyBounds = await readBounds();
+  const heavyFrame = await canvas.screenshot();
+
+  expect(athleticBounds.size.x).toBeGreaterThan(standardBounds.size.x + 0.01);
+  expect(heavyBounds.size.x).toBeGreaterThan(standardBounds.size.x + 0.01);
+  expect(heavyBounds.size.z).toBeGreaterThan(athleticBounds.size.z + 0.03);
+  expect(athleticBounds.size.y).toBeCloseTo(standardBounds.size.y, 3);
+  expect(heavyBounds.size.y).toBeCloseTo(standardBounds.size.y, 3);
+  expect(changedPixelCount(standardFrame, athleticFrame)).toBeGreaterThan(500);
+  expect(changedPixelCount(athleticFrame, heavyFrame)).toBeGreaterThan(500);
+  expect(
+    await page.evaluate(() => {
+      const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+        document: {
+          objects: Array<{
+            kind: string;
+            mannequinBodyType?: string;
+            mannequinPose?: { id: string };
+          }>;
+        };
+      };
+      const mannequin = state.document.objects.find(
+        ({ kind }) => kind === 'mannequin',
+      );
+      return {
+        bodyType: mannequin?.mannequinBodyType,
+        poseId: mannequin?.mannequinPose?.id,
+      };
+    }),
+  ).toEqual({ bodyType: 'heavy', poseId: 'default' });
+
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Object.values(localStorage).some(
+          (value) =>
+            value.includes('mannequinBodyType') && value.includes('heavy'),
+        ),
+      ),
+    )
+    .toBe(true);
+  await page.reload();
+  await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-mannequin-body-type',
+    'heavy',
+  );
+  await expect(
+    page
+      .getByRole('group', { name: '마네킹 체형' })
+      .getByRole('button', { name: '뚱뚱한 체형' }),
+  ).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('articulated mannequin hierarchy applies pose controls to actual WebGL pixels', async ({
   page,
 }) => {
