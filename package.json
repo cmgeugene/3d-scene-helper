@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:all": "node scripts/dev-all.mjs",
     "dev:companion": "tsx companion/index.ts",
     "companion:smoke": "tsx companion/smoke.ts",
     "smoke:browser-distribution": "node scripts/smoke-browser-distribution.mjs",

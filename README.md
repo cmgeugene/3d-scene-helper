@@ -21,6 +21,23 @@ npm install
 npm run dev
 ```
 
+개발 편집기와 AI Scene Assistant용 Local Companion을 한 번에 시작하려면 다음을 사용합니다.
+
+```bash
+npm run dev:all
+```
+
+기본 프로젝트 루트는 명령을 실행한 현재 디렉터리이며, Vite가 준비된 뒤 Companion이 기본
+브라우저를 엽니다. 다른 프로젝트를 사용하거나 브라우저 자동 실행을 끄려면 Companion 옵션을
+그대로 전달합니다.
+
+```bash
+npm run dev:all -- --project-root /absolute/path/to/project --no-open
+```
+
+5173 포트를 다른 개발 서버가 사용 중이면 `--editor-port <port>`로 `dev:all`의 Vite 포트를
+바꿀 수 있습니다.
+
 잠금 파일 그대로 다시 설치하려면 다음을 사용합니다.
 
 ```bash
