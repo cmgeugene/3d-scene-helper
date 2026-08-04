@@ -176,6 +176,171 @@ describe('editorStore', () => {
     expect(store.getState().isDirty).toBe(true);
   });
 
+  it('검증된 spec patch와 object transform command를 단일 원자 mutation으로 적용하고 stale/double apply를 거부하며 undo/redo한다', () => {
+    const original = structuredClone(
+      store.getState().document.semanticSceneSpec,
+    );
+    const proposal = {
+      version: 2 as const,
+      requestId: 'proposal-store-1',
+      baseSceneRevision: 0,
+      baseSpecRevision: 0,
+      message: '장소를 골목 치킨집으로 변경합니다.',
+      specPatch: [
+        {
+          op: 'replace' as const,
+          path: '/intent/location' as const,
+          value: '골목 치킨집',
+        },
+      ],
+      sceneCommands: [
+        {
+          type: 'setObjectTransform' as const,
+          objectId: STARTER_IDS.mannequinId,
+          transform: {
+            position: { x: 1.25, y: 0.85, z: 0 },
+            rotationDeg: { x: 0, y: 20, z: 0 },
+            scale: { x: 1, y: 1, z: 1 },
+          },
+        },
+      ],
+      warnings: [],
+    };
+
+    const evaluation = store.getState().applySpecPatchProposal(proposal);
+
+    expect(evaluation.changes).toEqual([
+      { path: '/intent/location', before: '', after: '골목 치킨집' },
+    ]);
+    expect(evaluation.sceneCommandChanges).toHaveLength(1);
+    expect(store.getState().document).toMatchObject({
+      sceneRevision: 1,
+      specRevision: 1,
+      semanticSceneSpec: { intent: { location: '골목 치킨집' } },
+      objects: [
+        { id: STARTER_IDS.floorId },
+        {
+          id: STARTER_IDS.mannequinId,
+          transform: proposal.sceneCommands[0].transform,
+        },
+      ],
+    });
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'apply-scene-change-proposal',
+    );
+    const applied = store.getState().document;
+    expect(() => store.getState().applySpecPatchProposal(proposal)).toThrow(
+      /stale/i,
+    );
+    expect(store.getState().document).toBe(applied);
+
+    store.getState().undo();
+    expect(store.getState().document.semanticSceneSpec).toEqual(original);
+    expect(store.getState().document).toMatchObject({
+      sceneRevision: 2,
+      specRevision: 2,
+    });
+    store.getState().redo();
+    expect(store.getState().document).toMatchObject({
+      sceneRevision: 3,
+      specRevision: 3,
+      semanticSceneSpec: { intent: { location: '골목 치킨집' } },
+      objects: [
+        { id: STARTER_IDS.floorId },
+        {
+          id: STARTER_IDS.mannequinId,
+          transform: proposal.sceneCommands[0].transform,
+        },
+      ],
+    });
+  });
+
+  it('proposal 표시 뒤 live scene이 바뀌면 apply race를 fail-closed한다', () => {
+    const proposal = {
+      version: 2 as const,
+      requestId: 'proposal-race',
+      baseSceneRevision: 0,
+      baseSpecRevision: 0,
+      message: '분위기를 변경합니다.',
+      specPatch: [
+        {
+          op: 'replace' as const,
+          path: '/intent/mood' as const,
+          value: '긴장감',
+        },
+      ],
+      sceneCommands: [],
+      warnings: [],
+    };
+    store.getState().renameObject(STARTER_IDS.mannequinId, 'Actor');
+    const changed = store.getState().document;
+
+    expect(() => store.getState().applySpecPatchProposal(proposal)).toThrow(
+      /stale/i,
+    );
+    expect(store.getState().document).toBe(changed);
+    expect(store.getState().document.semanticSceneSpec.intent.mood).toBe('');
+  });
+
+  it('transform-only proposal은 scene revision만 올리고 no-op transaction은 거부한다', () => {
+    const originalTransform = structuredClone(
+      store.getState().document.objects[1].transform,
+    );
+    const proposal = {
+      version: 2 as const,
+      requestId: 'proposal-transform-only',
+      baseSceneRevision: 0,
+      baseSpecRevision: 0,
+      message: '마네킹을 카메라 쪽으로 옮깁니다.',
+      specPatch: [],
+      sceneCommands: [
+        {
+          type: 'setObjectTransform' as const,
+          objectId: STARTER_IDS.mannequinId,
+          transform: {
+            ...originalTransform,
+            position: { ...originalTransform.position, z: -0.75 },
+          },
+        },
+      ],
+      warnings: [],
+    };
+
+    store.getState().applySpecPatchProposal(proposal);
+
+    expect(store.getState().document).toMatchObject({
+      sceneRevision: 1,
+      specRevision: 0,
+      objects: [
+        { id: STARTER_IDS.floorId },
+        {
+          id: STARTER_IDS.mannequinId,
+          transform: { position: { z: -0.75 } },
+        },
+      ],
+    });
+
+    const noOpStore = createEditorStore({
+      initialDocument: createStarterSceneDocument(STARTER_IDS),
+      idFactory: () => 'unused',
+    });
+    const before = noOpStore.getState();
+    expect(() =>
+      noOpStore.getState().applySpecPatchProposal({
+        ...proposal,
+        requestId: 'proposal-no-op',
+        sceneCommands: [
+          {
+            ...proposal.sceneCommands[0],
+            transform: originalTransform,
+          },
+        ],
+      }),
+    ).toThrow(/no effective changes/);
+    expect(noOpStore.getState().document).toBe(before.document);
+    expect(noOpStore.getState().history).toBe(before.history);
+  });
+
   it('SemanticSceneSpec 편집을 단일 history/dirty mutation으로 기록하고 undo/redo한다', () => {
     const original = structuredClone(
       store.getState().document.semanticSceneSpec,
@@ -508,9 +673,11 @@ describe('editorStore', () => {
 
     store.getState().resetScene();
 
-    expect(store.getState().document).toEqual(
-      createStarterSceneDocument(STARTER_IDS),
-    );
+    expect(store.getState().document).toEqual({
+      ...createStarterSceneDocument(STARTER_IDS),
+      sceneRevision: 4,
+      specRevision: 0,
+    });
     expect(store.getState()).toMatchObject({
       selectedObjectId: null,
       hoveredObjectId: null,
@@ -536,6 +703,7 @@ describe('editorStore', () => {
       'update-output',
       'update-motion-metadata',
       'update-semantic-scene-spec',
+      'apply-scene-change-proposal',
       'commit-mannequin-pose',
       'apply-generation-snapshot',
     ]);
@@ -801,7 +969,11 @@ describe('editorStore', () => {
     expect(store.getState().canRedo).toBe(false);
 
     store.getState().undo();
-    expect(store.getState().document).toEqual(originalDocument);
+    expect(store.getState().document).toEqual({
+      ...originalDocument,
+      sceneRevision: 2,
+      specRevision: 0,
+    });
     expect(store.getState().selectedObjectId).toBe(STARTER_IDS.mannequinId);
     expect(store.getState().activePanel).toBe('camera');
     expect(store.getState().canUndo).toBe(false);
@@ -886,7 +1058,11 @@ describe('editorStore', () => {
     expect(store.getState().isDirty).toBe(true);
     store.getState().undo();
 
-    expect(store.getState().document).toEqual(persisted);
+    expect(store.getState().document).toEqual({
+      ...persisted,
+      sceneRevision: 2,
+      specRevision: 0,
+    });
     expect(store.getState().isDirty).toBe(false);
   });
 
@@ -1037,7 +1213,11 @@ describe('editorStore', () => {
 
     store.getState().undo();
 
-    expect(store.getState().document).toEqual(previousDocument);
+    expect(store.getState().document).toEqual({
+      ...previousDocument,
+      sceneRevision: 2,
+      specRevision: 0,
+    });
     expect(store.getState().selectedObjectId).toBe(STARTER_IDS.mannequinId);
     expect(store.getState().navigation).toMatchObject({
       position: previousDocument.outputCamera.position,
@@ -1060,7 +1240,11 @@ describe('editorStore', () => {
     const importedSnapshot = store.getState().document;
 
     expect(store.getState()).toMatchObject({
-      document: imported,
+      document: {
+        ...imported,
+        sceneRevision: 2,
+        specRevision: 0,
+      },
       selectedObjectId: null,
       hoveredObjectId: null,
       inProgressTransform: null,

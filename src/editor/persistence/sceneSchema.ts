@@ -47,7 +47,7 @@ const positiveVector3Schema = z.strictObject({
   z: z.number().positive(),
 });
 
-const transformSchema = z.strictObject({
+export const transformSchema = z.strictObject({
   position: vector3Schema,
   rotationDeg: vector3Schema,
   scale: positiveVector3Schema,
@@ -237,6 +237,8 @@ export const sceneDocumentSchema = z
     background: backgroundSchema,
     output: outputSchema,
     sceneNotes: z.string().max(MAX_SCENE_NOTES_LENGTH),
+    sceneRevision: z.number().int().nonnegative().safe().default(0),
+    specRevision: z.number().int().nonnegative().safe().default(0),
     semanticSceneSpec: semanticSceneSpecSchema.default(
       createDefaultSemanticSceneSpec(),
     ),

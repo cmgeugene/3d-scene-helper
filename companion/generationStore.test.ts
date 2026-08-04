@@ -7,6 +7,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { GenerationStore } from './generationStore';
 import { TEST_LAYOUT_SPEC } from '../shared/layoutSpecTestFixture';
 import { createStarterSceneDocument } from '../src/editor/persistence/sceneSchema';
+import {
+  createImageGenerationPrompt,
+  createImageRefinementPrompt,
+} from '../src/assistant/sceneAssistantPrompt';
 
 const tempRoots: string[] = [];
 const onePixelPng = Buffer.from(
@@ -64,6 +68,59 @@ afterEach(async () => {
 });
 
 describe('GenerationStore', () => {
+  it('request ID와 fingerprint를 보존하고 재시작 고아 작업을 interrupted로 복구한다', async () => {
+    const { root, store } = await createStore();
+    const render = await store.importSceneRender('scene-test', onePixelPng);
+    const requestFingerprint = `sha256:${'d'.repeat(64)}`;
+    const generation = await store.createGeneration({
+      requestId: 'generation-request-store-1',
+      requestFingerprint,
+      threadId: 'thread-idempotent',
+      turnId: 'turn-idempotent',
+      prompt: '$imagegen idempotent',
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: createSceneSnapshot(),
+      referenceSnapshots: [],
+      layoutRenderId: render.id,
+      referenceIds: [],
+      attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+    });
+
+    await expect(
+      store.findGenerationRequest('generation-request-store-1'),
+    ).resolves.toMatchObject({
+      requestFingerprint,
+      generation: {
+        id: generation.id,
+        requestId: 'generation-request-store-1',
+        status: 'inProgress',
+      },
+    });
+    expect((await store.listGenerations())[0]).not.toHaveProperty(
+      'requestFingerprint',
+    );
+
+    const restarted = new GenerationStore(root);
+    await expect(
+      restarted.recoverInProgressGenerations('Companion restart test'),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: generation.id,
+        status: 'interrupted',
+        error: 'Companion restart test',
+      }),
+    ]);
+    await expect(
+      restarted.recoverInProgressGenerations('second recovery'),
+    ).resolves.toEqual([]);
+    await expect(restarted.listGenerations()).resolves.toEqual([
+      expect.objectContaining({
+        requestId: 'generation-request-store-1',
+        status: 'interrupted',
+      }),
+    ]);
+  });
+
   it('구도와 Codex 결과를 프로젝트 artifact로 보관한다', async () => {
     const { root, store } = await createStore();
     const render = await store.importSceneRender('scene-test', onePixelPng);
@@ -134,6 +191,133 @@ describe('GenerationStore', () => {
     expect(manifest.generations[0]?.result.assetPath).toMatch(
       /^generations\/artifact_.+\.png$/,
     );
+  });
+
+  it('입력 스냅샷 해시와 실제 첨부 순서를 저장하고 prompt 근거를 재검증한다', async () => {
+    const { root, store } = await createStore();
+    const render = await store.importSceneRender('scene-test', onePixelPng);
+    const scene = createSceneSnapshot();
+    const parent = await store.createGeneration({
+      requestId: 'request-summary-parent',
+      requestFingerprint: `sha256:${'d'.repeat(64)}`,
+      threadId: 'thread-summary-parent',
+      turnId: 'turn-summary-parent',
+      prompt: createImageGenerationPrompt(scene, TEST_LAYOUT_SPEC, [
+        referenceSnapshot,
+      ]),
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: scene,
+      referenceSnapshots: [referenceSnapshot],
+      layoutRenderId: render.id,
+      referenceIds: [referenceSnapshot.id],
+      attachments: [
+        { type: 'layout', id: render.id, kind: 'layout' },
+        { type: 'reference', id: referenceSnapshot.id, kind: 'character' },
+      ],
+    });
+    const sourcePath = path.join(root, 'summary-source.png');
+    await writeFile(sourcePath, onePixelPng);
+    const completedParent = await store.importGenerationResult(
+      parent.turnId,
+      sourcePath,
+      null,
+    );
+    await store.completeTurn(parent.turnId, 'completed', null);
+
+    const child = await store.createGeneration({
+      requestId: 'request-summary-child',
+      requestFingerprint: `sha256:${'e'.repeat(64)}`,
+      threadId: 'thread-summary-child',
+      turnId: 'turn-summary-child',
+      prompt: createImageRefinementPrompt(
+        {
+          version: 1,
+          preserve: ['전체 구도'],
+          change: ['조명만 밝게'],
+        },
+        scene,
+        TEST_LAYOUT_SPEC,
+        parent,
+        [referenceSnapshot],
+      ),
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: scene,
+      referenceSnapshots: [referenceSnapshot],
+      parentGenerationId: parent.id,
+      feedback: '조명만 밝게',
+      refinementDirective: {
+        version: 1,
+        preserve: ['전체 구도'],
+        change: ['조명만 밝게'],
+      },
+      generationMode: 'edit',
+      layoutRenderId: render.id,
+      referenceIds: [referenceSnapshot.id],
+      attachments: [
+        { type: 'sourceGeneration', id: parent.id, kind: null },
+        { type: 'layout', id: render.id, kind: 'layout' },
+        { type: 'reference', id: referenceSnapshot.id, kind: 'character' },
+      ],
+    });
+
+    expect(child).toMatchObject({
+      executionIntegrity: { status: 'valid', issues: [] },
+      executionSummary: {
+        version: 1,
+        requestId: 'request-summary-child',
+        sceneDocument: { id: 'scene-test' },
+        layoutRender: { id: render.id, contentHash: render.contentHash },
+        sourceGeneration: {
+          id: parent.id,
+          usage: 'editSource',
+          contentHash: completedParent?.result?.contentHash,
+        },
+        references: [
+          {
+            id: referenceSnapshot.id,
+            kind: 'character',
+            contentHash: referenceSnapshot.contentHash,
+          },
+        ],
+        attachments: [
+          expect.objectContaining({
+            attachmentIndex: 1,
+            type: 'sourceGeneration',
+            id: parent.id,
+          }),
+          expect.objectContaining({
+            attachmentIndex: 2,
+            type: 'layout',
+            id: render.id,
+          }),
+          expect.objectContaining({
+            attachmentIndex: 3,
+            type: 'reference',
+            id: referenceSnapshot.id,
+          }),
+        ],
+      },
+    });
+
+    const manifestPath = path.join(root, 'generations.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      generations: Array<{ id: string; prompt: string }>;
+    };
+    manifest.generations.find(({ id }) => id === child.id)!.prompt =
+      '$imagegen tampered prompt';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const tampered = (await new GenerationStore(root).listGenerations()).find(
+      ({ id }) => id === child.id,
+    );
+    expect(tampered?.executionIntegrity).toMatchObject({
+      status: 'mismatch',
+      issues: expect.arrayContaining([
+        expect.stringContaining('prompt 해시'),
+        expect.stringContaining('prompt의 SceneDocument'),
+        expect.stringContaining('prompt의 LayoutSpec'),
+      ]),
+    });
   });
 
   it('새 generation의 null scene snapshot을 Zod 경계에서 fail-closed한다', async () => {
@@ -286,6 +470,11 @@ describe('GenerationStore', () => {
       referenceSnapshots: [referenceSnapshot],
       parentGenerationId: parent.id,
       feedback: '전봇대 가림 비율만 줄여줘.',
+      refinementDirective: {
+        version: 1,
+        preserve: ['전체 구도', '인물 의상'],
+        change: ['전봇대 가림 비율만 줄여줘.'],
+      },
       generationMode: 'edit',
       layoutRenderId: render.id,
       referenceIds: ['ref-1'],
@@ -306,6 +495,10 @@ describe('GenerationStore', () => {
       parentGenerationId: parent.id,
       versionNumber: 2,
       feedback: '전봇대 가림 비율만 줄여줘.',
+      refinementDirective: {
+        preserve: ['전체 구도', '인물 의상'],
+        change: ['전봇대 가림 비율만 줄여줘.'],
+      },
       generationMode: 'edit',
     });
   });
@@ -339,6 +532,41 @@ describe('GenerationStore', () => {
       referenceIds: [],
       attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
     });
+    await expect(
+      store.createGeneration({
+        threadId: 'thread-edit-without-directive',
+        turnId: 'turn-edit-without-directive',
+        prompt: '$imagegen missing directive',
+        layoutSpec: TEST_LAYOUT_SPEC,
+        sceneSnapshot: createSceneSnapshot(),
+        referenceSnapshots: [],
+        parentGenerationId: source.id,
+        feedback: '구도만 유지해줘',
+        generationMode: 'edit',
+        layoutRenderId: render.id,
+        referenceIds: [],
+        attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+      }),
+    ).rejects.toThrow('구조화된 유지·변경 지시');
+    await expect(
+      store.createGeneration({
+        threadId: 'thread-fresh-with-directive',
+        turnId: 'turn-fresh-with-directive',
+        prompt: '$imagegen invalid fresh directive',
+        layoutSpec: TEST_LAYOUT_SPEC,
+        sceneSnapshot: createSceneSnapshot(),
+        referenceSnapshots: [],
+        refinementDirective: {
+          version: 1,
+          preserve: [],
+          change: ['조명 변경'],
+        },
+        generationMode: 'fresh',
+        layoutRenderId: render.id,
+        referenceIds: [],
+        attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+      }),
+    ).rejects.toThrow('새 생성에는 보정 지시');
     const edit = await store.createGeneration({
       threadId: 'thread-edit',
       turnId: 'turn-edit',
@@ -349,6 +577,11 @@ describe('GenerationStore', () => {
       parentGenerationId: source.id,
       sourceGenerationId: null,
       feedback: '기존 결과 이미지만 보정',
+      refinementDirective: {
+        version: 1,
+        preserve: ['전체 구도'],
+        change: ['기존 결과 이미지만 보정'],
+      },
       generationMode: 'edit',
       layoutRenderId: render.id,
       referenceIds: [],
@@ -432,7 +665,11 @@ describe('GenerationStore', () => {
       'sourceGenerationId',
       'versionNumber',
       'feedback',
+      'refinementDirective',
       'generationMode',
+      'requestId',
+      'requestFingerprint',
+      'executionSummary',
     ]) {
       delete manifest.generations[0]?.[field];
     }
@@ -444,10 +681,14 @@ describe('GenerationStore', () => {
         semanticSceneSpecSnapshot: null,
         referenceSnapshots: [],
         parentGenerationId: null,
+        refinementDirective: null,
         sourceGenerationId: null,
         versionNumber: 1,
         feedback: null,
         generationMode: 'fresh',
+        requestId: null,
+        executionSummary: null,
+        executionIntegrity: { status: 'legacy', issues: [] },
       }),
     ]);
   });

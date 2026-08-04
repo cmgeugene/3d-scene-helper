@@ -13,7 +13,9 @@ import {
   type CompanionBrowserClient,
   type CompanionRuntimeStatus,
   type GenerationRecord,
+  type NormalizedStartGenerationInput,
   type ReferenceArtifact,
+  startGenerationInputSchema,
 } from './companionClient';
 import {
   parseConversationUpdate,
@@ -30,12 +32,47 @@ import {
   createSceneAssistantPrompt,
 } from './sceneAssistantPrompt';
 import { parseGenerationUpdate } from './generationEvents';
+import { parseSpecPatchProposalUpdate } from './specPatchProposalEvents';
+import { RuntimeRequestCard } from './RuntimeRequestCard';
+import {
+  runtimeRequestSchema,
+  type RuntimeRequest,
+  type RuntimeRequestResponse,
+} from '../../shared/runtimeRequest';
 import { createLayoutSpec } from './layoutSpec';
-import { sceneDocumentSchema } from '../editor/persistence/sceneSchema';
+import {
+  sceneDocumentSchema,
+  type SceneDocument,
+} from '../editor/persistence/sceneSchema';
+import {
+  evaluateSpecPatchProposal,
+  type SpecPatchEvaluation,
+  type SpecPatchProposal,
+} from '../editor/persistence/specPatchProposal';
 import { getMaximumReferenceImages } from '../../shared/imageInputBudget';
+import {
+  createGenerationPreflightFingerprint,
+  evaluateGenerationPreflight,
+  type GenerationPreflightIssue,
+} from '../../shared/generationPreflight';
+import {
+  createRefinementDirective,
+  type RefinementDirective,
+} from '../../shared/refinementDirective';
+import {
+  clearGenerationRequestRecovery,
+  readGenerationRequestRecovery,
+  storeGenerationRequestRecovery,
+  type GenerationRequestRecovery,
+} from './generationRequestRecovery';
+import type { ConversationTaskMetadata } from '../../shared/conversationMetadata';
 
-type ConnectionPhase = 'disconnected' | 'connecting' | 'ready' | 'error';
+type ConnectionPhase =
+  'disconnected' | 'connecting' | 'reconnecting' | 'ready' | 'error';
 type AssistantView = 'conversation' | 'contract';
+
+const MAX_AUTOMATIC_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_DELAYS_MS = [500, 1_000, 2_000] as const;
 
 interface ChatMessage {
   id: string;
@@ -53,9 +90,13 @@ interface SceneAssistantPanelProps {
   clientFactory?: (connection: CompanionConnection) => CompanionBrowserClient;
   createObjectUrl?: (blob: Blob) => string;
   revokeObjectUrl?: (url: string) => void;
+  storage?: Storage;
   onRefinementModeChange?: (active: boolean) => void;
   refinementSource?: GenerationRecord | null;
   onRefinementSourceChange?: (generation: GenerationRecord | null) => void;
+  onApplySpecPatchProposal?: (
+    proposal: SpecPatchProposal,
+  ) => SpecPatchEvaluation;
 }
 
 interface ConnectedSceneAssistantProps {
@@ -67,9 +108,13 @@ interface ConnectedSceneAssistantProps {
   clientFactory: (connection: CompanionConnection) => CompanionBrowserClient;
   createObjectUrl: (blob: Blob) => string;
   revokeObjectUrl: (url: string) => void;
+  storage: Storage;
   onRefinementModeChange: (active: boolean) => void;
   refinementSource?: GenerationRecord | null;
   onRefinementSourceChange: (generation: GenerationRecord | null) => void;
+  onApplySpecPatchProposal: (
+    proposal: SpecPatchProposal,
+  ) => SpecPatchEvaluation;
 }
 
 const defaultClientFactory = (connection: CompanionConnection) =>
@@ -78,8 +123,32 @@ const emptySceneContext = () => null;
 const emptySelectedReferences = () => [];
 const defaultCreateObjectUrl = (blob: Blob) => URL.createObjectURL(blob);
 const defaultRevokeObjectUrl = (url: string) => URL.revokeObjectURL(url);
+
+function createGenerationRequestId(sceneId: string) {
+  const entropy =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `generation-${sceneId.slice(0, 80)}-${entropy}`;
+}
+
+function revokeAfterRender(
+  revokeObjectUrl: (url: string) => void,
+  url: string,
+) {
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => revokeObjectUrl(url)),
+    );
+    return;
+  }
+  setTimeout(() => revokeObjectUrl(url), 32);
+}
 const ignoreRefinementModeChange = () => undefined;
 const ignoreRefinementSourceChange = () => undefined;
+const unavailableSpecPatchApply = (): never => {
+  throw new Error('Semantic Scene Spec 변경 적용기가 연결되지 않았습니다.');
+};
 
 function accountLabel(runtime: CompanionRuntimeStatus) {
   if (runtime.account?.type === 'chatgpt') {
@@ -93,8 +162,23 @@ function accountLabel(runtime: CompanionRuntimeStatus) {
 function connectionLabel(phase: ConnectionPhase) {
   if (phase === 'ready') return '연결됨';
   if (phase === 'connecting') return '연결 중';
+  if (phase === 'reconnecting') return '재연결 중';
   if (phase === 'error') return '연결 오류';
   return '연결 안 됨';
+}
+
+function formatSpecPatchValue(value: unknown) {
+  if (value === '') return '(비어 있음)';
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value);
+}
+
+function formatTransform(
+  transform: SceneDocument['objects'][number]['transform'],
+) {
+  const vector = ({ x, y, z }: { x: number; y: number; z: number }) =>
+    `(${x}, ${y}, ${z})`;
+  return `위치 ${vector(transform.position)} · 회전 ${vector(transform.rotationDeg)} · 크기 ${vector(transform.scale)}`;
 }
 
 function PanelHeading({ phase }: { phase: ConnectionPhase }) {
@@ -140,9 +224,11 @@ function ConnectedSceneAssistant({
   clientFactory,
   createObjectUrl,
   revokeObjectUrl,
+  storage,
   onRefinementModeChange,
   refinementSource: controlledRefinementSource,
   onRefinementSourceChange,
+  onApplySpecPatchProposal,
 }: ConnectedSceneAssistantProps) {
   const client = useMemo(
     () => clientFactory(connection),
@@ -152,18 +238,50 @@ function ConnectedSceneAssistant({
   const [runtime, setRuntime] = useState<CompanionRuntimeStatus | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [reconnectDelayMs, setReconnectDelayMs] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [refinementPreserveDraft, setRefinementPreserveDraft] = useState('');
   const [activeView, setActiveView] = useState<AssistantView>('conversation');
   const restoredThreadId = useMemo(() => readSceneAssistantThread(), []);
   const [threadId, setThreadId] = useState<string | null>(restoredThreadId);
+  const [savedTask, setSavedTask] = useState<ConversationTaskMetadata | null>(
+    null,
+  );
+  const [conversationDecisionRequired, setConversationDecisionRequired] =
+    useState(false);
+  const [conversationSessionLoading, setConversationSessionLoading] = useState(
+    client.getConversationSession !== undefined,
+  );
+  const [sessionActionInFlight, setSessionActionInFlight] = useState(false);
+  const [runtimeRequests, setRuntimeRequests] = useState<RuntimeRequest[]>([]);
+  const [runtimeRequestActionId, setRuntimeRequestActionId] = useState<
+    string | null
+  >(null);
+  const [runtimeRequestError, setRuntimeRequestError] = useState<string | null>(
+    null,
+  );
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [conversationError, setConversationError] = useState<string | null>(
     null,
   );
+  const [proposalError, setProposalError] = useState<string | null>(null);
+  const [pendingSpecPatch, setPendingSpecPatch] = useState<{
+    proposal: SpecPatchProposal;
+    evaluation: SpecPatchEvaluation;
+  } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [generation, setGeneration] = useState<GenerationRecord | null>(null);
+  const [generationRequestRecovery, setGenerationRequestRecovery] =
+    useState<GenerationRequestRecovery | null>(() =>
+      readGenerationRequestRecovery(storage),
+    );
+  const [pendingGenerationPreflight, setPendingGenerationPreflight] = useState<{
+    fingerprint: string;
+    warnings: GenerationPreflightIssue[];
+  } | null>(null);
   const [internalRefinementSource, setInternalRefinementSource] =
     useState<GenerationRecord | null>(null);
   const refinementSource =
@@ -179,12 +297,19 @@ function ConnectedSceneAssistant({
   const threadIdRef = useRef<string | null>(restoredThreadId);
   const threadReadyRef = useRef(false);
   const activeTurnIdRef = useRef<string | null>(null);
+  const completedTurnIdsRef = useRef(new Set<string>());
   const messageSequence = useRef(0);
   const generationPreviewUrlRef = useRef<string | null>(null);
+  const handledProposalIdsRef = useRef(new Set<string>());
+  const generationLaunchInFlightRef = useRef(false);
+  const reconnectAttemptRef = useRef(0);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const conversationActivatedRef = useRef(false);
 
   const changeRefinementSource = useCallback(
     (next: GenerationRecord | null) => {
       setInternalRefinementSource(next);
+      setRefinementPreserveDraft('');
       onRefinementSourceChange(next);
     },
     [onRefinementSourceChange],
@@ -199,15 +324,52 @@ function ConnectedSceneAssistant({
     [onRefinementModeChange],
   );
 
+  useEffect(() => {
+    if (activeTurnId === null && !isSubmitting) {
+      generationLaunchInFlightRef.current = false;
+    }
+  }, [activeTurnId, isSubmitting]);
+
   const displayGeneration = useCallback(
     async (nextGeneration: GenerationRecord, signal?: AbortSignal) => {
       setGeneration(nextGeneration);
       if (nextGeneration.status === 'inProgress') {
+        threadIdRef.current = nextGeneration.threadId;
+        setThreadId(nextGeneration.threadId);
+        storeSceneAssistantThread(nextGeneration.threadId);
+        activeTurnIdRef.current = nextGeneration.turnId;
+        setActiveTurnId(nextGeneration.turnId);
+        setIsSubmitting(true);
+        setIsCancelling(false);
         setGenerationPhase(
           nextGeneration.result === null ? 'generating' : 'importing',
         );
       } else {
+        generationLaunchInFlightRef.current = false;
+        if (activeTurnIdRef.current === nextGeneration.turnId) {
+          activeTurnIdRef.current = null;
+          setActiveTurnId(null);
+        }
+        setIsSubmitting(false);
+        setIsCancelling(false);
         setGenerationPhase(null);
+        if (nextGeneration.status === 'failed') {
+          setConversationError(
+            nextGeneration.error ?? '이미지 생성이 실패했습니다.',
+          );
+        } else if (nextGeneration.status === 'interrupted') {
+          setConversationError(
+            nextGeneration.error ?? '이미지 생성을 중단했습니다.',
+          );
+        }
+      }
+      const recovery = readGenerationRequestRecovery(storage);
+      if (
+        recovery !== null &&
+        nextGeneration.requestId === recovery.input.requestId
+      ) {
+        clearGenerationRequestRecovery(storage);
+        setGenerationRequestRecovery(null);
       }
       if (nextGeneration.result === null) return;
       const blob = await client.loadGenerationBlob(nextGeneration.id, signal);
@@ -216,12 +378,15 @@ function ConnectedSceneAssistant({
       const previousUrl = generationPreviewUrlRef.current;
       generationPreviewUrlRef.current = nextUrl;
       setGenerationPreviewUrl(nextUrl);
-      if (previousUrl !== null) revokeObjectUrl(previousUrl);
+      if (previousUrl !== null) revokeAfterRender(revokeObjectUrl, previousUrl);
     },
-    [client, createObjectUrl, revokeObjectUrl],
+    [client, createObjectUrl, revokeObjectUrl, storage],
   );
 
   const ensureThread = useCallback(async () => {
+    if (conversationDecisionRequired || conversationSessionLoading) {
+      throw new Error('저장된 Codex task를 재개할지 먼저 선택해 주세요.');
+    }
     let currentThreadId = threadIdRef.current;
     if (currentThreadId === null) {
       currentThreadId = await client.startThread();
@@ -230,15 +395,81 @@ function ConnectedSceneAssistant({
     }
     threadIdRef.current = currentThreadId;
     threadReadyRef.current = true;
+    conversationActivatedRef.current = true;
     setThreadId(currentThreadId);
     storeSceneAssistantThread(currentThreadId);
     return currentThreadId;
-  }, [client]);
+  }, [client, conversationDecisionRequired, conversationSessionLoading]);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current === null) return;
+    window.clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
+  }, []);
+
+  const resetReconnectState = useCallback(() => {
+    clearReconnectTimer();
+    reconnectAttemptRef.current = 0;
+    setReconnectAttempt(0);
+    setReconnectDelayMs(null);
+  }, [clearReconnectTimer]);
 
   const retry = useCallback(() => {
+    clearReconnectTimer();
+    reconnectAttemptRef.current = 0;
+    setReconnectAttempt(0);
+    setReconnectDelayMs(null);
     setPhase('connecting');
     setConnectionError(null);
     setRetryNonce((value) => value + 1);
+  }, [clearReconnectTimer]);
+
+  const scheduleReconnect = useCallback(
+    (reason: string) => {
+      if (reconnectTimerRef.current !== null) return;
+      const attempt = reconnectAttemptRef.current + 1;
+      if (attempt > MAX_AUTOMATIC_RECONNECT_ATTEMPTS) {
+        setPhase('error');
+        setConnectionError(
+          `${reason} 자동 재연결을 완료하지 못했습니다. Companion 실행 상태를 확인해 주세요.`,
+        );
+        setReconnectDelayMs(null);
+        return;
+      }
+      const delay = RECONNECT_DELAYS_MS[attempt - 1]!;
+      threadReadyRef.current = false;
+      if (client.getConversationSession !== undefined) {
+        setConversationSessionLoading(true);
+      }
+      setPhase('reconnecting');
+      setConnectionError(reason);
+      setReconnectAttempt(attempt);
+      setReconnectDelayMs(delay);
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null;
+        reconnectAttemptRef.current = attempt;
+        setReconnectDelayMs(null);
+        setRetryNonce((value) => value + 1);
+      }, delay);
+    },
+    [client],
+  );
+
+  useEffect(
+    () => () => {
+      clearReconnectTimer();
+    },
+    [clearReconnectTimer],
+  );
+
+  const trackStartedTurn = useCallback((turnId: string) => {
+    if (completedTurnIdsRef.current.delete(turnId)) {
+      setIsSubmitting(false);
+      return false;
+    }
+    activeTurnIdRef.current = turnId;
+    setActiveTurnId(turnId);
+    return true;
   }, []);
 
   const applyConversationUpdate = useCallback((update: ConversationUpdate) => {
@@ -263,16 +494,22 @@ function ConnectedSceneAssistant({
         update.willRetry ? `${update.error} 재시도 중입니다.` : update.error,
       );
       if (!update.willRetry) {
-        activeTurnIdRef.current = null;
-        setActiveTurnId(null);
+        completedTurnIdsRef.current.add(update.turnId);
+        if (activeTurnIdRef.current === update.turnId) {
+          activeTurnIdRef.current = null;
+          setActiveTurnId(null);
+        }
         setIsSubmitting(false);
       }
       return;
     }
 
     if (update.type === 'turn-completed') {
-      activeTurnIdRef.current = null;
-      setActiveTurnId(null);
+      completedTurnIdsRef.current.add(update.turnId);
+      if (activeTurnIdRef.current === update.turnId) {
+        activeTurnIdRef.current = null;
+        setActiveTurnId(null);
+      }
       setIsSubmitting(false);
       setIsCancelling(false);
       if (update.status === 'failed') {
@@ -285,19 +522,115 @@ function ConnectedSceneAssistant({
     }
   }, []);
 
+  const upsertRuntimeRequest = useCallback((request: RuntimeRequest) => {
+    setRuntimeRequests((current) => {
+      const index = current.findIndex(({ id }) => id === request.id);
+      if (index < 0) return [...current, request].slice(-50);
+      const next = [...current];
+      next[index] = request;
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
+    if (client.getConversationSession !== undefined) {
+      void client
+        .getConversationSession(controller.signal)
+        .then((session) => {
+          if (controller.signal.aborted) return;
+          setSavedTask(session.activeTask);
+          setConversationSessionLoading(false);
+          setConversationError((current) =>
+            current?.startsWith('프로젝트 대화 metadata를 불러오지 못했습니다.')
+              ? null
+              : current,
+          );
+          if (session.activeTask === null) {
+            threadIdRef.current = null;
+            threadReadyRef.current = false;
+            setThreadId(null);
+            setConversationDecisionRequired(false);
+            clearSceneAssistantThread();
+            return;
+          }
+          const activeTask = session.activeTask;
+          const knownTurnId = activeTurnIdRef.current;
+          if (
+            knownTurnId !== null &&
+            activeTask.lastTurnId === knownTurnId &&
+            activeTask.lastTurnStatus !== 'inProgress'
+          ) {
+            activeTurnIdRef.current = null;
+            setActiveTurnId(null);
+            setIsSubmitting(false);
+            setIsCancelling(false);
+          }
+          if (
+            conversationActivatedRef.current &&
+            threadIdRef.current === activeTask.threadId
+          ) {
+            threadReadyRef.current = false;
+            setThreadId(activeTask.threadId);
+            setConversationDecisionRequired(false);
+            return;
+          }
+          threadIdRef.current = null;
+          threadReadyRef.current = false;
+          setThreadId(null);
+          setConversationDecisionRequired(true);
+        })
+        .catch((reason) => {
+          if (controller.signal.aborted) return;
+          setConversationSessionLoading(false);
+          setConversationError(
+            reason instanceof Error
+              ? `프로젝트 대화 metadata를 불러오지 못했습니다. ${reason.message}`
+              : '프로젝트 대화 metadata를 불러오지 못했습니다.',
+          );
+        });
+    }
+    if (client.listRuntimeRequests !== undefined) {
+      void client
+        .listRuntimeRequests(controller.signal)
+        .then((result) => {
+          if (controller.signal.aborted) return;
+          setRuntimeRequests(result.requests);
+          setRuntimeRequestError((current) =>
+            current?.startsWith('Codex 요청 목록을 불러오지 못했습니다.')
+              ? null
+              : current,
+          );
+        })
+        .catch((reason) => {
+          if (controller.signal.aborted) return;
+          setRuntimeRequestError(
+            reason instanceof Error
+              ? `Codex 요청 목록을 불러오지 못했습니다. ${reason.message}`
+              : 'Codex 요청 목록을 불러오지 못했습니다.',
+          );
+        });
+    }
     void client
       .getRuntime(controller.signal)
       .then((value) => {
         if (controller.signal.aborted) return;
         setRuntime(value);
-        setPhase(value.state === 'ready' ? 'ready' : 'connecting');
+        if (value.state === 'ready') {
+          resetReconnectState();
+          setPhase('ready');
+          setConnectionError(null);
+        } else if (value.state === 'failed') {
+          resetReconnectState();
+          setPhase('error');
+          setConnectionError(value.error ?? 'Codex App Server가 실패했습니다.');
+        } else {
+          setPhase('connecting');
+        }
       })
       .catch((reason) => {
         if (controller.signal.aborted) return;
-        setPhase('error');
-        setConnectionError(
+        scheduleReconnect(
           reason instanceof Error
             ? reason.message
             : 'Companion에 연결하지 못했습니다.',
@@ -307,6 +640,21 @@ function ConnectedSceneAssistant({
       .listGenerations(controller.signal)
       .then((generations) => {
         if (controller.signal.aborted) return;
+        const recovery = readGenerationRequestRecovery(storage);
+        if (recovery !== null) {
+          const recovered = generations.find(
+            ({ requestId }) => requestId === recovery.input.requestId,
+          );
+          if (recovered !== undefined) {
+            clearGenerationRequestRecovery(storage);
+            setGenerationRequestRecovery(null);
+          } else {
+            setGenerationRequestRecovery(recovery);
+            setConversationError(
+              '이전 generation 요청의 응답을 확인하지 못했습니다. 같은 request ID로 안전하게 다시 확인할 수 있습니다.',
+            );
+          }
+        }
         const latest = generations.at(-1);
         if (latest !== undefined) {
           return displayGeneration(latest, controller.signal);
@@ -322,9 +670,46 @@ function ConnectedSceneAssistant({
           const parsed = companionRuntimeSchema.safeParse(event.data);
           if (parsed.success) {
             setRuntime(parsed.data);
-            setPhase(parsed.data.state === 'ready' ? 'ready' : 'connecting');
-            setConnectionError(parsed.data.error);
+            if (parsed.data.state === 'ready') {
+              resetReconnectState();
+              setPhase('ready');
+              setConnectionError(null);
+            } else if (parsed.data.state === 'failed') {
+              resetReconnectState();
+              setPhase('error');
+              setConnectionError(
+                parsed.data.error ?? 'Codex App Server가 실패했습니다.',
+              );
+            } else {
+              setPhase('connecting');
+              setConnectionError(parsed.data.error);
+            }
           }
+        }
+        const specPatchUpdate = parseSpecPatchProposalUpdate(event);
+        if (specPatchUpdate?.type === 'proposal') {
+          try {
+            const scene = sceneDocumentSchema.parse(getSceneContext());
+            const evaluation = evaluateSpecPatchProposal(
+              scene,
+              specPatchUpdate.proposal,
+            );
+            setPendingSpecPatch({
+              proposal: specPatchUpdate.proposal,
+              evaluation,
+            });
+            setProposalError(null);
+          } catch (reason) {
+            setPendingSpecPatch(null);
+            setProposalError(
+              reason instanceof Error
+                ? reason.message
+                : 'Semantic Scene Spec 변경안을 검증하지 못했습니다.',
+            );
+          }
+        } else if (specPatchUpdate?.type === 'error') {
+          setPendingSpecPatch(null);
+          setProposalError(specPatchUpdate.error);
         }
         const update = parseConversationUpdate(event);
         if (update !== null) applyConversationUpdate(update);
@@ -343,10 +728,13 @@ function ConnectedSceneAssistant({
           setGenerationPhase(null);
           setConversationError(generationUpdate.error);
         }
+        if (event.event === 'runtime-request') {
+          const request = runtimeRequestSchema.safeParse(event.data);
+          if (request.success) upsertRuntimeRequest(request.data);
+        }
       },
       (reason) => {
-        setPhase('error');
-        setConnectionError(reason.message);
+        scheduleReconnect(reason.message);
       },
     );
 
@@ -356,15 +744,20 @@ function ConnectedSceneAssistant({
       const previewUrl = generationPreviewUrlRef.current;
       if (previewUrl !== null) {
         generationPreviewUrlRef.current = null;
-        revokeObjectUrl(previewUrl);
+        revokeAfterRender(revokeObjectUrl, previewUrl);
       }
     };
   }, [
     applyConversationUpdate,
     client,
     displayGeneration,
+    getSceneContext,
     retryNonce,
     revokeObjectUrl,
+    resetReconnectState,
+    scheduleReconnect,
+    storage,
+    upsertRuntimeRequest,
   ]);
 
   const submitMessage = useCallback(
@@ -375,7 +768,9 @@ function ConnectedSceneAssistant({
         message === '' ||
         phase !== 'ready' ||
         activeTurnIdRef.current !== null ||
-        isSubmitting
+        isSubmitting ||
+        conversationDecisionRequired ||
+        conversationSessionLoading
       ) {
         return;
       }
@@ -401,13 +796,25 @@ function ConnectedSceneAssistant({
           getSceneContext(),
           selectedReferences,
         );
-        const turnId = await client.startTurn(
-          currentThreadId,
-          prompt,
-          selectedReferences.map(({ id }) => id),
-        );
-        activeTurnIdRef.current = turnId;
-        setActiveTurnId(turnId);
+        const referenceIds = selectedReferences.map(({ id }) => id);
+        const scene = sceneDocumentSchema.safeParse(getSceneContext());
+        const turnId =
+          client.startConversationTurn === undefined
+            ? await client.startTurn(currentThreadId, prompt, referenceIds)
+            : await client.startConversationTurn(
+                currentThreadId,
+                prompt,
+                referenceIds,
+                {
+                  kind: 'conversation',
+                  userMessage: message,
+                  sceneRevision: scene.success
+                    ? scene.data.sceneRevision
+                    : null,
+                  specRevision: scene.success ? scene.data.specRevision : null,
+                },
+              );
+        trackStartedTurn(turnId);
       } catch (reason) {
         setConversationError(
           reason instanceof Error
@@ -425,118 +832,339 @@ function ConnectedSceneAssistant({
       ensureThread,
       isSubmitting,
       phase,
+      trackStartedTurn,
+      conversationDecisionRequired,
+      conversationSessionLoading,
     ],
   );
 
-  const generateImage = useCallback(async () => {
+  const requestSpecPatchProposal = useCallback(async () => {
     const message = draft.trim();
-    const sourceGeneration = refinementSource;
-    const editing = sourceGeneration !== null;
-    const selectedReferences = getSelectedReferences();
-    const maximumReferences = getMaximumReferenceImages({
-      includeLayout: true,
-      includeSourceKeyframe: editing,
-    });
     if (
       message === '' ||
       phase !== 'ready' ||
-      captureLayout === null ||
       activeTurnIdRef.current !== null ||
       isSubmitting ||
-      runtime?.capabilities?.imageGeneration === false
+      conversationDecisionRequired ||
+      conversationSessionLoading
     ) {
       return;
     }
-    if (selectedReferences.length > maximumReferences) {
+    if (client.startSpecPatchProposal === undefined) {
       setConversationError(
-        `현재 생성 구성에서는 레퍼런스를 최대 ${maximumReferences}장까지 선택할 수 있습니다. ${selectedReferences.length - maximumReferences}장을 해제해 주세요.`,
+        'Companion이 structured 변경안을 지원하지 않습니다.',
       );
       return;
     }
-
+    const parsedScene = sceneDocumentSchema.safeParse(getSceneContext());
+    if (!parsedScene.success) {
+      setConversationError(
+        '현재 SceneDocument를 변경안 요청으로 해석하지 못했습니다.',
+      );
+      return;
+    }
+    const scene: SceneDocument = parsedScene.data;
     messageSequence.current += 1;
+    const requestId = `spec-patch-${scene.id}-${scene.sceneRevision}-${messageSequence.current}`;
     setMessages((current) => [
       ...current,
       {
         id: `user-${messageSequence.current}`,
         role: 'user',
-        text: `${message} (${editing ? '키프레임 보정' : '이미지 생성'})`,
+        text: message,
       },
     ]);
     setDraft('');
+    setPendingSpecPatch(null);
+    setProposalError(null);
     setConversationError(null);
-    const previousPreviewUrl = generationPreviewUrlRef.current;
-    if (previousPreviewUrl !== null) {
-      generationPreviewUrlRef.current = null;
-      revokeObjectUrl(previousPreviewUrl);
-    }
-    setGenerationPreviewUrl(null);
-    setGeneration(null);
     setIsSubmitting(true);
-    setGenerationPhase('rendering');
-
     try {
-      const parsedScene = sceneDocumentSchema.safeParse(getSceneContext());
-      if (!parsedScene.success) {
-        throw new Error('현재 장면을 LayoutSpec으로 해석하지 못했습니다.');
-      }
-      const scene = parsedScene.data;
-      const layoutSpec = createLayoutSpec(scene, selectedReferences);
-      const layout = await captureLayout();
-      setGenerationPhase('uploading');
-      const render = await client.createSceneRender(layout, scene.id);
       const currentThreadId = await ensureThread();
-      const prompt =
-        sourceGeneration === null
-          ? createImageGenerationPrompt(scene, layoutSpec, selectedReferences)
-          : createImageRefinementPrompt(
-              message,
-              scene,
-              layoutSpec,
-              sourceGeneration,
-              selectedReferences,
-            );
-      setGenerationPhase('generating');
-      const started = await client.startGeneration({
+      const started = await client.startSpecPatchProposal({
         threadId: currentThreadId,
-        prompt,
-        layoutRenderId: render.id,
-        layoutSpec,
-        sceneSnapshot: scene,
-        referenceIds: selectedReferences.map(({ id }) => id),
-        parentGenerationId: sourceGeneration?.id ?? null,
-        sourceGenerationId:
-          sourceGeneration === null
-            ? (scene.generationSource?.generationId ?? null)
-            : null,
-        feedback: sourceGeneration === null ? null : message,
-        generationMode: sourceGeneration === null ? 'fresh' : 'edit',
+        requestId,
+        baseSceneRevision: scene.sceneRevision,
+        baseSpecRevision: scene.specRevision,
+        userMessage: message,
+        sceneDocument: scene,
       });
-      activeTurnIdRef.current = started.turnId;
-      setActiveTurnId(started.turnId);
-      setGeneration(started.generation);
+      trackStartedTurn(started.turnId);
     } catch (reason) {
-      setGenerationPhase(null);
       setConversationError(
         reason instanceof Error
           ? reason.message
-          : '이미지 생성을 시작하지 못했습니다.',
+          : 'Semantic Scene Spec 변경안을 요청하지 못했습니다.',
       );
       setIsSubmitting(false);
     }
   }, [
-    captureLayout,
     client,
     draft,
     ensureThread,
     getSceneContext,
-    getSelectedReferences,
     isSubmitting,
     phase,
-    refinementSource,
-    runtime?.capabilities?.imageGeneration,
-    revokeObjectUrl,
+    trackStartedTurn,
+    conversationDecisionRequired,
+    conversationSessionLoading,
   ]);
+
+  const generateImage = useCallback(
+    async (acknowledgeWarnings = false) => {
+      const message = draft.trim();
+      const sourceGeneration = refinementSource;
+      const editing = sourceGeneration !== null;
+      let refinementDirective: RefinementDirective | null = null;
+      if (editing) {
+        try {
+          refinementDirective = createRefinementDirective(
+            message,
+            refinementPreserveDraft,
+          );
+        } catch (reason) {
+          setConversationError(
+            reason instanceof Error
+              ? `보정 지시를 확인해 주세요. ${reason.message}`
+              : '보정 지시를 구조화하지 못했습니다.',
+          );
+          return;
+        }
+      }
+      const selectedReferences = getSelectedReferences();
+      if (
+        message === '' ||
+        phase !== 'ready' ||
+        captureLayout === null ||
+        activeTurnIdRef.current !== null ||
+        isSubmitting ||
+        conversationDecisionRequired ||
+        conversationSessionLoading ||
+        generationLaunchInFlightRef.current ||
+        runtime?.capabilities?.imageGeneration === false
+      ) {
+        return;
+      }
+      const parsedScene = sceneDocumentSchema.safeParse(getSceneContext());
+      if (!parsedScene.success) {
+        setConversationError(
+          '현재 SceneDocument를 생성 전 검사에 사용할 수 없습니다.',
+        );
+        return;
+      }
+      const scene = parsedScene.data;
+      let layoutSpec: ReturnType<typeof createLayoutSpec>;
+      try {
+        layoutSpec = createLayoutSpec(scene, selectedReferences);
+      } catch (reason) {
+        setConversationError(
+          reason instanceof Error
+            ? reason.message
+            : '현재 장면을 LayoutSpec으로 해석하지 못했습니다.',
+        );
+        return;
+      }
+      const preflightInput = {
+        scene,
+        layoutSpec,
+        references: selectedReferences,
+        includeLayout: true,
+        includeSourceKeyframe: editing,
+      };
+      const preflight = evaluateGenerationPreflight(preflightInput);
+      if (preflight.blockers.length > 0) {
+        setPendingGenerationPreflight(null);
+        setConversationError(
+          `생성 전 무결성 검사 실패: ${preflight.blockers.map(({ message: blockerMessage }) => blockerMessage).join(' ')}`,
+        );
+        return;
+      }
+      const preflightFingerprint =
+        createGenerationPreflightFingerprint(preflightInput);
+      if (
+        preflight.warnings.length > 0 &&
+        (!acknowledgeWarnings ||
+          pendingGenerationPreflight?.fingerprint !== preflightFingerprint)
+      ) {
+        setPendingGenerationPreflight({
+          fingerprint: preflightFingerprint,
+          warnings: preflight.warnings,
+        });
+        setConversationError(null);
+        return;
+      }
+
+      generationLaunchInFlightRef.current = true;
+      messageSequence.current += 1;
+      setMessages((current) => [
+        ...current,
+        {
+          id: `user-${messageSequence.current}`,
+          role: 'user',
+          text: `${message} (${editing ? '키프레임 보정' : '이미지 생성'})`,
+        },
+      ]);
+      setDraft('');
+      setPendingGenerationPreflight(null);
+      setConversationError(null);
+      const previousPreviewUrl = generationPreviewUrlRef.current;
+      if (previousPreviewUrl !== null) {
+        generationPreviewUrlRef.current = null;
+        revokeAfterRender(revokeObjectUrl, previousPreviewUrl);
+      }
+      setGenerationPreviewUrl(null);
+      setGeneration(null);
+      setIsSubmitting(true);
+      setGenerationPhase('rendering');
+
+      try {
+        const layout = await captureLayout();
+        setGenerationPhase('uploading');
+        const render = await client.createSceneRender(layout, scene.id);
+        const currentThreadId = await ensureThread();
+        const prompt =
+          sourceGeneration === null
+            ? createImageGenerationPrompt(scene, layoutSpec, selectedReferences)
+            : createImageRefinementPrompt(
+                refinementDirective!,
+                scene,
+                layoutSpec,
+                sourceGeneration,
+                selectedReferences,
+              );
+        setGenerationPhase('generating');
+        const generationInput: NormalizedStartGenerationInput =
+          startGenerationInputSchema.parse({
+            requestId: createGenerationRequestId(scene.id),
+            threadId: currentThreadId,
+            prompt,
+            layoutRenderId: render.id,
+            layoutSpec,
+            sceneSnapshot: scene,
+            referenceIds: selectedReferences.map(({ id }) => id),
+            parentGenerationId: sourceGeneration?.id ?? null,
+            sourceGenerationId:
+              sourceGeneration === null
+                ? (scene.generationSource?.generationId ?? null)
+                : null,
+            feedback: sourceGeneration === null ? null : message,
+            refinementDirective,
+            generationMode: sourceGeneration === null ? 'fresh' : 'edit',
+            acknowledgedPreflightWarningIds: preflight.warnings.map(
+              ({ id }) => id,
+            ),
+          });
+        storeGenerationRequestRecovery(storage, generationInput);
+        const started = await client.startGeneration(generationInput);
+        clearGenerationRequestRecovery(storage);
+        setGenerationRequestRecovery(null);
+        if (
+          started.generation.status !== 'inProgress' ||
+          trackStartedTurn(started.turnId)
+        ) {
+          await displayGeneration(started.generation);
+        }
+      } catch (reason) {
+        const recovery = readGenerationRequestRecovery(storage);
+        if (recovery !== null) setGenerationRequestRecovery(recovery);
+        setGenerationPhase(null);
+        setConversationError(
+          reason instanceof Error
+            ? reason.message
+            : '이미지 생성을 시작하지 못했습니다.',
+        );
+        setIsSubmitting(false);
+      } finally {
+        generationLaunchInFlightRef.current = false;
+      }
+    },
+    [
+      captureLayout,
+      client,
+      draft,
+      ensureThread,
+      getSceneContext,
+      getSelectedReferences,
+      isSubmitting,
+      pendingGenerationPreflight?.fingerprint,
+      phase,
+      refinementPreserveDraft,
+      refinementSource,
+      runtime?.capabilities?.imageGeneration,
+      revokeObjectUrl,
+      storage,
+      displayGeneration,
+      trackStartedTurn,
+      conversationDecisionRequired,
+      conversationSessionLoading,
+    ],
+  );
+
+  const retryRecoveredGenerationRequest = useCallback(async () => {
+    if (
+      generationRequestRecovery === null ||
+      generationLaunchInFlightRef.current ||
+      activeTurnIdRef.current !== null ||
+      isSubmitting
+    ) {
+      return;
+    }
+    generationLaunchInFlightRef.current = true;
+    setIsSubmitting(true);
+    setGenerationPhase('generating');
+    setConversationError(null);
+    try {
+      await ensureThread();
+      const started = await client.startGeneration(
+        generationRequestRecovery.input,
+      );
+      clearGenerationRequestRecovery(storage);
+      setGenerationRequestRecovery(null);
+      if (
+        started.generation.status !== 'inProgress' ||
+        trackStartedTurn(started.turnId)
+      ) {
+        await displayGeneration(started.generation);
+      }
+    } catch (reason) {
+      setGenerationPhase(null);
+      setConversationError(
+        reason instanceof Error
+          ? `generation 요청을 다시 확인하지 못했습니다. ${reason.message}`
+          : 'generation 요청을 다시 확인하지 못했습니다.',
+      );
+      setIsSubmitting(false);
+    } finally {
+      generationLaunchInFlightRef.current = false;
+    }
+  }, [
+    client,
+    displayGeneration,
+    ensureThread,
+    generationRequestRecovery,
+    isSubmitting,
+    storage,
+    trackStartedTurn,
+  ]);
+
+  const applyPendingSpecPatch = useCallback(() => {
+    if (pendingSpecPatch === null) return;
+    const requestId = pendingSpecPatch.proposal.requestId;
+    if (handledProposalIdsRef.current.has(requestId)) return;
+    handledProposalIdsRef.current.add(requestId);
+    try {
+      onApplySpecPatchProposal(pendingSpecPatch.proposal);
+      setPendingSpecPatch(null);
+      setProposalError(null);
+    } catch (reason) {
+      setPendingSpecPatch(null);
+      setProposalError(
+        reason instanceof Error
+          ? reason.message
+          : 'Semantic Scene Spec 변경안을 적용하지 못했습니다.',
+      );
+    }
+  }, [onApplySpecPatchProposal, pendingSpecPatch]);
 
   const cancelTurn = useCallback(async () => {
     const currentThreadId = threadIdRef.current;
@@ -546,6 +1174,11 @@ function ConnectedSceneAssistant({
     setIsCancelling(true);
     try {
       await client.interruptTurn(currentThreadId, currentTurnId);
+      activeTurnIdRef.current = null;
+      setActiveTurnId(null);
+      setIsSubmitting(false);
+      setIsCancelling(false);
+      generationLaunchInFlightRef.current = false;
     } catch (reason) {
       setConversationError(
         reason instanceof Error
@@ -556,18 +1189,90 @@ function ConnectedSceneAssistant({
     }
   }, [client, isCancelling]);
 
-  const startNewConversation = useCallback(() => {
-    if (activeTurnIdRef.current !== null) return;
-    threadIdRef.current = null;
-    threadReadyRef.current = false;
-    setThreadId(null);
-    setMessages([]);
+  const activateSavedConversation = useCallback(async () => {
+    if (savedTask === null || sessionActionInFlight) return;
+    setSessionActionInFlight(true);
     setConversationError(null);
-    changeRefinementSource(null);
-    clearSceneAssistantThread();
-  }, [changeRefinementSource]);
+    try {
+      const resumedThreadId = await client.startThread(savedTask.threadId);
+      threadIdRef.current = resumedThreadId;
+      threadReadyRef.current = true;
+      conversationActivatedRef.current = true;
+      setThreadId(resumedThreadId);
+      setConversationDecisionRequired(false);
+      storeSceneAssistantThread(resumedThreadId);
+    } catch (reason) {
+      setConversationError(
+        reason instanceof Error
+          ? `저장된 Codex task를 재개하지 못했습니다. 새 task를 시작할 수 있습니다. ${reason.message}`
+          : '저장된 Codex task를 재개하지 못했습니다. 새 task를 시작할 수 있습니다.',
+      );
+    } finally {
+      setSessionActionInFlight(false);
+    }
+  }, [client, savedTask, sessionActionInFlight]);
 
-  const busy = activeTurnId !== null || isSubmitting;
+  const startNewConversation = useCallback(async () => {
+    if (activeTurnIdRef.current !== null || sessionActionInFlight) return;
+    setSessionActionInFlight(true);
+    setConversationError(null);
+    try {
+      if (client.getConversationSession === undefined) {
+        threadIdRef.current = null;
+        threadReadyRef.current = false;
+        setThreadId(null);
+        clearSceneAssistantThread();
+      } else {
+        const nextThreadId = await client.startThread();
+        threadIdRef.current = nextThreadId;
+        threadReadyRef.current = true;
+        conversationActivatedRef.current = true;
+        setThreadId(nextThreadId);
+        storeSceneAssistantThread(nextThreadId);
+      }
+      setSavedTask(null);
+      setConversationDecisionRequired(false);
+      setMessages([]);
+      changeRefinementSource(null);
+    } catch (reason) {
+      setConversationError(
+        reason instanceof Error
+          ? `새 Codex task를 시작하지 못했습니다. ${reason.message}`
+          : '새 Codex task를 시작하지 못했습니다.',
+      );
+    } finally {
+      setSessionActionInFlight(false);
+    }
+  }, [changeRefinementSource, client, sessionActionInFlight]);
+
+  const respondToRuntimeRequest = useCallback(
+    async (requestId: string, response: RuntimeRequestResponse) => {
+      if (client.respondRuntimeRequest === undefined) {
+        throw new Error(
+          '현재 Companion이 App Server 요청 응답을 지원하지 않습니다.',
+        );
+      }
+      setRuntimeRequestActionId(requestId);
+      setRuntimeRequestError(null);
+      try {
+        upsertRuntimeRequest(
+          await client.respondRuntimeRequest(requestId, response),
+        );
+      } catch (reason) {
+        const error =
+          reason instanceof Error
+            ? reason
+            : new Error('App Server 요청에 응답하지 못했습니다.');
+        setRuntimeRequestError(error.message);
+        throw error;
+      } finally {
+        setRuntimeRequestActionId(null);
+      }
+    },
+    [client, upsertRuntimeRequest],
+  );
+
+  const busy = activeTurnId !== null || isSubmitting || sessionActionInFlight;
   const selectedReferences = getSelectedReferences();
   const maximumReferences = getMaximumReferenceImages({
     includeLayout: true,
@@ -597,6 +1302,27 @@ function ConnectedSceneAssistant({
         <p className="assistant-message">
           Codex 런타임 상태를 확인하고 있습니다.
         </p>
+      ) : null}
+
+      {phase === 'reconnecting' ? (
+        <div className="assistant-reconnect" role="status">
+          <strong>
+            Companion 자동 재연결 {reconnectAttempt}/
+            {MAX_AUTOMATIC_RECONNECT_ATTEMPTS}
+          </strong>
+          <p>
+            {connectionError ?? 'Companion 연결이 끊겼습니다.'}
+            {reconnectDelayMs === null
+              ? ' 상태를 다시 확인하고 있습니다.'
+              : ` ${(reconnectDelayMs / 1_000).toFixed(1)}초 뒤 상태를 다시 확인합니다.`}
+          </p>
+          <button type="button" onClick={retry}>
+            지금 다시 연결
+          </button>
+          <small>
+            진행 여부가 불명확한 turn은 자동으로 다시 실행하지 않습니다.
+          </small>
+        </div>
       ) : null}
 
       {phase === 'ready' && runtime !== null ? (
@@ -654,20 +1380,117 @@ function ConnectedSceneAssistant({
           aria-labelledby="assistant-tab-conversation"
         >
           <div className="assistant-conversation-heading">
-            <p>{threadId === null ? '새 대화' : '장면 대화'}</p>
-            {threadId !== null && !busy ? (
-              <button type="button" onClick={startNewConversation}>
+            <p>
+              {conversationDecisionRequired
+                ? '프로젝트 대화 선택'
+                : threadId === null
+                  ? '새 대화'
+                  : '장면 대화'}
+            </p>
+            {threadId !== null && !busy && !conversationDecisionRequired ? (
+              <button type="button" onClick={() => void startNewConversation()}>
                 새 대화
               </button>
             ) : null}
           </div>
 
+          {conversationSessionLoading ? (
+            <p className="assistant-session-loading" role="status">
+              프로젝트의 저장된 Codex task를 확인하고 있습니다.
+            </p>
+          ) : null}
+
+          {!conversationDecisionRequired || savedTask === null ? null : (
+            <article
+              className="assistant-session-choice"
+              aria-label="저장된 Codex task 선택"
+            >
+              <header>
+                <strong>저장된 대화를 이어갈까요?</strong>
+                <span>{savedTask.threadId}</span>
+              </header>
+              <dl>
+                <div>
+                  <dt>최근 요청</dt>
+                  <dd>{savedTask.lastUserMessage ?? '기록 없음'}</dd>
+                </div>
+                <div>
+                  <dt>최근 응답 요약</dt>
+                  <dd>{savedTask.lastAssistantSummary ?? '기록 없음'}</dd>
+                </div>
+                <div>
+                  <dt>진행 상태</dt>
+                  <dd>
+                    turn {savedTask.turnCount}개 ·{' '}
+                    {savedTask.lastTurnStatus ?? '시작 전'} · scene r
+                    {savedTask.sceneRevision ?? '?'} · spec r
+                    {savedTask.specRevision ?? '?'}
+                  </dd>
+                </div>
+              </dl>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => void activateSavedConversation()}
+                  disabled={sessionActionInFlight}
+                >
+                  저장된 task 재개
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void startNewConversation()}
+                  disabled={sessionActionInFlight}
+                >
+                  새 task 시작
+                </button>
+              </div>
+            </article>
+          )}
+
+          {runtimeRequests
+            .filter(({ status }) => status === 'pending')
+            .map((request) => (
+              <RuntimeRequestCard
+                key={request.id}
+                request={request}
+                busy={runtimeRequestActionId === request.id}
+                onRespond={(response) =>
+                  respondToRuntimeRequest(request.id, response)
+                }
+              />
+            ))}
+
+          {runtimeRequests
+            .filter(({ status }) => status === 'expired')
+            .slice(-1)
+            .map((request) => (
+              <article
+                key={request.id}
+                className="assistant-runtime-request assistant-runtime-request--expired"
+                aria-label="만료된 Codex 요청"
+              >
+                <strong>{request.title}이 만료되었습니다.</strong>
+                <p>
+                  Companion 재시작으로 이전 App Server 연결에 응답할 수
+                  없습니다. Codex가 다시 요청하면 새 카드에서 결정해 주세요.
+                </p>
+              </article>
+            ))}
+
+          {runtimeRequestError === null ? null : (
+            <p className="assistant-conversation-error" role="alert">
+              {runtimeRequestError}
+            </p>
+          )}
+
           <div className="assistant-messages" aria-live="polite">
             {messages.length === 0 ? (
               <p className="assistant-empty-message">
-                {threadId === null
-                  ? '현재 3D 장면에 대해 설명하거나 의미를 지정해 보세요.'
-                  : '이전 Codex task를 다음 메시지부터 이어갑니다.'}
+                {conversationDecisionRequired
+                  ? 'task를 선택하기 전에는 대화나 생성을 시작하지 않습니다.'
+                  : threadId === null
+                    ? '현재 3D 장면에 대해 설명하거나 의미를 지정해 보세요.'
+                    : '이전 Codex task를 다음 메시지부터 이어갑니다.'}
               </p>
             ) : (
               messages.map((message) => (
@@ -689,11 +1512,99 @@ function ConnectedSceneAssistant({
             ) : null}
           </div>
 
+          {pendingSpecPatch === null ? null : (
+            <article
+              className="assistant-spec-patch-card"
+              aria-label="장면 변경안"
+            >
+              <header>
+                <p className="eyebrow">검증된 변경안</p>
+                <h3>{pendingSpecPatch.proposal.message}</h3>
+              </header>
+              <dl className="assistant-spec-patch-changes">
+                {pendingSpecPatch.evaluation.changes.map((change) => (
+                  <div key={change.path}>
+                    <dt>{change.path}</dt>
+                    <dd>
+                      <span>{formatSpecPatchValue(change.before)}</span>
+                      <span aria-hidden="true">→</span>
+                      <strong>{formatSpecPatchValue(change.after)}</strong>
+                    </dd>
+                  </div>
+                ))}
+                {pendingSpecPatch.evaluation.sceneCommandChanges.map(
+                  (change) => (
+                    <div key={`${change.type}:${change.objectId}`}>
+                      <dt>
+                        {change.objectName} ({change.objectId}) · 3D transform
+                      </dt>
+                      <dd>
+                        <span>{formatTransform(change.before)}</span>
+                        <span aria-hidden="true">→</span>
+                        <strong>{formatTransform(change.after)}</strong>
+                      </dd>
+                    </div>
+                  ),
+                )}
+              </dl>
+              {pendingSpecPatch.proposal.warnings.length === 0 ? null : (
+                <div className="assistant-spec-patch-warnings">
+                  <strong>주의</strong>
+                  <ul>
+                    {pendingSpecPatch.proposal.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="assistant-spec-patch-actions">
+                <button
+                  type="button"
+                  onClick={applyPendingSpecPatch}
+                  disabled={
+                    pendingSpecPatch.evaluation.changes.length === 0 &&
+                    pendingSpecPatch.evaluation.sceneCommandChanges.length === 0
+                  }
+                >
+                  변경안 적용
+                </button>
+                <button type="button" onClick={() => setPendingSpecPatch(null)}>
+                  변경안 취소
+                </button>
+              </div>
+            </article>
+          )}
+
+          {proposalError !== null ? (
+            <p className="assistant-conversation-error" role="alert">
+              {proposalError}
+            </p>
+          ) : null}
+
           {conversationError !== null ? (
             <p className="assistant-conversation-error" role="alert">
               {conversationError}
             </p>
           ) : null}
+
+          {generationRequestRecovery === null ? null : (
+            <article
+              className="assistant-generation-recovery"
+              aria-label="미확인 generation 요청 복구"
+            >
+              <strong>이전 생성 요청의 완료 여부를 확인하지 못했습니다.</strong>
+              <span>
+                request ID · {generationRequestRecovery.input.requestId}
+              </span>
+              <button
+                type="button"
+                onClick={() => void retryRecoveredGenerationRequest()}
+                disabled={busy}
+              >
+                같은 요청 안전하게 다시 확인
+              </button>
+            </article>
+          )}
 
           {generationPhase !== null ? (
             <p className="assistant-generation-status" role="status">
@@ -706,6 +1617,24 @@ function ConnectedSceneAssistant({
                     : 'Codex가 이미지를 생성하고 있습니다.'}
             </p>
           ) : null}
+
+          {generation?.requestId === undefined ||
+          generation.requestId === null ? null : (
+            <p
+              className="assistant-generation-request-status"
+              role="status"
+              aria-label="generation 요청 상태"
+            >
+              request ID · {generation.requestId} ·{' '}
+              {generation.status === 'inProgress'
+                ? '진행 중'
+                : generation.status === 'completed'
+                  ? '완료'
+                  : generation.status === 'failed'
+                    ? '실패 · 새 요청으로 다시 시도 가능'
+                    : '중단됨 · 새 요청으로 다시 시도 가능'}
+            </p>
+          )}
 
           {generationPreviewUrl !== null &&
           generation !== null &&
@@ -759,6 +1688,57 @@ function ConnectedSceneAssistant({
           )}
 
           <form className="assistant-composer" onSubmit={submitMessage}>
+            {pendingGenerationPreflight === null ? null : (
+              <article
+                className="assistant-preflight-card"
+                aria-label="생성 전 충돌 경고"
+              >
+                <header>
+                  <p className="eyebrow">Generation preflight</p>
+                  <h3>확인이 필요한 충돌 가능성이 있습니다.</h3>
+                </header>
+                <ul>
+                  {pendingGenerationPreflight.warnings.map((warning) => (
+                    <li key={warning.id}>{warning.message}</li>
+                  ))}
+                </ul>
+                <div className="assistant-preflight-actions">
+                  <button
+                    type="button"
+                    onClick={() => void generateImage(true)}
+                  >
+                    경고 확인 후 생성
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingGenerationPreflight(null)}
+                  >
+                    생성 취소
+                  </button>
+                </div>
+              </article>
+            )}
+            {refinementSource === null ? null : (
+              <>
+                <label htmlFor="assistant-refinement-preserve">
+                  이 키프레임에서 유지할 요소
+                </label>
+                <textarea
+                  id="assistant-refinement-preserve"
+                  value={refinementPreserveDraft}
+                  onChange={(event) =>
+                    setRefinementPreserveDraft(event.target.value)
+                  }
+                  placeholder={'예: 전체 구도\n인물 의상과 정체성'}
+                  rows={2}
+                  disabled={busy}
+                />
+                <p className="assistant-refinement-directive-help">
+                  유지·변경 항목을 한 줄에 하나씩 입력합니다. 같은 항목은 두
+                  목록에 동시에 넣을 수 없습니다.
+                </p>
+              </>
+            )}
             <label htmlFor="assistant-message">
               {refinementSource === null
                 ? '장면에 대해 말하기'
@@ -793,7 +1773,11 @@ function ConnectedSceneAssistant({
                   : '예: 전봇대가 가리는 비율만 조금 줄여줘.'
               }
               rows={3}
-              disabled={busy}
+              disabled={
+                busy ||
+                conversationDecisionRequired ||
+                conversationSessionLoading
+              }
             />
             {busy ? (
               <button
@@ -808,6 +1792,16 @@ function ConnectedSceneAssistant({
               <div className="assistant-actions">
                 <button type="submit" disabled={draft.trim() === ''}>
                   보내기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void requestSpecPatchProposal()}
+                  disabled={
+                    draft.trim() === '' ||
+                    client.startSpecPatchProposal === undefined
+                  }
+                >
+                  변경안 제안
                 </button>
                 <button
                   className="assistant-generate"
@@ -926,9 +1920,11 @@ export function SceneAssistantPanel({
   clientFactory = defaultClientFactory,
   createObjectUrl = defaultCreateObjectUrl,
   revokeObjectUrl = defaultRevokeObjectUrl,
+  storage = window.localStorage,
   onRefinementModeChange = ignoreRefinementModeChange,
   refinementSource,
   onRefinementSourceChange = ignoreRefinementSourceChange,
+  onApplySpecPatchProposal = unavailableSpecPatchApply,
 }: SceneAssistantPanelProps) {
   if (connection === null) {
     return (
@@ -960,9 +1956,11 @@ export function SceneAssistantPanel({
       clientFactory={clientFactory}
       createObjectUrl={createObjectUrl}
       revokeObjectUrl={revokeObjectUrl}
+      storage={storage}
       onRefinementModeChange={onRefinementModeChange}
       refinementSource={refinementSource}
       onRefinementSourceChange={onRefinementSourceChange}
+      onApplySpecPatchProposal={onApplySpecPatchProposal}
     />
   );
 }

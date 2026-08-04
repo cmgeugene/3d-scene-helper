@@ -183,7 +183,11 @@ describe('createImageGenerationPrompt', () => {
 describe('createImageRefinementPrompt', () => {
   it('기존 키프레임과 3D 캡처 뒤에 레퍼런스를 배치한다', () => {
     const prompt = createImageRefinementPrompt(
-      '전봇대가 가리는 비율만 줄여줘.',
+      {
+        version: 1,
+        preserve: ['전체 구도', '인물 정체성'],
+        change: ['전봇대가 가리는 비율만 줄여줘.'],
+      },
       { id: 'scene-1' },
       TEST_LAYOUT_SPEC,
       { id: 'generation-1', versionNumber: 1 },
@@ -212,6 +216,10 @@ describe('createImageRefinementPrompt', () => {
     expect(prompt).toContain('첨부 이미지 1은 보정의 기준');
     expect(prompt).toContain('첨부 이미지 2는 현재 OutputCamera');
     expect(prompt).toContain('한 번의 완성 이미지 재생성');
+    expect(prompt).toContain('[보정 지시 / RefinementDirective]');
+    expect(prompt).toContain('"preserve":["전체 구도","인물 정체성"]');
+    expect(prompt).toContain('"change":["전봇대가 가리는 비율만 줄여줘."]');
+    expect(prompt).toContain('두 목록에 없는 요소도 기존 키프레임을 우선 보존');
     expect(prompt).toContain('"attachmentIndex":3');
     expect(prompt).toContain('"id":"generation-1"');
   });

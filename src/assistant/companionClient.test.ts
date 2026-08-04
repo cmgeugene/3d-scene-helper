@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CompanionClient, SseDecoder } from './companionClient';
 import { TEST_LAYOUT_SPEC } from '../../shared/layoutSpecTestFixture';
 import { createStarterSceneDocument } from '../editor/persistence/sceneSchema';
@@ -137,6 +137,208 @@ describe('CompanionClient', () => {
     });
   });
 
+  it('프로젝트 대화 metadata를 검증하고 요약 가능한 turn 입력을 보낸다', async () => {
+    const fetchCalls: Array<{ input: string; init?: RequestInit }> = [];
+    const session = {
+      version: 1 as const,
+      activeTask: {
+        threadId: 'thread-saved',
+        state: 'active' as const,
+        turnCount: 2,
+        lastTurnId: 'turn-2',
+        lastTurnKind: 'conversation' as const,
+        lastTurnStatus: 'completed' as const,
+        lastUserMessage: '인물을 오른쪽으로 옮겨줘.',
+        lastAssistantSummary: '오른쪽 이동 변경안을 준비했습니다.',
+        sceneRevision: 4,
+        specRevision: 2,
+        createdAt: '2026-08-04T00:00:00.000Z',
+        updatedAt: '2026-08-04T00:01:00.000Z',
+      },
+      archivedTaskCount: 1,
+    };
+    const client = new CompanionClient(connection, async (input, init) => {
+      fetchCalls.push({ input: String(input), init });
+      if (String(input).endsWith('/api/conversation-session')) {
+        return new Response(JSON.stringify(session));
+      }
+      return new Response(JSON.stringify({ turnId: 'turn-3' }), {
+        status: 202,
+      });
+    });
+
+    await expect(client.getConversationSession()).resolves.toEqual(session);
+    await expect(
+      client.startConversationTurn(
+        'thread-saved',
+        'serialized prompt',
+        ['ref-1'],
+        {
+          kind: 'conversation',
+          userMessage: '계속 이야기하자.',
+          sceneRevision: 5,
+          specRevision: 3,
+        },
+      ),
+    ).resolves.toBe('turn-3');
+
+    expect(fetchCalls[1]).toMatchObject({
+      input: 'http://127.0.0.1:61234/api/turns',
+      init: {
+        method: 'POST',
+        body: JSON.stringify({
+          threadId: 'thread-saved',
+          prompt: 'serialized prompt',
+          attachments: [],
+          referenceIds: ['ref-1'],
+          metadata: {
+            kind: 'conversation',
+            userMessage: '계속 이야기하자.',
+            sceneRevision: 5,
+            specRevision: 3,
+          },
+        }),
+        headers: expect.objectContaining({
+          Authorization: `Bearer ${connection.token}`,
+        }),
+      },
+    });
+  });
+
+  it('App Server 요청 목록을 검증하고 승인·답변을 인증된 endpoint로 보낸다', async () => {
+    const fetchCalls: Array<{ input: string; init?: RequestInit }> = [];
+    const pending = {
+      id: 'b893b2c7-06b7-4547-988b-5894df20d830',
+      kind: 'commandApproval' as const,
+      method: 'item/commandExecution/requestApproval' as const,
+      threadId: 'thread-approval',
+      turnId: 'turn-approval',
+      itemId: 'item-command',
+      status: 'pending' as const,
+      title: '명령 실행 승인',
+      reason: '빌드 검증',
+      impact: 'npm run build',
+      cwd: '/project',
+      questions: [],
+      autoResolutionMs: null,
+      createdAt: '2026-08-04T00:00:00.000Z',
+      updatedAt: '2026-08-04T00:00:00.000Z',
+      resolvedAt: null,
+    };
+    const client = new CompanionClient(connection, async (input, init) => {
+      fetchCalls.push({ input: String(input), init });
+      if (init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({
+            request: {
+              ...pending,
+              status: 'approved',
+              updatedAt: '2026-08-04T00:01:00.000Z',
+              resolvedAt: '2026-08-04T00:01:00.000Z',
+            },
+          }),
+        );
+      }
+      return new Response(JSON.stringify({ version: 1, requests: [pending] }));
+    });
+
+    await expect(client.listRuntimeRequests()).resolves.toEqual({
+      version: 1,
+      requests: [pending],
+    });
+    await expect(
+      client.respondRuntimeRequest(pending.id, { action: 'approve' }),
+    ).resolves.toMatchObject({ id: pending.id, status: 'approved' });
+    expect(fetchCalls[1]).toMatchObject({
+      input: `http://127.0.0.1:61234/api/runtime-requests/${pending.id}/respond`,
+      init: expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ action: 'approve' }),
+        headers: expect.objectContaining({
+          Authorization: `Bearer ${connection.token}`,
+        }),
+      }),
+    });
+  });
+
+  it('Semantic Scene Spec 변경안 요청을 revisioned SceneDocument와 함께 보낸다', async () => {
+    const sceneDocument = createStarterSceneDocument({
+      documentId: 'scene-proposal-client',
+      floorId: 'floor-proposal-client',
+      mannequinId: 'mannequin-proposal-client',
+    });
+    const fetchCalls: Array<{ input: string; init?: RequestInit }> = [];
+    const client = new CompanionClient(connection, async (input, init) => {
+      fetchCalls.push({ input: String(input), init });
+      return new Response(
+        JSON.stringify({
+          turnId: 'turn-proposal-client',
+          requestId: 'request-proposal-client',
+        }),
+        { status: 202 },
+      );
+    });
+
+    await expect(
+      client.startSpecPatchProposal({
+        threadId: 'thread-1',
+        requestId: 'request-proposal-client',
+        baseSceneRevision: 0,
+        baseSpecRevision: 0,
+        userMessage: '분위기를 긴장감 있게 바꿔줘.',
+        sceneDocument,
+      }),
+    ).resolves.toEqual({
+      turnId: 'turn-proposal-client',
+      requestId: 'request-proposal-client',
+    });
+    expect(fetchCalls[0]).toMatchObject({
+      input: 'http://127.0.0.1:61234/api/spec-patch-proposals',
+      init: expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          threadId: 'thread-1',
+          requestId: 'request-proposal-client',
+          baseSceneRevision: 0,
+          baseSpecRevision: 0,
+          userMessage: '분위기를 긴장감 있게 바꿔줘.',
+          sceneDocument,
+        }),
+      }),
+    });
+  });
+
+  it('브라우저 경계에서 request revision 불일치와 malformed SceneDocument를 전송 전에 거부한다', async () => {
+    const sceneDocument = createStarterSceneDocument({
+      documentId: 'scene-proposal-invalid-client',
+      floorId: 'floor-proposal-invalid-client',
+      mannequinId: 'mannequin-proposal-invalid-client',
+    });
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            turnId: 'turn-never',
+            requestId: 'request-invalid',
+          }),
+          { status: 202 },
+        ),
+    );
+    const client = new CompanionClient(connection, fetchImpl);
+
+    await expect(
+      client.startSpecPatchProposal({
+        threadId: 'thread-1',
+        requestId: 'request-invalid',
+        baseSceneRevision: 1,
+        baseSpecRevision: 0,
+        userMessage: '장소를 바꿔줘.',
+        sceneDocument,
+      }),
+    ).rejects.toThrow(/revision/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('레퍼런스 목록, 바이너리 가져오기와 콘텐츠 조회를 인증해 처리한다', async () => {
     const reference = {
       id: 'ref-1',
@@ -265,12 +467,50 @@ describe('CompanionClient', () => {
       parentGenerationId: null,
       versionNumber: 1,
       feedback: null,
+      refinementDirective: null,
       generationMode: 'fresh' as const,
       layoutRenderId: 'render-1',
       referenceIds: ['ref-1'],
       attachments: [
         { type: 'layout' as const, id: 'render-1', kind: 'layout' as const },
       ],
+      executionSummary: {
+        version: 1 as const,
+        requestId: null,
+        prompt: { contentHash: `sha256:${'1'.repeat(64)}` },
+        sceneDocument: {
+          id: sceneSnapshot.id,
+          sceneRevision: sceneSnapshot.sceneRevision,
+          specRevision: sceneSnapshot.specRevision,
+          contentHash: `sha256:${'2'.repeat(64)}`,
+        },
+        semanticSceneSpec: {
+          version: 1 as const,
+          contentHash: `sha256:${'3'.repeat(64)}`,
+        },
+        layoutSpec: {
+          version: 1 as const,
+          sceneId: TEST_LAYOUT_SPEC.sceneId,
+          contentHash: `sha256:${'4'.repeat(64)}`,
+        },
+        layoutRender: {
+          id: 'render-1',
+          sceneId: sceneSnapshot.id,
+          contentHash: render.contentHash,
+        },
+        sourceGeneration: null,
+        references: [],
+        attachments: [
+          {
+            attachmentIndex: 1,
+            type: 'layout' as const,
+            id: 'render-1',
+            kind: 'layout' as const,
+            contentHash: render.contentHash,
+          },
+        ],
+      },
+      executionIntegrity: { status: 'valid' as const, issues: [] },
       revisedPrompt: null,
       result: null,
       error: null,
@@ -309,6 +549,7 @@ describe('CompanionClient', () => {
     await expect(client.listGenerations()).resolves.toEqual([generation]);
     await expect(
       client.startGeneration({
+        requestId: 'generation-request-client-1',
         threadId: 'thread-1',
         prompt: '$imagegen test',
         layoutRenderId: 'render-1',
@@ -338,6 +579,7 @@ describe('CompanionClient', () => {
     expect(fetchCalls[2]?.init).toMatchObject({
       method: 'POST',
       body: JSON.stringify({
+        requestId: 'generation-request-client-1',
         threadId: 'thread-1',
         prompt: '$imagegen test',
         layoutRenderId: 'render-1',
@@ -345,8 +587,11 @@ describe('CompanionClient', () => {
         sceneSnapshot,
         referenceIds: ['ref-1'],
         parentGenerationId: null,
+        sourceGenerationId: null,
         feedback: null,
+        refinementDirective: null,
         generationMode: 'fresh',
+        acknowledgedPreflightWarningIds: [],
       }),
     });
     expect(fetchCalls.at(-1)?.input).toBe(

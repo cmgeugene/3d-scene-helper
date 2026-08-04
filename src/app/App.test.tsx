@@ -98,9 +98,7 @@ describe('App', () => {
   });
 
   it('복원된 autosave를 새 장면과 기본 장면 초기화 기준으로 재사용하지 않는다', () => {
-    const runReset = (
-      buttonName: '새 장면' | '기본 장면으로 초기화',
-    ) => {
+    const runReset = (buttonName: '새 장면' | '기본 장면으로 초기화') => {
       const saved = createStarterSceneDocument({
         documentId: 'saved-scene',
         floorId: 'saved-floor',
@@ -143,10 +141,7 @@ describe('App', () => {
     };
 
     expect(runReset('새 장면')).toEqual([]);
-    expect(runReset('기본 장면으로 초기화')).toEqual([
-      'floor',
-      'mannequin',
-    ]);
+    expect(runReset('기본 장면으로 초기화')).toEqual(['floor', 'mannequin']);
   });
 
   it('document mutation을 debounce autosave하고 persisted 전 dirty 상태에서만 beforeunload를 막는다', () => {
@@ -181,7 +176,41 @@ describe('App', () => {
     expect(persistedUnload.defaultPrevented).toBe(false);
   });
 
-  it('pending autosave가 persisted document replacement를 뒤늦게 덮어쓰지 않는다', () => {
+  it('persisted semantic content로 undo해 dirty=false여도 monotonic revision은 autosave한다', () => {
+    vi.useFakeTimers();
+    const original = createStarterSceneDocument({
+      documentId: 'revision-scene',
+      floorId: 'revision-floor',
+      mannequinId: 'revision-mannequin',
+    });
+    const originalJson = encodeSceneDocument(original);
+    const storage = createMemoryStorage({ [SCENE_STORAGE_KEY]: originalJson });
+    const store = createAppEditorStore(storage);
+    render(<App canvasEnabled={false} store={store} storage={storage} />);
+
+    act(() => {
+      store.getState().addObject({ kind: 'cube' });
+      store.getState().undo();
+    });
+
+    expect(store.getState()).toMatchObject({
+      document: { sceneRevision: 2, specRevision: 0 },
+      isDirty: false,
+    });
+    expect(storage.getItem(SCENE_STORAGE_KEY)).toBe(originalJson);
+
+    act(() => {
+      vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS);
+    });
+
+    expect(storage.getItem(SCENE_STORAGE_KEY)).toBe(
+      encodeSceneDocument(store.getState().document),
+    );
+    expect(storage.getItem(SCENE_STORAGE_KEY)).not.toBe(originalJson);
+    expect(store.getState().isDirty).toBe(false);
+  });
+
+  it('pending autosave가 persisted replacement의 semantic content를 덮지 않고 새 revision만 보존한다', () => {
     vi.useFakeTimers();
     const persisted = createStarterSceneDocument({
       documentId: 'persisted-scene',
@@ -200,9 +229,16 @@ describe('App', () => {
       vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS);
     });
 
-    expect(storage.getItem(SCENE_STORAGE_KEY)).toBe(persistedJson);
+    expect(storage.getItem(SCENE_STORAGE_KEY)).toBe(
+      encodeSceneDocument(store.getState().document),
+    );
     expect(store.getState()).toMatchObject({
-      document: { id: 'persisted-scene', name: 'Persisted scene' },
+      document: {
+        id: 'persisted-scene',
+        name: 'Persisted scene',
+        sceneRevision: 2,
+        objects: persisted.objects,
+      },
       isDirty: false,
     });
   });

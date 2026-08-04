@@ -1,13 +1,29 @@
 import { z } from 'zod';
-import {
-  layoutSpecSchema,
-  type LayoutSpec,
-} from '../../shared/layoutSpecSchema';
+import { layoutSpecSchema } from '../../shared/layoutSpecSchema';
 import {
   sceneDocumentSchema,
   type SceneDocument,
 } from '../editor/persistence/sceneSchema';
 import { semanticSceneSpecSchema } from '../editor/persistence/semanticSceneSpec';
+import { refinementDirectiveSchema } from '../../shared/refinementDirective';
+import {
+  generationExecutionIntegritySchema,
+  generationExecutionSummarySchema,
+} from '../../shared/generationExecutionSummary';
+import {
+  conversationSessionSchema,
+  conversationTurnMetadataInputSchema,
+  type ConversationSession,
+  type ConversationTurnMetadataInput,
+} from '../../shared/conversationMetadata';
+import {
+  runtimeRequestListSchema,
+  runtimeRequestResponseSchema,
+  runtimeRequestSchema,
+  type RuntimeRequest,
+  type RuntimeRequestList,
+  type RuntimeRequestResponse,
+} from '../../shared/runtimeRequest';
 import type { CompanionConnection } from './companionConnection';
 
 const accountSchema = z
@@ -102,6 +118,7 @@ const generationSceneIntegritySchema = z.object({
 
 export const generationRecordSchema = z.object({
   id: z.string().min(1),
+  requestId: z.string().trim().min(1).max(200).nullable().optional(),
   threadId: z.string().min(1),
   turnId: z.string().min(1),
   status: z.enum(['inProgress', 'completed', 'failed', 'interrupted']),
@@ -114,6 +131,7 @@ export const generationRecordSchema = z.object({
   sourceGenerationId: z.string().min(1).nullable().optional(),
   versionNumber: z.number().int().positive().default(1),
   feedback: z.string().min(1).nullable().default(null),
+  refinementDirective: refinementDirectiveSchema.nullable().default(null),
   generationMode: z.enum(['fresh', 'edit']).default('fresh'),
   layoutRenderId: z.string().min(1),
   sceneIntegrity: generationSceneIntegritySchema.optional(),
@@ -125,6 +143,8 @@ export const generationRecordSchema = z.object({
       kind: referenceKindSchema.nullable(),
     }),
   ),
+  executionSummary: generationExecutionSummarySchema.nullable().optional(),
+  executionIntegrity: generationExecutionIntegritySchema.optional(),
   revisedPrompt: z.string().nullable(),
   result: generationResultSchema.nullable(),
   error: z.string().nullable(),
@@ -135,18 +155,64 @@ export const generationRecordSchema = z.object({
 export type SceneRenderArtifact = z.infer<typeof sceneRenderArtifactSchema>;
 export type GenerationRecord = z.infer<typeof generationRecordSchema>;
 
-export interface StartGenerationInput {
+const startSpecPatchProposalInputSchema = z
+  .strictObject({
+    threadId: z.string().min(1),
+    requestId: z.string().trim().min(1).max(200),
+    baseSceneRevision: z.number().int().nonnegative().safe(),
+    baseSpecRevision: z.number().int().nonnegative().safe(),
+    userMessage: z.string().trim().min(1).max(4_000),
+    sceneDocument: sceneDocumentSchema,
+  })
+  .superRefine((input, context) => {
+    if (input.baseSceneRevision !== input.sceneDocument.sceneRevision) {
+      context.addIssue({
+        code: 'custom',
+        path: ['baseSceneRevision'],
+        message: 'scene revision does not match SceneDocument',
+      });
+    }
+    if (input.baseSpecRevision !== input.sceneDocument.specRevision) {
+      context.addIssue({
+        code: 'custom',
+        path: ['baseSpecRevision'],
+        message: 'spec revision does not match SceneDocument',
+      });
+    }
+  });
+
+export interface StartSpecPatchProposalInput {
   threadId: string;
-  prompt: string;
-  layoutRenderId: string;
-  layoutSpec: LayoutSpec;
-  sceneSnapshot: SceneDocument;
-  referenceIds?: string[];
-  parentGenerationId?: string | null;
-  sourceGenerationId?: string | null;
-  feedback?: string | null;
-  generationMode?: GenerationRecord['generationMode'];
+  requestId: string;
+  baseSceneRevision: number;
+  baseSpecRevision: number;
+  userMessage: string;
+  sceneDocument: SceneDocument;
 }
+
+export const startGenerationInputSchema = z.object({
+  requestId: z.string().trim().min(1).max(200),
+  threadId: z.string().min(1),
+  prompt: z.string().min(1).max(100_000),
+  layoutRenderId: z.string().min(1),
+  layoutSpec: layoutSpecSchema,
+  sceneSnapshot: sceneDocumentSchema,
+  referenceIds: z.array(z.string().min(1)).default([]),
+  parentGenerationId: z.string().min(1).nullable().default(null),
+  sourceGenerationId: z.string().min(1).nullable().default(null),
+  feedback: z.string().trim().min(1).max(4_000).nullable().default(null),
+  refinementDirective: refinementDirectiveSchema.nullable().default(null),
+  generationMode: z.enum(['fresh', 'edit']).default('fresh'),
+  acknowledgedPreflightWarningIds: z
+    .array(z.string().trim().min(1).max(300))
+    .max(32)
+    .default([]),
+});
+
+export type StartGenerationInput = z.input<typeof startGenerationInputSchema>;
+export type NormalizedStartGenerationInput = z.output<
+  typeof startGenerationInputSchema
+>;
 
 export interface CompanionEvent {
   event: string;
@@ -155,6 +221,13 @@ export interface CompanionEvent {
 
 export interface CompanionBrowserClient {
   getRuntime(signal?: AbortSignal): Promise<CompanionRuntimeStatus>;
+  getConversationSession?(signal?: AbortSignal): Promise<ConversationSession>;
+  listRuntimeRequests?(signal?: AbortSignal): Promise<RuntimeRequestList>;
+  respondRuntimeRequest?(
+    requestId: string,
+    response: RuntimeRequestResponse,
+    signal?: AbortSignal,
+  ): Promise<RuntimeRequest>;
   startThread(threadId?: string, signal?: AbortSignal): Promise<string>;
   startTurn(
     threadId: string,
@@ -162,6 +235,17 @@ export interface CompanionBrowserClient {
     referenceIds?: string[],
     signal?: AbortSignal,
   ): Promise<string>;
+  startConversationTurn?(
+    threadId: string,
+    prompt: string,
+    referenceIds: string[],
+    metadata: ConversationTurnMetadataInput,
+    signal?: AbortSignal,
+  ): Promise<string>;
+  startSpecPatchProposal?(
+    input: StartSpecPatchProposalInput,
+    signal?: AbortSignal,
+  ): Promise<{ turnId: string; requestId: string }>;
   interruptTurn(
     threadId: string,
     turnId: string,
@@ -190,7 +274,11 @@ export interface CompanionBrowserClient {
   startGeneration(
     input: StartGenerationInput,
     signal?: AbortSignal,
-  ): Promise<{ turnId: string; generation: GenerationRecord }>;
+  ): Promise<{
+    turnId: string;
+    generation: GenerationRecord;
+    reused?: boolean;
+  }>;
   loadGenerationBlob(generationId: string, signal?: AbortSignal): Promise<Blob>;
   subscribe(
     listener: (event: CompanionEvent) => void,
@@ -199,7 +287,7 @@ export interface CompanionBrowserClient {
 }
 
 interface FetchLike {
-  (input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  (input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response>;
 }
 
 const defaultFetch: FetchLike = (input, init) => fetch(input, init);
@@ -269,6 +357,43 @@ export class CompanionClient implements CompanionBrowserClient {
     return z.object({ threadId: z.string().min(1) }).parse(value).threadId;
   }
 
+  async getConversationSession(signal?: AbortSignal) {
+    const response = await this.fetchImpl(
+      `${this.connection.url}/api/conversation-session`,
+      { headers: this.headers(), signal },
+    );
+    if (response.status === 404) {
+      return { version: 1 as const, activeTask: null, archivedTaskCount: 0 };
+    }
+    if (!response.ok) throw await this.createHttpError(response);
+    return conversationSessionSchema.parse(await response.json());
+  }
+
+  async listRuntimeRequests(signal?: AbortSignal) {
+    const response = await this.fetchImpl(
+      `${this.connection.url}/api/runtime-requests`,
+      { headers: this.headers(), signal },
+    );
+    if (!response.ok) {
+      throw await this.createHttpError(response);
+    }
+    return runtimeRequestListSchema.parse(await response.json());
+  }
+
+  async respondRuntimeRequest(
+    requestId: string,
+    input: RuntimeRequestResponse,
+    signal?: AbortSignal,
+  ) {
+    const body = runtimeRequestResponseSchema.parse(input);
+    const value = await this.postJson(
+      `/api/runtime-requests/${encodeURIComponent(requestId)}/respond`,
+      body,
+      signal,
+    );
+    return z.object({ request: runtimeRequestSchema }).parse(value).request;
+  }
+
   async startTurn(
     threadId: string,
     prompt: string,
@@ -281,6 +406,45 @@ export class CompanionClient implements CompanionBrowserClient {
       signal,
     );
     return z.object({ turnId: z.string().min(1) }).parse(value).turnId;
+  }
+
+  async startConversationTurn(
+    threadId: string,
+    prompt: string,
+    referenceIds: string[],
+    metadata: ConversationTurnMetadataInput,
+    signal?: AbortSignal,
+  ) {
+    const value = await this.postJson(
+      '/api/turns',
+      {
+        threadId,
+        prompt,
+        attachments: [],
+        referenceIds,
+        metadata: conversationTurnMetadataInputSchema.parse(metadata),
+      },
+      signal,
+    );
+    return z.object({ turnId: z.string().min(1) }).parse(value).turnId;
+  }
+
+  async startSpecPatchProposal(
+    input: StartSpecPatchProposalInput,
+    signal?: AbortSignal,
+  ) {
+    const parsedInput = startSpecPatchProposalInputSchema.parse(input);
+    const value = await this.postJson(
+      '/api/spec-patch-proposals',
+      parsedInput,
+      signal,
+    );
+    return z
+      .strictObject({
+        turnId: z.string().min(1),
+        requestId: z.literal(parsedInput.requestId),
+      })
+      .parse(value);
   }
 
   async interruptTurn(threadId: string, turnId: string, signal?: AbortSignal) {
@@ -415,6 +579,7 @@ export class CompanionClient implements CompanionBrowserClient {
   }
 
   async startGeneration(input: StartGenerationInput, signal?: AbortSignal) {
+    const parsedInput = startGenerationInputSchema.parse(input);
     const response = await this.fetchImpl(
       `${this.connection.url}/api/generations`,
       {
@@ -424,18 +589,18 @@ export class CompanionClient implements CompanionBrowserClient {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          ...input,
-          referenceIds: input.referenceIds ?? [],
-          parentGenerationId: input.parentGenerationId ?? null,
-          feedback: input.feedback ?? null,
-          generationMode: input.generationMode ?? 'fresh',
+          ...parsedInput,
         }),
         signal,
       },
     );
     if (!response.ok) throw await this.createHttpError(response);
     return z
-      .object({ turnId: z.string().min(1), generation: generationRecordSchema })
+      .object({
+        turnId: z.string().min(1),
+        generation: generationRecordSchema,
+        reused: z.boolean().optional(),
+      })
       .parse(await response.json());
   }
 

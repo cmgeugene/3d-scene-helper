@@ -49,9 +49,31 @@ npm run dev
 npm run dev:companion -- --project-root .
 ```
 
-준비 메시지의 `launchUrl`을 브라우저에서 열면 연결 정보가 앱으로 한 번 전달되고 우측 Scene Assistant 패널에 Codex 계정과 연결 상태가 표시됩니다. Vite 주소가 기본값인 `http://127.0.0.1:5173`과 다르면 `--editor-url http://127.0.0.1:<port>`를 함께 지정합니다. 연결 정보는 URL fragment에서 즉시 제거되고 현재 탭의 `sessionStorage`에만 보관됩니다.
+Companion은 준비가 끝나면 세션 `launchUrl`을 기본 브라우저에서 자동으로 엽니다. Vite 주소가 기본값인 `http://127.0.0.1:5173`과 다르면 `--editor-url http://127.0.0.1:<port>`를 함께 지정합니다. 브라우저를 열지 않으려면 `--no-open`을 사용합니다. 지정 포트가 이미 사용 중이면 임의의 빈 포트로 한 번 전환하며, 고정 포트가 반드시 필요하면 `--strict-port`를 추가합니다. 연결 정보는 URL fragment에서 즉시 제거되고 현재 탭의 `sessionStorage`에만 보관됩니다.
 
-연결 후 Scene Assistant 입력창에 장면 설명이나 질문을 보내면 현재 `SceneDocument` 스냅샷을 함께 전달해 새 Codex task를 시작합니다. 응답은 이벤트 스트림으로 표시되며 진행 중에는 중단할 수 있습니다. 같은 탭을 새로고침하면 보관된 thread ID를 다음 메시지에서 재개하고, `새 대화`를 누르면 새 task를 시작합니다. 대화 요약과 thread ID를 프로젝트 파일에 영구 저장하는 기능은 후속 단계입니다.
+프로젝트마다 하나의 Companion만 실행할 수 있습니다. 실행 중인 프로젝트를 다시 시작하면 중복 실행을 거부하고, 비정상 종료로 남은 lock은 자동 복구합니다. `SIGINT`나 `SIGTERM`으로 종료하면 HTTP 서버, App Server와 lock을 함께 정리합니다.
+
+개발 서버 없이 production 편집기와 Companion을 같은 loopback origin에서 실행하려면 다음을
+사용합니다.
+
+```bash
+npm run build
+npm run start:browser -- --project-root /absolute/path/to/project
+```
+
+현재 운영체제·CPU용 Codex 실행 파일까지 포함한 내부 배포 artifact는 다음 명령으로 만듭니다.
+
+```bash
+npm run build:browser-distribution
+node .artifacts/browser-distribution/<platform>-<arch>/launch.mjs \
+  --project-root /absolute/path/to/project
+```
+
+artifact는 Node.js를 요구하지만 별도 Vite 개발 서버나 `npm install`은 요구하지 않습니다. 현재
+platform 전용으로 생성되며 `distribution-manifest.json`에 편집기, runner와 Codex payload 크기를
+기록합니다. 외부 사용자용 installer, 코드 서명과 자동 업데이트는 아직 포함하지 않습니다.
+
+연결 후 Scene Assistant 입력창에 장면 설명이나 질문을 보내면 현재 `SceneDocument` 스냅샷을 함께 전달해 Codex task를 시작하거나 저장된 task를 재개합니다. 응답은 이벤트 스트림으로 표시되며 진행 중에는 중단할 수 있습니다. task ID와 제한된 대화 요약은 프로젝트의 `conversations.json`에 저장되고, 프로젝트를 다시 열면 저장 task 재개 또는 새 task 시작을 명시적으로 선택합니다. 연결이 끊기면 0.5초, 1초, 2초 간격으로 최대 3회 상태를 다시 조회합니다. 이 과정에서 turn을 자동 재전송하지 않으며, 복구 후 다음 사용자 동작이 저장 thread를 이어 갑니다.
 
 화면 아래 References 트레이에서는 PNG, JPEG, WebP 이미지를 `Layout`, `Background`, `Character`, `Style` 역할로 가져올 수 있습니다. 파일은 25MB 이하만 허용하며 실제 이미지 시그니처를 검사합니다. 원본은 프로젝트의 `assets/references/`에 복사되고, 안정적인 ID·SHA-256 해시·크기·역할은 프로젝트 루트의 `references.json`에 기록됩니다. 트레이에는 썸네일과 메타데이터가 표시되며 생성에 사용할 레퍼런스를 선택할 수 있습니다. 각 카드의 `설정`에서 캐릭터 레퍼런스를 장면의 마네킹에 연결하고, 쉼표로 구분한 사용 범위와 제외 범위를 저장할 수 있습니다.
 

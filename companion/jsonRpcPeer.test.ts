@@ -61,6 +61,28 @@ describe('JsonRpcPeer', () => {
     peer.close();
   });
 
+  it('서버 요청에 result 또는 protocol error로 응답한다', async () => {
+    const readable = new PassThrough();
+    const writable = new PassThrough();
+    const peer = new JsonRpcPeer(readable, writable);
+
+    const approvedOutput = waitForData(writable);
+    peer.respond(9, { decision: 'accept' });
+    await expect(approvedOutput).resolves.toBe(
+      `${JSON.stringify({ id: 9, result: { decision: 'accept' } })}\n`,
+    );
+
+    const rejectedOutput = waitForData(writable);
+    peer.respondError('request-10', -32601, 'unsupported request');
+    await expect(rejectedOutput).resolves.toBe(
+      `${JSON.stringify({
+        id: 'request-10',
+        error: { code: -32601, message: 'unsupported request' },
+      })}\n`,
+    );
+    peer.close();
+  });
+
   it('잘못된 JSON을 프로토콜 오류로 보고한다', async () => {
     const readable = new PassThrough();
     const writable = new PassThrough();

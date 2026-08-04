@@ -11,9 +11,12 @@
     "dev": "vite",
     "dev:companion": "tsx companion/index.ts",
     "companion:smoke": "tsx companion/smoke.ts",
+    "smoke:browser-distribution": "node scripts/smoke-browser-distribution.mjs",
     "build": "tsc -b && vite build && node scripts/assert-production-bridge-absent.mjs",
+    "build:browser-distribution": "npm run build && node scripts/build-browser-distribution.mjs",
     "build:e2e": "tsc -b && vite build --mode e2e",
     "preview": "vite preview",
+    "start:browser": "tsx companion/index.ts --editor-root dist",
     "test": "vitest",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
@@ -22,7 +25,7 @@
     "test:e2e:preview": "npm run check:preview-port && npm run build:e2e && start-server-and-test \"npm run preview -- --host 127.0.0.1 --port 4173 --strictPort\" http-get://127.0.0.1:4173 \"npm run test:e2e:external\"",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",
-    "format:check": "prettier --check package.json package-lock.json index.html tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts eslint.config.js .prettierrc.json playwright.config.ts \"companion/**/*.ts\" \"scripts/**/*.mjs\" \"src/**/*.{ts,tsx,css}\" \"e2e/**/*.ts\" README.md \"docs/**/*.md\""
+    "format:check": "prettier --check package.json package-lock.json index.html tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts eslint.config.js .prettierrc.json playwright.config.ts \"companion/**/*.ts\" \"shared/**/*.ts\" \"scripts/**/*.mjs\" \"src/**/*.{ts,tsx,css}\" \"e2e/**/*.ts\" README.md \"docs/**/*.md\""
   },
   "dependencies": {
     "@openai/codex": "0.146.0",

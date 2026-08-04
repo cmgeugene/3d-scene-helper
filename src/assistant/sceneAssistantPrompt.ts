@@ -1,7 +1,11 @@
 import type { GenerationRecord, ReferenceArtifact } from './companionClient';
 import type { LayoutSpec } from '../../shared/layoutSpecSchema';
 import type { SceneDocument } from '../editor/persistence/sceneSchema';
-import { normalizeSemanticSceneSpec } from '../editor/persistence/semanticSceneSpec';
+import type { RefinementDirective } from '../../shared/refinementDirective';
+import {
+  referencePromptManifest,
+  serializeSemanticSceneSpecPrompt,
+} from '../../shared/generationPromptEvidence';
 
 const SCENE_ASSISTANT_INSTRUCTIONS = `너는 I2V 3D Scene Helper의 Scene Assistant다.
 현재 요청에서는 파일을 수정하거나 명령을 실행하지 말고, 제공된 SceneDocument와 사용자의 설명을 바탕으로 장면을 해석하고 필요한 확인 질문이나 연출 제안을 한국어로 간결하게 답한다.
@@ -12,110 +16,10 @@ function referenceManifest(
   references: ReferenceArtifact[],
   attachmentIndexOffset: number,
 ) {
-  return [...references]
-    .sort((left, right) => {
-      const order = { layout: 0, background: 1, character: 2, style: 3 };
-      const kindDifference = order[left.kind] - order[right.kind];
-      return kindDifference === 0
-        ? left.createdAt.localeCompare(right.createdAt)
-        : kindDifference;
-    })
-    .map((reference, index) => ({
-      attachmentIndex: index + 1 + attachmentIndexOffset,
-      id: reference.id,
-      name: reference.name,
-      role: reference.kind,
-      targetObjectId: reference.targetObjectId,
-      use: reference.use,
-      exclude: reference.exclude,
-    }));
+  return referencePromptManifest(references, attachmentIndexOffset);
 }
 
-export function serializeSemanticSceneSpecPrompt(
-  spec: SceneDocument['semanticSceneSpec'],
-) {
-  const normalized = normalizeSemanticSceneSpec(spec);
-  const blocks: string[] = [];
-  const intentLines = [
-    ['장소', normalized.intent.location],
-    ['시간대', normalized.intent.timeOfDay],
-    ['분위기', normalized.intent.mood],
-    ['화풍 의도', normalized.intent.visualStyle],
-  ]
-    .filter((entry): entry is [string, string] => entry[1] !== '')
-    .map(([label, value]) => `- ${label}: ${value}`);
-  if (intentLines.length > 0) {
-    blocks.push(`[장면 의도]\n${intentLines.join('\n')}`);
-  }
-
-  if (normalized.generatedProps.length > 0) {
-    blocks.push(
-      `[생성 전용 소품]\n${normalized.generatedProps
-        .map(({ name, placement, importance }) =>
-          [
-            `- ${name}`,
-            placement === '' ? '' : `배치: ${placement}`,
-            importance === '' ? '' : `중요도: ${importance}`,
-          ]
-            .filter(Boolean)
-            .join(' · '),
-        )
-        .join('\n')}`,
-    );
-  }
-
-  if (normalized.extras.enabled) {
-    const count =
-      normalized.extras.minCount === normalized.extras.maxCount
-        ? `${normalized.extras.minCount}명`
-        : `${normalized.extras.minCount}~${normalized.extras.maxCount}명`;
-    const lines = [
-      `- 인원: ${count}`,
-      normalized.extras.placement === ''
-        ? ''
-        : `- 배치: ${normalized.extras.placement}`,
-      normalized.extras.importance === ''
-        ? ''
-        : `- 중요도: ${normalized.extras.importance}`,
-    ].filter(Boolean);
-    blocks.push(`[엑스트라]\n${lines.join('\n')}`);
-  }
-
-  if (normalized.relationships.length > 0) {
-    blocks.push(
-      `[인물/오브젝트 관계]\n${normalized.relationships
-        .map(
-          ({ subjectObjectId, targetObjectId, relationship, gaze, action }) =>
-            [
-              `- ${subjectObjectId} → ${targetObjectId}`,
-              relationship === '' ? '' : `관계: ${relationship}`,
-              gaze === '' ? '' : `시선: ${gaze}`,
-              action === '' ? '' : `행동: ${action}`,
-            ]
-              .filter(Boolean)
-              .join(' · '),
-        )
-        .join('\n')}`,
-    );
-  }
-
-  if (normalized.constraints.preserve.length > 0) {
-    blocks.push(
-      `[필수 유지]\n${normalized.constraints.preserve
-        .map((value) => `- ${value}`)
-        .join('\n')}`,
-    );
-  }
-  if (normalized.constraints.allowChanges.length > 0) {
-    blocks.push(
-      `[변경 가능]\n${normalized.constraints.allowChanges
-        .map((value) => `- ${value}`)
-        .join('\n')}`,
-    );
-  }
-
-  return blocks.join('\n\n');
-}
+export { serializeSemanticSceneSpecPrompt };
 
 export function createSceneAssistantPrompt(
   userMessage: string,
@@ -174,7 +78,7 @@ ${JSON.stringify(referenceBlock)}`;
 }
 
 export function createImageRefinementPrompt(
-  feedback: string,
+  directive: RefinementDirective,
   sceneDocument: unknown,
   layoutSpec: LayoutSpec,
   sourceGeneration: Pick<GenerationRecord, 'id' | 'versionNumber'>,
@@ -187,8 +91,11 @@ export function createImageRefinementPrompt(
 첨부 이미지 3 이후는 역할별 외형 레퍼런스입니다. 매니페스트의 use 항목만 사용하고 exclude 항목은 가져오지 마세요.
 이 요청은 기존 파일을 픽셀 단위로 수정하는 작업이 아니라, 기존 키프레임을 고충실도 입력으로 사용하는 한 번의 완성 이미지 재생성입니다. 요청하지 않은 부분을 임의로 바꾸거나 새로운 요소를 추가하지 마세요. 이미지 한 장만 생성하고 파일 수정이나 명령 실행은 하지 마세요.
 
-[보정 요청]
-${feedback}
+[보정 지시 / RefinementDirective]
+${JSON.stringify(directive)}
+
+[보정 권위 규칙]
+preserve 항목은 기존 완성 키프레임을 권위 원본으로 삼아 바꾸지 마세요. change 항목만 다시 생성하고, 두 목록에 없는 요소도 기존 키프레임을 우선 보존하세요.
 
 [보정 원본]
 ${JSON.stringify(sourceGeneration)}

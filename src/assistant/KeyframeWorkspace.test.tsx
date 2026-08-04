@@ -8,6 +8,7 @@ import type {
   GenerationRecord,
 } from './companionClient';
 import {
+  KEYFRAME_COMPARISON_STORAGE_KEY,
   KEYFRAME_SELECTION_STORAGE_KEY,
   KeyframeWorkspace,
 } from './KeyframeWorkspace';
@@ -70,6 +71,7 @@ function generation(
     parentGenerationId: null,
     versionNumber: 1,
     feedback: null,
+    refinementDirective: null,
     generationMode: 'fresh',
     layoutRenderId: `render-${overrides.id}`,
     sceneIntegrity: {
@@ -136,6 +138,139 @@ function clientWith(generations: GenerationRecord[]): CompanionBrowserClient {
 }
 
 describe('KeyframeWorkspace', () => {
+  it('부모·형제 결과와 계약 차이를 비교하고 비교 선택을 reload 뒤 복원한다', async () => {
+    const user = userEvent.setup();
+    const parent = generation({ id: 'generation-parent' });
+    const selectedScene = structuredClone(parent.sceneSnapshot!);
+    selectedScene.sceneRevision = 2;
+    selectedScene.outputCamera.focalLengthMm = 35;
+    selectedScene.semanticSceneSpec.intent.mood = '비 오는 긴장된 저녁';
+    const selectedLayout = structuredClone(TEST_LAYOUT_SPEC);
+    selectedLayout.camera.focalLengthMm = 35;
+    const selected = generation({
+      id: 'generation-selected',
+      parentGenerationId: parent.id,
+      versionNumber: 2,
+      generationMode: 'edit',
+      sceneSnapshot: selectedScene,
+      layoutSpec: selectedLayout,
+      refinementDirective: {
+        version: 1,
+        preserve: ['카메라 구도'],
+        change: ['표정을 긴장되게 바꿔줘'],
+      },
+    });
+    const sibling = generation({
+      id: 'generation-sibling',
+      parentGenerationId: parent.id,
+      versionNumber: 3,
+      generationMode: 'edit',
+      refinementDirective: {
+        version: 1,
+        preserve: ['인물 의상'],
+        change: ['배경 조명을 밝게 바꿔줘'],
+      },
+    });
+    const unrelated = generation({ id: 'generation-unrelated' });
+    const storage = createMemoryStorage({
+      [KEYFRAME_SELECTION_STORAGE_KEY]: selected.id,
+      [KEYFRAME_COMPARISON_STORAGE_KEY]: sibling.id,
+    });
+    let urlSequence = 0;
+    const renderWorkspace = () =>
+      render(
+        <KeyframeWorkspace
+          connection={connection}
+          storage={storage}
+          clientFactory={() =>
+            clientWith([parent, selected, sibling, unrelated])
+          }
+          createObjectUrl={() => `blob:comparison-${++urlSequence}`}
+          revokeObjectUrl={() => undefined}
+          onRefine={() => undefined}
+        />,
+      );
+
+    const first = renderWorkspace();
+    const select = await screen.findByRole('combobox', {
+      name: '비교 대상 generation',
+    });
+    expect(select).toHaveValue(sibling.id);
+    expect(within(select).getAllByRole('option')).toHaveLength(2);
+    expect(
+      within(select).queryByRole('option', { name: /unrelated/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole('img', { name: '선택 generation 비교 결과' }),
+    ).toBeVisible();
+    expect(
+      await screen.findByRole('img', { name: '비교 generation 결과' }),
+    ).toBeVisible();
+    const comparisonRegion = screen.getByRole('region', {
+      name: '부모·형제 generation 비교',
+    });
+    expect(comparisonRegion).toHaveTextContent('v2 · edit');
+    expect(comparisonRegion).toHaveTextContent('v3 · edit');
+    expect(comparisonRegion).toHaveTextContent('표정을 긴장되게 바꿔줘');
+    expect(comparisonRegion).toHaveTextContent('배경 조명을 밝게 바꿔줘');
+    expect(comparisonRegion).toHaveTextContent('SceneDocument · 변경 있음');
+    expect(comparisonRegion).toHaveTextContent('LayoutSpec · 변경 있음');
+
+    await user.selectOptions(select, parent.id);
+    await waitFor(() =>
+      expect(storage.getItem(KEYFRAME_COMPARISON_STORAGE_KEY)).toBe(parent.id),
+    );
+    await user.selectOptions(select, sibling.id);
+    await waitFor(() =>
+      expect(storage.getItem(KEYFRAME_COMPARISON_STORAGE_KEY)).toBe(sibling.id),
+    );
+
+    first.unmount();
+    renderWorkspace();
+    expect(
+      await screen.findByRole('button', { name: /generation-selected/ }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    expect(
+      await screen.findByRole('combobox', {
+        name: '비교 대상 generation',
+      }),
+    ).toHaveValue(sibling.id);
+  });
+
+  it('계보 밖 비교 저장값은 부모 generation으로 안전하게 복원한다', async () => {
+    const parent = generation({ id: 'generation-parent-fallback' });
+    const selected = generation({
+      id: 'generation-selected-fallback',
+      parentGenerationId: parent.id,
+      versionNumber: 2,
+      generationMode: 'edit',
+    });
+    const storage = createMemoryStorage({
+      [KEYFRAME_SELECTION_STORAGE_KEY]: selected.id,
+      [KEYFRAME_COMPARISON_STORAGE_KEY]: 'generation-outside-lineage',
+    });
+
+    render(
+      <KeyframeWorkspace
+        connection={connection}
+        storage={storage}
+        clientFactory={() => clientWith([parent, selected])}
+        createObjectUrl={() => 'blob:fallback'}
+        revokeObjectUrl={() => undefined}
+        onRefine={() => undefined}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('combobox', {
+        name: '비교 대상 generation',
+      }),
+    ).toHaveValue(parent.id);
+    await waitFor(() =>
+      expect(storage.getItem(KEYFRAME_COMPARISON_STORAGE_KEY)).toBe(parent.id),
+    );
+  });
+
   it('프로젝트 전체 계보를 표시하고 저장된 선택의 결과와 당시 레이아웃을 비교한다', async () => {
     const user = userEvent.setup();
     const parent = generation({ id: 'generation-parent' });
@@ -147,6 +282,11 @@ describe('KeyframeWorkspace', () => {
       versionNumber: 2,
       generationMode: 'edit',
       feedback: '전봇대 가림을 줄여줘.',
+      refinementDirective: {
+        version: 1,
+        preserve: ['카메라 구도', '인물 의상'],
+        change: ['전봇대 가림을 줄여줘.'],
+      },
       error: '생성이 중단되었습니다.',
     });
     const appliedLayoutFresh = generation({
@@ -219,6 +359,12 @@ describe('KeyframeWorkspace', () => {
 
     await user.click(screen.getByRole('button', { name: '선택 결과로 보정' }));
     expect(refine).toHaveBeenCalledWith(parent);
+
+    await user.click(
+      within(history).getByRole('button', { name: /generation-child/ }),
+    );
+    expect(screen.getAllByText('카메라 구도 · 인물 의상')[0]).toBeVisible();
+    expect(screen.getAllByText('전봇대 가림을 줄여줘.')[0]).toBeVisible();
 
     await user.click(
       within(history).getByRole('button', { name: /generation-legacy/ }),
@@ -523,6 +669,104 @@ describe('KeyframeWorkspace', () => {
       expect(
         screen.getByRole('img', { name: '생성 당시 3D 레이아웃' }),
       ).toBeVisible(),
+    );
+  });
+
+  it('실행 요약의 스냅샷 해시와 실제 첨부 순서 및 검증 오류를 표시한다', async () => {
+    const selected = generation({
+      id: 'generation-execution-summary',
+      executionSummary: {
+        version: 1,
+        requestId: 'request-execution-summary',
+        prompt: { contentHash: `sha256:${'1'.repeat(64)}` },
+        sceneDocument: {
+          id: 'scene-test',
+          sceneRevision: 3,
+          specRevision: 2,
+          contentHash: `sha256:${'2'.repeat(64)}`,
+        },
+        semanticSceneSpec: {
+          version: 1,
+          contentHash: `sha256:${'3'.repeat(64)}`,
+        },
+        layoutSpec: {
+          version: 1,
+          sceneId: 'scene-test',
+          contentHash: `sha256:${'4'.repeat(64)}`,
+        },
+        layoutRender: {
+          id: 'render-summary',
+          sceneId: 'scene-test',
+          contentHash: `sha256:${'5'.repeat(64)}`,
+        },
+        sourceGeneration: {
+          id: 'generation-source',
+          usage: 'editSource',
+          contentHash: `sha256:${'6'.repeat(64)}`,
+        },
+        references: [
+          {
+            id: reference.id,
+            kind: 'character',
+            contentHash: reference.contentHash,
+          },
+        ],
+        attachments: [
+          {
+            attachmentIndex: 1,
+            type: 'sourceGeneration',
+            id: 'generation-source',
+            kind: null,
+            contentHash: `sha256:${'6'.repeat(64)}`,
+          },
+          {
+            attachmentIndex: 2,
+            type: 'layout',
+            id: 'render-summary',
+            kind: 'layout',
+            contentHash: `sha256:${'5'.repeat(64)}`,
+          },
+          {
+            attachmentIndex: 3,
+            type: 'reference',
+            id: reference.id,
+            kind: 'character',
+            contentHash: reference.contentHash,
+          },
+        ],
+      },
+      executionIntegrity: {
+        status: 'mismatch',
+        issues: ['prompt의 LayoutSpec 입력이 저장 스냅샷과 일치하지 않습니다.'],
+      },
+    });
+
+    render(
+      <KeyframeWorkspace
+        connection={connection}
+        storage={createMemoryStorage()}
+        clientFactory={() => clientWith([selected])}
+        createObjectUrl={(blob) => `blob:${blob.size}`}
+        revokeObjectUrl={() => undefined}
+        onRefine={() => undefined}
+      />,
+    );
+
+    const heading = await screen.findByRole('heading', {
+      name: '재현 가능한 실행 요약',
+    });
+    const summary = heading.closest('section');
+    expect(summary).not.toBeNull();
+    expect(
+      within(summary!).getByText(/입력 무결성 · 불일치 발견/),
+    ).toBeVisible();
+    expect(within(summary!).getByText(/scene r3 · spec r2/)).toBeVisible();
+    const attachments = within(summary!).getAllByRole('listitem');
+    expect(attachments[0]).toHaveTextContent('1 · sourceGeneration');
+    expect(attachments[1]).toHaveTextContent('2 · layout');
+    expect(attachments[2]).toHaveTextContent('3 · reference');
+    expect(within(summary!).getByRole('alert')).toHaveTextContent(
+      'prompt의 LayoutSpec 입력이 저장 스냅샷과 일치하지 않습니다.',
     );
   });
 

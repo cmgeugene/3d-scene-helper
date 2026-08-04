@@ -84,6 +84,7 @@ function createGenerationFixture(id = 'generation-apply'): GenerationRecord {
     parentGenerationId: null,
     versionNumber: 3,
     feedback: null,
+    refinementDirective: null,
     generationMode: 'fresh',
     layoutRenderId: `render-${id}`,
     sceneIntegrity: {
@@ -230,6 +231,7 @@ describe('EditorShell', () => {
       parentGenerationId: null,
       versionNumber: 1,
       feedback: null,
+      refinementDirective: null,
       generationMode: 'fresh',
       layoutRenderId: 'render-selected',
       sceneIntegrity: {
@@ -461,7 +463,10 @@ describe('EditorShell', () => {
     );
 
     await user.click(screen.getByRole('button', { name: '실행 취소' }));
-    expect(store.getState().document).toEqual(beforeDocument);
+    expect(store.getState().document).toEqual({
+      ...beforeDocument,
+      sceneRevision: 3,
+    });
     expect(store.getState().selectedObjectId).toBe(beforeSelection);
 
     store.getState().redo();
@@ -481,7 +486,10 @@ describe('EditorShell', () => {
     );
 
     await user.click(screen.getByRole('button', { name: '적용 전 씬 복구' }));
-    expect(reloadStore.getState().document).toEqual(beforeDocument);
+    expect(reloadStore.getState().document).toEqual({
+      ...beforeDocument,
+      sceneRevision: 5,
+    });
     expect(reloadStore.getState().selectedObjectId).toBe(beforeSelection);
     expect(storage.getItem(PRE_APPLY_RECOVERY_STORAGE_KEY)).toBeNull();
   });

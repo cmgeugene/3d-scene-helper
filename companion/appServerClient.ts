@@ -5,6 +5,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import {
   JsonRpcPeer,
+  type JsonRpcId,
   type JsonRpcNotification,
   type JsonRpcServerRequest,
 } from './jsonRpcPeer';
@@ -78,6 +79,10 @@ export interface AppServerStatus {
   capabilities?: z.infer<typeof modelProviderCapabilitiesSchema> | null;
 }
 
+export interface TurnOptions {
+  outputSchema?: unknown;
+}
+
 export interface CodexRuntime {
   readonly status: AppServerStatus;
   start(): Promise<void>;
@@ -85,8 +90,14 @@ export interface CodexRuntime {
   refreshAccount(): Promise<AppServerStatus>;
   startThread(projectRoot: string): Promise<string>;
   resumeThread(threadId: string, projectRoot: string): Promise<string>;
-  startTurn(threadId: string, input: TurnInput[]): Promise<string>;
+  startTurn(
+    threadId: string,
+    input: TurnInput[],
+    options?: TurnOptions,
+  ): Promise<string>;
   interruptTurn(threadId: string, turnId: string): Promise<void>;
+  respondServerRequest?(id: JsonRpcId, result: unknown): void;
+  rejectServerRequest?(id: JsonRpcId, code: number, message: string): void;
   on(
     event: 'notification',
     listener: (value: JsonRpcNotification) => void,
@@ -192,7 +203,7 @@ export class CodexAppServerClient extends EventEmitter implements CodexRuntime {
     const response = threadResponseSchema.parse(
       await this.getPeer().request('thread/start', {
         cwd: path.resolve(projectRoot),
-        approvalPolicy: 'never',
+        approvalPolicy: 'on-request',
         sandbox: 'read-only',
         personality: 'pragmatic',
       }),
@@ -205,22 +216,40 @@ export class CodexAppServerClient extends EventEmitter implements CodexRuntime {
       await this.getPeer().request('thread/resume', {
         threadId,
         cwd: path.resolve(projectRoot),
-        approvalPolicy: 'never',
+        approvalPolicy: 'on-request',
         sandbox: 'read-only',
       }),
     );
     return response.thread.id;
   }
 
-  async startTurn(threadId: string, input: TurnInput[]) {
+  async startTurn(
+    threadId: string,
+    input: TurnInput[],
+    options: TurnOptions = {},
+  ) {
     const response = turnResponseSchema.parse(
-      await this.getPeer().request('turn/start', { threadId, input }),
+      await this.getPeer().request('turn/start', {
+        threadId,
+        input,
+        ...(options.outputSchema === undefined
+          ? {}
+          : { outputSchema: options.outputSchema }),
+      }),
     );
     return response.turn.id;
   }
 
   async interruptTurn(threadId: string, turnId: string) {
     await this.getPeer().request('turn/interrupt', { threadId, turnId });
+  }
+
+  respondServerRequest(id: JsonRpcId, result: unknown) {
+    this.getPeer().respond(id, result);
+  }
+
+  rejectServerRequest(id: JsonRpcId, code: number, message: string) {
+    this.getPeer().respondError(id, code, message);
   }
 
   private async startInternal() {

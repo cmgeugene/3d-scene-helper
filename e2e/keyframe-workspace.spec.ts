@@ -88,6 +88,47 @@ function generation(
     },
     referenceIds: [],
     attachments: [{ type: 'layout', id: `render-${id}`, kind: 'layout' }],
+    executionSummary: legacy
+      ? undefined
+      : {
+          version: 1,
+          requestId: `request-${id}`,
+          prompt: { contentHash: `sha256:${'1'.repeat(64)}` },
+          sceneDocument: {
+            id: sceneSnapshot.id,
+            sceneRevision: sceneSnapshot.sceneRevision,
+            specRevision: sceneSnapshot.specRevision,
+            contentHash: `sha256:${'2'.repeat(64)}`,
+          },
+          semanticSceneSpec: {
+            version: 1,
+            contentHash: `sha256:${'3'.repeat(64)}`,
+          },
+          layoutSpec: {
+            version: 1,
+            sceneId: mismatch ? 'scene-other' : sceneSnapshot.id,
+            contentHash: `sha256:${'4'.repeat(64)}`,
+          },
+          layoutRender: {
+            id: `render-${id}`,
+            sceneId: sceneSnapshot.id,
+            contentHash: `sha256:${'5'.repeat(64)}`,
+          },
+          sourceGeneration: null,
+          references: [],
+          attachments: [
+            {
+              attachmentIndex: 1,
+              type: 'layout',
+              id: `render-${id}`,
+              kind: 'layout',
+              contentHash: `sha256:${'5'.repeat(64)}`,
+            },
+          ],
+        },
+    executionIntegrity: legacy
+      ? { status: 'legacy', issues: [] }
+      : { status: 'valid', issues: [] },
     revisedPrompt: `revised ${id}`,
     result: {
       artifactId: `artifact-${id}`,
@@ -168,6 +209,18 @@ function createMockCompanionServer() {
     }
     if (request.url === '/api/generations') {
       sendJson(response, { version: 1, generations });
+      return;
+    }
+    if (request.url === '/api/conversation-session') {
+      sendJson(response, {
+        version: 1,
+        activeTask: null,
+        archivedTaskCount: 0,
+      });
+      return;
+    }
+    if (request.url === '/api/runtime-requests') {
+      sendJson(response, { version: 1, requests: [] });
       return;
     }
     if (request.url === '/api/references') {
@@ -320,6 +373,14 @@ test('sceneSnapshot preview가 과거 구도를 재현하고 live scene 상태�
 
   const complete = page.getByRole('button', { name: /generation-complete/ });
   await complete.click();
+  const executionSummary = page
+    .getByRole('heading', { name: '재현 가능한 실행 요약' })
+    .locator('..');
+  await expect(executionSummary).toContainText('입력 무결성 · 검증 통과');
+  await expect(executionSummary).toContainText(
+    '1 · layout · render-generation-complete',
+  );
+  await expect(executionSummary).toContainText(`sha256:${'5'.repeat(64)}`);
   await expect(page.getByText('현재 씬과 변경 있음')).toBeVisible();
   await expect(page.getByText(/과거 정민.*변형/)).toBeVisible();
   await expect(page.getByText(/과거 카운터.*현재 씬에서 삭제/)).toBeVisible();
@@ -389,6 +450,10 @@ test('sceneSnapshot preview가 과거 구도를 재현하고 live scene 상태�
     page.getByRole('heading', { name: '키프레임 작업 공간' }),
   ).toBeVisible();
   await expect(complete).toHaveAttribute('aria-pressed', 'true');
+  await expect(executionSummary).toContainText('입력 무결성 · 검증 통과');
+  await expect(executionSummary).toContainText(
+    '1 · layout · render-generation-complete',
+  );
   const afterRefreshBaseline = await readEditorEvidence();
   expect(afterRefreshBaseline.document).toBe(beforePreview.document);
   expect(afterRefreshBaseline.autosave).toBe(beforePreview.autosave);
@@ -494,6 +559,14 @@ test('sceneSnapshot apply는 cancel/save 실패/race를 닫고 undo와 durable r
   const beforeApply = await readEvidence();
   expect(beforeApply.autosave).not.toBeNull();
   expect(beforeApply.recovery).toBeNull();
+  const beforeApplyDocument = JSON.parse(beforeApply.document) as Record<
+    string,
+    unknown
+  >;
+  const documentContent = (serialized: string) => {
+    const document = JSON.parse(serialized) as Record<string, unknown>;
+    return { ...document, sceneRevision: 0, specRevision: 0 };
+  };
 
   await page.getByRole('button', { name: '키프레임' }).click();
   const complete = page.getByRole('button', { name: /generation-complete/ });
@@ -599,7 +672,13 @@ test('sceneSnapshot apply는 cancel/save 실패/race를 닫고 undo와 durable r
 
   await page.getByRole('button', { name: '실행 취소' }).click();
   const afterUndo = await readEvidence();
-  expect(afterUndo.document).toBe(beforeApply.document);
+  expect(documentContent(afterUndo.document)).toEqual(
+    documentContent(beforeApply.document),
+  );
+  expect(JSON.parse(afterUndo.document)).toMatchObject({
+    sceneRevision: 3,
+    specRevision: beforeApplyDocument.specRevision,
+  });
   expect(afterUndo.selectedObjectId).toBe(beforeApply.selectedObjectId);
 
   await page.getByRole('button', { name: '다시 실행' }).click();
@@ -627,7 +706,13 @@ test('sceneSnapshot apply는 cancel/save 실패/race를 닫고 undo와 durable r
     })
     .toBe(true);
   const recovered = await readEvidence();
-  expect(recovered.document).toBe(beforeApply.document);
+  expect(documentContent(recovered.document)).toEqual(
+    documentContent(beforeApply.document),
+  );
+  expect(JSON.parse(recovered.document)).toMatchObject({
+    sceneRevision: 5,
+    specRevision: beforeApplyDocument.specRevision,
+  });
   expect(recovered.selectedObjectId).toBe(beforeApply.selectedObjectId);
   expect(recovered.recovery).toBeNull();
   expect(

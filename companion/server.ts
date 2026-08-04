@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   createServer,
   type IncomingMessage,
@@ -17,9 +17,21 @@ import {
   FRESH_GENERATION_MAX_REFERENCES,
   getMaximumReferenceImages,
 } from '../shared/imageInputBudget';
+import { evaluateGenerationPreflight } from '../shared/generationPreflight';
+import { refinementDirectiveSchema } from '../shared/refinementDirective';
+import { conversationTurnMetadataInputSchema } from '../shared/conversationMetadata';
+import { runtimeRequestResponseSchema } from '../shared/runtimeRequest';
 import { sceneDocumentSchema } from '../src/editor/persistence/sceneSchema';
+import {
+  SPEC_PATCH_PROPOSAL_JSON_SCHEMA,
+  evaluateSpecPatchProposal,
+  specPatchProposalSchema,
+} from '../src/editor/persistence/specPatchProposal';
 import { GenerationStore } from './generationStore';
+import { ConversationStore } from './conversationStore';
+import { RuntimeRequestStore } from './runtimeRequestStore';
 import { resolveProjectArtifact } from './projectArtifacts';
+import { createStaticEditor } from './staticEditor';
 import {
   ReferenceInputError,
   ReferenceNotFoundError,
@@ -29,15 +41,53 @@ import {
   toPublicReference,
 } from './referenceStore';
 
-const threadBodySchema = z.object({
-  threadId: z.string().min(1).optional(),
-});
+const threadBodySchema = z
+  .object({
+    mode: z.enum(['new', 'resume']).optional(),
+    threadId: z.string().min(1).optional(),
+  })
+  .superRefine((body, context) => {
+    if (body.mode === 'resume' && body.threadId === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['threadId'],
+        message: 'task 재개에는 thread ID가 필요합니다.',
+      });
+    }
+    if (body.mode === 'new' && body.threadId !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['threadId'],
+        message: '새 task에는 기존 thread ID를 지정할 수 없습니다.',
+      });
+    }
+  });
 
 const turnBodySchema = z.object({
   threadId: z.string().min(1),
   prompt: z.string().min(1).max(100_000),
   attachments: z.array(z.string().min(1)).max(16).default([]),
   referenceIds: z.array(z.string().min(1)).max(16).default([]),
+  metadata: conversationTurnMetadataInputSchema.optional(),
+});
+
+const specPatchProposalRequestSchema = z.strictObject({
+  threadId: z.string().min(1),
+  requestId: z.string().trim().min(1).max(200),
+  baseSceneRevision: z.number().int().nonnegative().safe(),
+  baseSpecRevision: z.number().int().nonnegative().safe(),
+  userMessage: z.string().trim().min(1).max(4_000),
+  sceneDocument: sceneDocumentSchema,
+});
+
+const completedAgentMessageSchema = z.object({
+  threadId: z.string(),
+  turnId: z.string(),
+  item: z.object({
+    type: z.literal('agentMessage'),
+    id: z.string(),
+    text: z.string(),
+  }),
 });
 
 const interruptBodySchema = z.object({
@@ -57,6 +107,12 @@ const sceneRenderQuerySchema = z.object({
 
 const generationBodySchema = z
   .object({
+    requestId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .default(() => `legacy-generation-${randomBytes(16).toString('hex')}`),
     threadId: z.string().min(1),
     prompt: z.string().min(1).max(100_000),
     layoutSpec: layoutSpecSchema,
@@ -64,6 +120,7 @@ const generationBodySchema = z
     parentGenerationId: z.string().min(1).nullable().default(null),
     sourceGenerationId: z.string().min(1).nullable().default(null),
     feedback: z.string().trim().min(1).max(4_000).nullable().default(null),
+    refinementDirective: refinementDirectiveSchema.nullable().default(null),
     generationMode: z.enum(['fresh', 'edit']).default('fresh'),
     layoutRenderId: z.string().min(1),
     referenceIds: z
@@ -72,6 +129,10 @@ const generationBodySchema = z
         FRESH_GENERATION_MAX_REFERENCES,
         `3D 레이아웃을 포함한 생성에서는 레퍼런스를 최대 ${FRESH_GENERATION_MAX_REFERENCES}장까지 사용할 수 있습니다.`,
       )
+      .default([]),
+    acknowledgedPreflightWarningIds: z
+      .array(z.string().trim().min(1).max(300))
+      .max(32)
       .default([]),
   })
   .superRefine((body, context) => {
@@ -96,6 +157,20 @@ const generationBodySchema = z
         path: ['sourceGenerationId'],
         message:
           '보정 생성은 parentGenerationId만 사용하며 3D 레이아웃 출처를 별도로 지정하지 않습니다.',
+      });
+    }
+    if (editing && body.refinementDirective === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['refinementDirective'],
+        message: '보정 생성에는 구조화된 유지·변경 지시가 필요합니다.',
+      });
+    }
+    if (!editing && body.refinementDirective !== null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['refinementDirective'],
+        message: '새 생성에는 보정 지시를 지정할 수 없습니다.',
       });
     }
     const maximumReferences = getMaximumReferenceImages({
@@ -134,12 +209,18 @@ const completedTurnNotificationSchema = z.object({
   }),
 });
 
+const resolvedServerRequestNotificationSchema = z.object({
+  threadId: z.string().min(1),
+  requestId: z.union([z.string().min(1), z.number().int().safe()]),
+});
+
 export interface CompanionServerOptions {
   runtime: CodexRuntime;
   projectRoot: string;
   allowedOrigins: string[];
   token?: string;
   port?: number;
+  editorRoot?: string;
 }
 
 export interface CompanionServerHandle {
@@ -166,6 +247,13 @@ function sendJson(
 }
 
 class RequestBodyTooLargeError extends Error {}
+class GenerationRequestConflictError extends Error {}
+class RuntimeRequestConflictError extends Error {}
+class RuntimeRequestInputError extends Error {}
+
+function generationRequestFingerprint(value: unknown) {
+  return `sha256:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
+}
 
 async function readBody(request: IncomingMessage, maximumBytes: number) {
   const chunks: Buffer[] = [];
@@ -192,6 +280,33 @@ function writeSse(response: ServerResponse, event: string, value: unknown) {
   response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`);
 }
 
+function createSpecPatchProposalPrompt(
+  body: z.infer<typeof specPatchProposalRequestSchema>,
+) {
+  return `너는 I2V 3D Scene Helper의 구조화된 장면 변경 제안기다.
+최종 응답은 App Server outputSchema가 요구하는 JSON 객체 하나만 반환한다.
+requestId, baseSceneRevision, baseSpecRevision은 제공된 값을 그대로 사용한다.
+specPatch는 승인된 Semantic Scene Spec 경로의 add/remove/replace만 사용한다.
+3D 위치·회전·크기 변경은 specPatch가 아니라 sceneCommands의 setObjectTransform만 사용한다.
+setObjectTransform은 현재 SceneDocument에 존재하는 정확한 objectId와 position, rotationDeg, scale 전체를 반환한다.
+임의 object path, 배열 index path, 새 object 생성·삭제와 포즈 변경은 제안하지 않는다.
+같은 objectId를 한 응답에서 두 번 변경하지 않는다.
+확실하지 않거나 충돌 가능성이 있으면 warnings에 한국어로 설명하고, 안전한 변경이 없으면 specPatch와 sceneCommands를 모두 빈 배열로 둔다.
+
+[요청 메타데이터]
+${JSON.stringify({
+  requestId: body.requestId,
+  baseSceneRevision: body.baseSceneRevision,
+  baseSpecRevision: body.baseSpecRevision,
+})}
+
+[사용자 메시지]
+${body.userMessage}
+
+[현재 SceneDocument]
+${JSON.stringify(body.sceneDocument)}`;
+}
+
 export async function startCompanionServer(
   options: CompanionServerOptions,
 ): Promise<CompanionServerHandle> {
@@ -200,6 +315,45 @@ export async function startCompanionServer(
   const allowedOrigins = new Set(options.allowedOrigins);
   const referenceStore = new ReferenceStore(options.projectRoot);
   const generationStore = new GenerationStore(options.projectRoot);
+  const conversationStore = new ConversationStore(options.projectRoot);
+  const runtimeRequestStore = new RuntimeRequestStore(options.projectRoot);
+  const staticEditor =
+    options.editorRoot === undefined
+      ? null
+      : await createStaticEditor(options.editorRoot);
+  await conversationStore.recoverInProgressTask();
+  await runtimeRequestStore.recoverPending();
+  await generationStore.recoverInProgressGenerations(
+    'Companion이 재시작되어 진행 중이던 이미지 생성을 중단 상태로 복구했습니다.',
+  );
+  const generationRequestQueue = new Map<string, Promise<void>>();
+  const serializeGenerationRequest = async <T>(
+    requestId: string,
+    operation: () => Promise<T>,
+  ) => {
+    const previous = generationRequestQueue.get(requestId) ?? Promise.resolve();
+    let release: () => void = () => undefined;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => current);
+    generationRequestQueue.set(requestId, tail);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (generationRequestQueue.get(requestId) === tail) {
+        generationRequestQueue.delete(requestId);
+      }
+    }
+  };
+  const pendingSpecPatchProposals = new Map<
+    string,
+    z.infer<typeof specPatchProposalRequestSchema>
+  >();
+  const pendingRuntimeRequests = new Map<string, JsonRpcServerRequest>();
+  const resolvingRuntimeRequests = new Set<string>();
 
   const broadcast = (event: string, value: unknown) => {
     for (const client of sseClients) writeSse(client.response, event, value);
@@ -207,7 +361,127 @@ export async function startCompanionServer(
   const handleStatus = (status: AppServerStatus) =>
     broadcast('runtime', status);
   const handleNotification = (notification: JsonRpcNotification) => {
-    broadcast('codex', notification);
+    if (notification.method === 'serverRequest/resolved') {
+      const resolved = resolvedServerRequestNotificationSchema.safeParse(
+        notification.params,
+      );
+      if (resolved.success) {
+        const pending = [...pendingRuntimeRequests.entries()].find(
+          ([, request]) =>
+            request.id === resolved.data.requestId &&
+            request.params !== null &&
+            typeof request.params === 'object' &&
+            'threadId' in request.params &&
+            request.params.threadId === resolved.data.threadId,
+        );
+        if (pending !== undefined) pendingRuntimeRequests.delete(pending[0]);
+        void runtimeRequestStore
+          .resolveByRpcId(resolved.data.threadId, resolved.data.requestId)
+          .then((request) => {
+            if (request !== null) broadcast('runtime-request', request);
+          })
+          .catch(() => undefined);
+      }
+    }
+    const directTurn = z
+      .object({ turnId: z.string() })
+      .safeParse(notification.params);
+    const proposalMessage =
+      notification.method === 'item/completed'
+        ? completedAgentMessageSchema.safeParse(notification.params)
+        : null;
+    const proposalTurnId =
+      proposalMessage?.success === true
+        ? proposalMessage.data.turnId
+        : directTurn.success
+          ? directTurn.data.turnId
+          : null;
+    const pendingProposal =
+      proposalTurnId === null
+        ? undefined
+        : pendingSpecPatchProposals.get(proposalTurnId);
+    const isProposalAgentEvent =
+      pendingProposal !== undefined &&
+      (notification.method === 'item/agentMessage/delta' ||
+        proposalMessage?.success === true);
+    if (!isProposalAgentEvent) broadcast('codex', notification);
+
+    if (proposalMessage?.success === true && pendingProposal !== undefined) {
+      pendingSpecPatchProposals.delete(proposalMessage.data.turnId);
+      try {
+        const proposal = specPatchProposalSchema.parse(
+          JSON.parse(proposalMessage.data.item.text) as unknown,
+        );
+        if (
+          proposal.requestId !== pendingProposal.requestId ||
+          proposal.baseSceneRevision !== pendingProposal.baseSceneRevision ||
+          proposal.baseSpecRevision !== pendingProposal.baseSpecRevision
+        ) {
+          throw new Error('Codex proposal metadata does not match the request');
+        }
+        evaluateSpecPatchProposal(pendingProposal.sceneDocument, proposal);
+        broadcast('spec-patch-proposal', proposal);
+        void conversationStore
+          .recordAssistantSummary(
+            proposalMessage.data.threadId,
+            proposalMessage.data.turnId,
+            proposal.message,
+          )
+          .catch(() => undefined);
+      } catch (error) {
+        broadcast('spec-patch-proposal-error', {
+          requestId: pendingProposal.requestId,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Codex 변경안을 검증하지 못했습니다.',
+        });
+      }
+      return;
+    }
+
+    if (proposalMessage?.success === true && pendingProposal === undefined) {
+      void conversationStore
+        .recordAssistantSummary(
+          proposalMessage.data.threadId,
+          proposalMessage.data.turnId,
+          proposalMessage.data.item.text,
+        )
+        .catch(() => undefined);
+    }
+
+    if (notification.method === 'turn/completed') {
+      const completed = completedTurnNotificationSchema.safeParse(
+        notification.params,
+      );
+      if (completed.success) {
+        if (completed.data.turn.status !== 'inProgress') {
+          void conversationStore
+            .recordTurnCompleted(
+              completed.data.threadId,
+              completed.data.turn.id,
+              completed.data.turn.status,
+            )
+            .catch(() => undefined);
+        }
+        const abandonedProposal = pendingSpecPatchProposals.get(
+          completed.data.turn.id,
+        );
+        if (
+          abandonedProposal !== undefined &&
+          completed.data.turn.status !== 'inProgress'
+        ) {
+          pendingSpecPatchProposals.delete(completed.data.turn.id);
+          broadcast('spec-patch-proposal-error', {
+            requestId: abandonedProposal.requestId,
+            error:
+              completed.data.turn.error?.message ??
+              'Codex turn이 검증 가능한 structured 변경안 없이 종료되었습니다.',
+          });
+        }
+      }
+    }
+
     const processGenerationNotification = async () => {
       if (notification.method === 'item/completed') {
         const parsed = completedImageGenerationSchema.safeParse(
@@ -274,15 +548,43 @@ export async function startCompanionServer(
         });
       });
   };
-  const handleServerRequest = (request: JsonRpcServerRequest) =>
-    broadcast('codex-request', request);
+  const handleServerRequest = (request: JsonRpcServerRequest) => {
+    void runtimeRequestStore
+      .register(request)
+      .then((normalized) => {
+        if (normalized === null) {
+          options.runtime.rejectServerRequest?.(
+            request.id,
+            -32601,
+            '이 Companion이 지원하지 않는 App Server 요청입니다.',
+          );
+          return;
+        }
+        pendingRuntimeRequests.set(normalized.id, request);
+        broadcast('runtime-request', normalized);
+      })
+      .catch((error) => {
+        options.runtime.rejectServerRequest?.(
+          request.id,
+          -32603,
+          error instanceof Error
+            ? error.message
+            : 'App Server 요청을 안전하게 저장하지 못했습니다.',
+        );
+      });
+  };
   options.runtime.on('status', handleStatus);
   options.runtime.on('notification', handleNotification);
   options.runtime.on('serverRequest', handleServerRequest);
 
+  let serverOrigin: string | null = null;
   const server = createServer(async (request, response) => {
     const origin = request.headers.origin;
-    if (origin !== undefined && !allowedOrigins.has(origin)) {
+    if (
+      origin !== undefined &&
+      !allowedOrigins.has(origin) &&
+      origin !== serverOrigin
+    ) {
       sendJson(response, 403, { error: '허용되지 않은 Origin입니다.' });
       return;
     }
@@ -307,6 +609,20 @@ export async function startCompanionServer(
       return;
     }
 
+    if (
+      staticEditor !== null &&
+      (request.method === 'GET' || request.method === 'HEAD') &&
+      !requestUrl.pathname.startsWith('/api/') &&
+      requestUrl.pathname !== '/api' &&
+      (await staticEditor.serve(
+        requestUrl.pathname,
+        response,
+        request.method === 'HEAD',
+      ))
+    ) {
+      return;
+    }
+
     if (request.headers.authorization !== `Bearer ${token}`) {
       sendJson(response, 401, {
         error: '유효한 Companion 세션 토큰이 필요합니다.',
@@ -317,6 +633,105 @@ export async function startCompanionServer(
     try {
       if (request.method === 'GET' && requestUrl.pathname === '/api/runtime') {
         sendJson(response, 200, options.runtime.status);
+        return;
+      }
+
+      if (
+        request.method === 'GET' &&
+        requestUrl.pathname === '/api/runtime-requests'
+      ) {
+        sendJson(response, 200, await runtimeRequestStore.list());
+        return;
+      }
+
+      const runtimeRequestResponseMatch = requestUrl.pathname.match(
+        /^\/api\/runtime-requests\/([^/]+)\/respond$/,
+      );
+      if (request.method === 'POST' && runtimeRequestResponseMatch !== null) {
+        const id = decodeURIComponent(runtimeRequestResponseMatch[1] ?? '');
+        if (resolvingRuntimeRequests.has(id)) {
+          throw new RuntimeRequestConflictError(
+            '이미 처리 중인 App Server 요청입니다.',
+          );
+        }
+        const pending = pendingRuntimeRequests.get(id);
+        if (pending === undefined) {
+          throw new RuntimeRequestConflictError(
+            '이 요청은 현재 App Server 연결에서 더 이상 응답할 수 없습니다.',
+          );
+        }
+        if (options.runtime.respondServerRequest === undefined) {
+          throw new RuntimeRequestConflictError(
+            '현재 Codex runtime이 App Server 요청 응답을 지원하지 않습니다.',
+          );
+        }
+        const stored = (await runtimeRequestStore.list()).requests.find(
+          (candidate) => candidate.id === id,
+        );
+        if (stored === undefined || stored.status !== 'pending') {
+          throw new RuntimeRequestConflictError(
+            '이미 종료된 App Server 요청입니다.',
+          );
+        }
+        const body = runtimeRequestResponseSchema.parse(
+          await readJson(request),
+        );
+        let result: unknown;
+        let status: 'approved' | 'declined' | 'answered';
+        if (stored.kind === 'userInput') {
+          if (body.action !== 'answer') {
+            throw new RuntimeRequestInputError(
+              '사용자 입력 요청에는 질문 답변이 필요합니다.',
+            );
+          }
+          const questionIds = new Set(stored.questions.map(({ id }) => id));
+          const answerEntries = Object.entries(body.answers);
+          if (
+            answerEntries.length !== questionIds.size ||
+            answerEntries.some(
+              ([questionId, answers]) =>
+                !questionIds.has(questionId) ||
+                answers.length === 0 ||
+                answers.every((answer) => answer.trim() === ''),
+            )
+          ) {
+            throw new RuntimeRequestInputError(
+              '모든 확인 질문에 하나 이상의 답변이 필요합니다.',
+            );
+          }
+          result = {
+            answers: Object.fromEntries(
+              answerEntries.map(([questionId, answers]) => [
+                questionId,
+                { answers: answers.map((answer) => answer.trim()) },
+              ]),
+            ),
+          };
+          status = 'answered';
+        } else {
+          if (body.action === 'answer') {
+            throw new RuntimeRequestInputError(
+              '승인 요청에는 승인 또는 거부 결정이 필요합니다.',
+            );
+          }
+          result = {
+            decision: body.action === 'approve' ? 'accept' : 'decline',
+          };
+          status = body.action === 'approve' ? 'approved' : 'declined';
+        }
+        resolvingRuntimeRequests.add(id);
+        try {
+          options.runtime.respondServerRequest(pending.id, result);
+          pendingRuntimeRequests.delete(id);
+          const updated = await runtimeRequestStore.resolve(id, status);
+          if (updated === null) {
+            throw new Error('App Server 요청 metadata가 사라졌습니다.');
+          }
+          broadcast('runtime-request', updated);
+          sendJson(response, 200, { request: updated });
+        } finally {
+          resolvingRuntimeRequests.delete(id);
+        }
         return;
       }
 
@@ -336,7 +751,7 @@ export async function startCompanionServer(
           ),
         };
         sseClients.add(client);
-        request.on('close', () => {
+        response.on('close', () => {
           clearInterval(client.heartbeat);
           sseClients.delete(client);
         });
@@ -398,104 +813,178 @@ export async function startCompanionServer(
       }
 
       if (
+        request.method === 'GET' &&
+        requestUrl.pathname === '/api/conversation-session'
+      ) {
+        sendJson(response, 200, await conversationStore.getSession());
+        return;
+      }
+
+      if (
         request.method === 'POST' &&
         requestUrl.pathname === '/api/generations'
       ) {
         const body = generationBodySchema.parse(await readJson(request));
-        if (options.runtime.status.capabilities?.imageGeneration === false) {
-          throw new ReferenceInputError(
-            '현재 Codex 모델 공급자에서는 imagegen을 사용할 수 없습니다.',
-          );
-        }
-        const layout = await generationStore.resolveSceneRender(
-          body.layoutRenderId,
+        const requestFingerprint = generationRequestFingerprint(body);
+        const started = await serializeGenerationRequest(
+          body.requestId,
+          async () => {
+            const existing = await generationStore.findGenerationRequest(
+              body.requestId,
+            );
+            if (existing !== null) {
+              if (existing.requestFingerprint !== requestFingerprint) {
+                throw new GenerationRequestConflictError(
+                  '같은 generation request ID를 다른 입력에 재사용할 수 없습니다.',
+                );
+              }
+              return {
+                turnId: existing.generation.turnId,
+                generation: existing.generation,
+                reused: true,
+              };
+            }
+            if (
+              options.runtime.status.capabilities?.imageGeneration === false
+            ) {
+              throw new ReferenceInputError(
+                '현재 Codex 모델 공급자에서는 imagegen을 사용할 수 없습니다.',
+              );
+            }
+            const layout = await generationStore.resolveSceneRender(
+              body.layoutRenderId,
+            );
+            const references = await referenceStore.resolveReferenceAttachments(
+              body.referenceIds,
+            );
+            const sourceGeneration =
+              body.generationMode === 'edit' && body.parentGenerationId !== null
+                ? await generationStore.resolveGenerationResult(
+                    body.parentGenerationId,
+                  )
+                : null;
+            if (
+              layout.render.sceneId !== body.sceneSnapshot.id ||
+              body.layoutSpec.sceneId !== body.sceneSnapshot.id
+            ) {
+              throw new ReferenceInputError(
+                '장면 스냅샷, 레이아웃 렌더와 LayoutSpec의 장면 ID가 일치하지 않습니다.',
+              );
+            }
+            const preflight = evaluateGenerationPreflight({
+              scene: body.sceneSnapshot,
+              layoutSpec: body.layoutSpec,
+              references,
+              includeLayout: true,
+              includeSourceKeyframe: body.generationMode === 'edit',
+            });
+            if (preflight.blockers.length > 0) {
+              throw new ReferenceInputError(
+                `생성 전 무결성 검사 실패: ${preflight.blockers.map(({ message }) => message).join(' ')}`,
+              );
+            }
+            const acknowledgedWarnings = new Set(
+              body.acknowledgedPreflightWarningIds,
+            );
+            const unacknowledgedWarnings = preflight.warnings.filter(
+              ({ id }) => !acknowledgedWarnings.has(id),
+            );
+            if (unacknowledgedWarnings.length > 0) {
+              throw new ReferenceInputError(
+                `생성 전 경고 확인이 필요합니다: ${unacknowledgedWarnings.map(({ id, message }) => `[${id}] ${message}`).join(' ')}`,
+              );
+            }
+            const input: TurnInput[] = [{ type: 'text', text: body.prompt }];
+            if (sourceGeneration !== null) {
+              input.push({
+                type: 'localImage',
+                path: await resolveProjectArtifact(
+                  options.projectRoot,
+                  sourceGeneration.assetPath,
+                ),
+                detail: 'original',
+              });
+            }
+            input.push({
+              type: 'localImage',
+              path: await resolveProjectArtifact(
+                options.projectRoot,
+                layout.assetPath,
+              ),
+              detail: 'original',
+            });
+            for (const reference of references) {
+              input.push({
+                type: 'localImage',
+                path: await resolveProjectArtifact(
+                  options.projectRoot,
+                  reference.assetPath,
+                ),
+                detail: 'original',
+              });
+            }
+            const turnId = await options.runtime.startTurn(
+              body.threadId,
+              input,
+            );
+            await conversationStore.recordTurnStarted(body.threadId, turnId, {
+              kind: 'generation',
+              userMessage:
+                body.feedback ??
+                (body.generationMode === 'edit'
+                  ? '키프레임 보정 생성'
+                  : '현재 3D 장면 이미지 생성'),
+              sceneRevision: body.sceneSnapshot.sceneRevision,
+              specRevision: body.sceneSnapshot.specRevision,
+            });
+            const generation = await generationStore
+              .createGeneration({
+                requestId: body.requestId,
+                requestFingerprint,
+                threadId: body.threadId,
+                turnId,
+                prompt: body.prompt,
+                layoutSpec: body.layoutSpec,
+                sceneSnapshot: body.sceneSnapshot,
+                referenceSnapshots: references.map(toPublicReference),
+                parentGenerationId: body.parentGenerationId,
+                sourceGenerationId: body.sourceGenerationId,
+                feedback: body.feedback,
+                refinementDirective: body.refinementDirective,
+                generationMode: body.generationMode,
+                layoutRenderId: body.layoutRenderId,
+                referenceIds: references.map(({ id }) => id),
+                attachments: [
+                  ...(sourceGeneration === null
+                    ? []
+                    : [
+                        {
+                          type: 'sourceGeneration' as const,
+                          id: sourceGeneration.generation.id,
+                          kind: null,
+                        },
+                      ]),
+                  { type: 'layout', id: body.layoutRenderId, kind: 'layout' },
+                  ...references.map(({ id, kind }) => ({
+                    type: 'reference' as const,
+                    id,
+                    kind,
+                  })),
+                ],
+              })
+              .catch(async (error) => {
+                await options.runtime
+                  .interruptTurn(body.threadId, turnId)
+                  .catch(() => undefined);
+                await conversationStore
+                  .recordTurnCompleted(body.threadId, turnId, 'interrupted')
+                  .catch(() => undefined);
+                throw error;
+              });
+            return { turnId, generation, reused: false };
+          },
         );
-        const references = await referenceStore.resolveReferenceAttachments(
-          body.referenceIds,
-        );
-        const sourceGeneration =
-          body.generationMode === 'edit' && body.parentGenerationId !== null
-            ? await generationStore.resolveGenerationResult(
-                body.parentGenerationId,
-              )
-            : null;
-        if (
-          layout.render.sceneId !== body.sceneSnapshot.id ||
-          body.layoutSpec.sceneId !== body.sceneSnapshot.id
-        ) {
-          throw new ReferenceInputError(
-            '장면 스냅샷, 레이아웃 렌더와 LayoutSpec의 장면 ID가 일치하지 않습니다.',
-          );
-        }
-        const input: TurnInput[] = [{ type: 'text', text: body.prompt }];
-        if (sourceGeneration !== null) {
-          input.push({
-            type: 'localImage',
-            path: await resolveProjectArtifact(
-              options.projectRoot,
-              sourceGeneration.assetPath,
-            ),
-            detail: 'original',
-          });
-        }
-        input.push({
-          type: 'localImage',
-          path: await resolveProjectArtifact(
-            options.projectRoot,
-            layout.assetPath,
-          ),
-          detail: 'original',
-        });
-        for (const reference of references) {
-          input.push({
-            type: 'localImage',
-            path: await resolveProjectArtifact(
-              options.projectRoot,
-              reference.assetPath,
-            ),
-            detail: 'original',
-          });
-        }
-        const turnId = await options.runtime.startTurn(body.threadId, input);
-        const generation = await generationStore
-          .createGeneration({
-            threadId: body.threadId,
-            turnId,
-            prompt: body.prompt,
-            layoutSpec: body.layoutSpec,
-            sceneSnapshot: body.sceneSnapshot,
-            referenceSnapshots: references.map(toPublicReference),
-            parentGenerationId: body.parentGenerationId,
-            sourceGenerationId: body.sourceGenerationId,
-            feedback: body.feedback,
-            generationMode: body.generationMode,
-            layoutRenderId: body.layoutRenderId,
-            referenceIds: references.map(({ id }) => id),
-            attachments: [
-              ...(sourceGeneration === null
-                ? []
-                : [
-                    {
-                      type: 'sourceGeneration' as const,
-                      id: sourceGeneration.generation.id,
-                      kind: null,
-                    },
-                  ]),
-              { type: 'layout', id: body.layoutRenderId, kind: 'layout' },
-              ...references.map(({ id, kind }) => ({
-                type: 'reference' as const,
-                id,
-                kind,
-              })),
-            ],
-          })
-          .catch(async (error) => {
-            await options.runtime
-              .interruptTurn(body.threadId, turnId)
-              .catch(() => undefined);
-            throw error;
-          });
-        sendJson(response, 202, { turnId, generation });
+        sendJson(response, started.reused ? 200 : 202, started);
         return;
       }
 
@@ -570,14 +1059,48 @@ export async function startCompanionServer(
 
       if (request.method === 'POST' && requestUrl.pathname === '/api/threads') {
         const body = threadBodySchema.parse(await readJson(request));
+        const mode =
+          body.mode ?? (body.threadId === undefined ? 'new' : 'resume');
         const threadId =
-          body.threadId === undefined
+          mode === 'new'
             ? await options.runtime.startThread(options.projectRoot)
             : await options.runtime.resumeThread(
-                body.threadId,
+                body.threadId!,
                 options.projectRoot,
               );
-        sendJson(response, 200, { threadId });
+        const session = await conversationStore.activateThread(threadId, mode);
+        sendJson(response, 200, { threadId, session });
+        return;
+      }
+
+      if (
+        request.method === 'POST' &&
+        requestUrl.pathname === '/api/spec-patch-proposals'
+      ) {
+        const body = specPatchProposalRequestSchema.parse(
+          await readJson(request),
+        );
+        if (
+          body.baseSceneRevision !== body.sceneDocument.sceneRevision ||
+          body.baseSpecRevision !== body.sceneDocument.specRevision
+        ) {
+          throw new ReferenceInputError(
+            '변경안 요청 revision이 SceneDocument와 일치하지 않습니다.',
+          );
+        }
+        const turnId = await options.runtime.startTurn(
+          body.threadId,
+          [{ type: 'text', text: createSpecPatchProposalPrompt(body) }],
+          { outputSchema: SPEC_PATCH_PROPOSAL_JSON_SCHEMA },
+        );
+        await conversationStore.recordTurnStarted(body.threadId, turnId, {
+          kind: 'specPatch',
+          userMessage: body.userMessage,
+          sceneRevision: body.baseSceneRevision,
+          specRevision: body.baseSpecRevision,
+        });
+        pendingSpecPatchProposals.set(turnId, body);
+        sendJson(response, 202, { turnId, requestId: body.requestId });
         return;
       }
 
@@ -607,6 +1130,13 @@ export async function startCompanionServer(
           });
         }
         const turnId = await options.runtime.startTurn(body.threadId, input);
+        if (body.metadata !== undefined) {
+          await conversationStore.recordTurnStarted(
+            body.threadId,
+            turnId,
+            body.metadata,
+          );
+        }
         sendJson(response, 202, { turnId });
         return;
       }
@@ -630,11 +1160,16 @@ export async function startCompanionServer(
       const statusCode =
         error instanceof z.ZodError ||
         error instanceof ReferenceInputError ||
-        error instanceof RequestBodyTooLargeError
+        error instanceof RequestBodyTooLargeError ||
+        error instanceof RuntimeRequestInputError
           ? 400
-          : error instanceof ReferenceNotFoundError
-            ? 404
-            : 500;
+          : error instanceof GenerationRequestConflictError
+            ? 409
+            : error instanceof RuntimeRequestConflictError
+              ? 409
+              : error instanceof ReferenceNotFoundError
+                ? 404
+                : 500;
       sendJson(response, statusCode, {
         error: message,
       });
@@ -650,9 +1185,10 @@ export async function startCompanionServer(
   });
 
   const address = server.address() as AddressInfo;
+  serverOrigin = `http://127.0.0.1:${address.port}`;
   return {
     token,
-    url: `http://127.0.0.1:${address.port}`,
+    url: serverOrigin,
     async close() {
       options.runtime.off('status', handleStatus);
       options.runtime.off('notification', handleNotification);

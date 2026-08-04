@@ -2,7 +2,7 @@
 
 > 기준일: 2026-08-04
 >
-> 현재 기준: S23 Semantic Scene Spec 1차 수직 슬라이스와 P2 완료; P3는 시작 전
+> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료
 >
 > 이 문서는 앞으로의 구현 순서와 완료 기준을 관리하는 단일 로드맵이다. 세부 설계는
 > `ai-scene-assistant.md`, 완료된 작업의 검증 기록은 `session-handoffs/`를 따른다.
@@ -23,6 +23,16 @@
 | 키프레임 작업  | 전체 generation 이력과 sceneSnapshot 읽기 전용 3D 미리보기·차이·무결성 표시 | S20–S21 |
 | 스냅샷 적용    | generation sceneSnapshot의 fail-closed 적용·undo·durable recovery·출처 보존 | S22     |
 | 장면 전체 명세 | versioned Semantic Scene Spec 저장·편집·snapshot·prompt와 권위 경계         | S23     |
+| 대화형 변경    | specPatch와 object ID 명령의 이중 검증·원자 적용·generation 전달 증거       | S24–S27 |
+| 생성 사전검사  | 참조·LayoutSpec 무결성 차단과 충돌 경고의 브라우저·Companion 재검증         | S26     |
+| 보정 지시 계약 | versioned 유지·변경 지시의 UI·prompt·generation 저장과 이중 검증            | S28     |
+| 버전 결과 비교 | 부모·형제 결과 이미지와 mode·directive·SceneDocument·LayoutSpec 비교·복원   | S29     |
+| 생성 실행 복구 | request ID idempotency·중복 방지·응답 유실 재전송·재시작 상태 복구          | S30     |
+| 실행 재현 증거 | 입력 스냅샷·원본·레퍼런스 해시, 실제 첨부 순서와 prompt 근거 재검증         | S31     |
+| 프로젝트 대화  | versioned task metadata, 명시적 재개·새 task 선택, 재시작 중단 상태 복구    | S32     |
+| 런타임 요청    | 명령·파일 승인과 사용자 질문의 인증 응답, 비밀 비저장, 재시작 만료 복구     | S33     |
+| 실행 수명주기  | 프로젝트 lock, 포트 fallback, 브라우저 자동 실행, 제한된 무중복 재연결      | S34     |
+| 브라우저 배포  | 동일-origin 정적 편집기, platform Codex bundle, 크기 manifest와 배포 결정   | S35     |
 
 현재 기본 생성은 `3D 레이아웃 1장 + 레퍼런스 최대 4장`, 보정 생성은
 `원본 키프레임 1장 + 현재 3D 레이아웃 1장 + 레퍼런스 최대 3장`을 사용한다.
@@ -89,45 +99,45 @@
 2. [x] 새 대화나 새로고침 후에도 명세가 프로젝트에서 복원된다.
 3. [x] prompt는 채팅 기록이 아니라 저장된 명세를 기준으로 재생성할 수 있다.
 
-### P3. 대화형 변경 계약과 충돌 검사
+### P3. 대화형 변경 계약과 충돌 검사 — 완료 (S27)
 
 목표는 Codex가 대화 내용을 바로 씬에 덮어쓰지 않고 검증 가능한 변경안으로 제시하게 하는
 것이다.
 
-- 허용된 경로만 수정하는 구조화된 `specPatch`
-- 변경 전/후 미리보기와 적용·취소
-- 3D 변형은 object ID 기반 도메인 명령으로 분리
-- 삭제된 오브젝트와 레퍼런스 연결의 참조 무결성 검사
-- 주인공 가림, 레퍼런스 충돌, 포즈 권위 충돌과 이미지 입력 예산 경고
+- [x] 허용된 경로만 수정하는 구조화된 `specPatch`
+- [x] 변경 전/후 미리보기와 적용·취소
+- [x] 3D 변형은 object ID 기반 도메인 명령으로 분리
+- [x] 삭제된 오브젝트와 레퍼런스 연결의 참조 무결성 검사 — S26
+- [x] 주인공 가림, 레퍼런스 충돌, 포즈 권위 충돌과 이미지 입력 예산 경고 — S26
 
 완료 기준:
 
-1. 자연어 지시가 검증 가능한 변경 카드로 표시된다.
-2. 적용 전에는 SceneDocument와 Scene Spec이 바뀌지 않는다.
-3. 잘못된 ID, 허용되지 않은 경로와 충돌하는 지시는 서버와 브라우저 양쪽에서 거부된다.
-4. 적용된 변경은 generation snapshot과 prompt에서 동일하게 확인된다.
+1. [x] 자연어 지시가 검증 가능한 변경 카드로 표시된다.
+2. [x] 적용 전에는 SceneDocument와 Scene Spec이 바뀌지 않는다.
+3. [x] 잘못된 ID, 허용되지 않은 경로와 충돌하는 지시는 서버와 브라우저 양쪽에서 거부된다.
+4. [x] 적용된 변경은 generation snapshot과 prompt에서 동일하게 확인된다.
 
-### P4. 생성 이력과 보정 정책 고도화
+### P4. 생성 이력과 보정 정책 고도화 — 완료 (S31)
 
-- 원본 기반 `edit`와 3D 변경 후 `fresh` 재생성을 UI에서 명확히 구분
-- 피드백에서 유지·변경 제약을 구조화하고 generation에 저장
-- 버전 계보 탐색과 결과 비교
-- 생성 요청 idempotency, 중복 클릭 방지, 취소·실패·재시도 상태 정리
-- 동일 입력 재생성 시 어떤 스냅샷과 레퍼런스를 사용했는지 재현 가능한 실행 요약 제공
+- [x] 원본 기반 `edit`와 3D 변경 후 `fresh` 재생성을 UI에서 명확히 구분
+- [x] 피드백에서 유지·변경 제약을 구조화하고 generation에 저장 — S28
+- [x] 버전 계보 탐색과 결과 비교 — S29
+- [x] 생성 요청 idempotency, 중복 클릭 방지, 취소·실패·재시도 상태 정리 — S30
+- [x] 동일 입력 재생성 시 어떤 스냅샷과 레퍼런스를 사용했는지 재현 가능한 실행 요약 제공 — S31
 
 완료 기준:
 
-1. 사용자는 디테일 보정과 구도 재생성 중 적합한 경로를 선택할 수 있다.
-2. 모든 결과에서 원본, 입력 이미지 순서, 피드백과 생성 방식을 추적할 수 있다.
-3. 새로고침과 Companion 재시작 뒤에도 진행·실패 상태가 모순 없이 복구된다.
+1. [x] 사용자는 디테일 보정과 구도 재생성 중 적합한 경로를 선택할 수 있다.
+2. [x] 모든 결과에서 원본, 입력 이미지 순서, 피드백과 생성 방식을 추적할 수 있다.
+3. [x] 새로고침과 Companion 재시작 뒤에도 진행·실패 상태가 모순 없이 복구된다.
 
-### P5. 프로젝트 대화 영속성과 런타임 제품화
+### P5. 프로젝트 대화 영속성과 런타임 제품화 — 완료 (S35)
 
-- 프로젝트별 Codex task ID와 대화 요약 metadata 저장
-- 프로젝트를 다시 열었을 때 task 재개 또는 새 task 시작을 명시적으로 선택
-- App Server의 승인·사용자 입력 요청 처리 UI
-- Companion 자동 시작과 종료, 포트 충돌 및 재연결 UX
-- 배포 형태 결정 후 Electron/Tauri 등 데스크톱 패키징 평가
+- [x] 프로젝트별 Codex task ID와 대화 요약 metadata 저장 — S32
+- [x] 프로젝트를 다시 열었을 때 task 재개 또는 새 task 시작을 명시적으로 선택 — S32
+- [x] App Server의 승인·사용자 입력 요청 처리 UI — S33
+- [x] Companion 자동 시작과 종료, 포트 충돌 및 재연결 UX — S34
+- [x] 배포 형태 결정과 Electron/Tauri 등 데스크톱 패키징 평가 — S35
 
 Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semantic Scene Spec,
 레퍼런스 manifest와 generation record가 프로젝트의 영구 원본이라는 원칙은 유지한다.
@@ -154,7 +164,7 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 
 ## 5. 바로 다음 작업
 
-S23은 버전이 있는 장면 전체 Semantic Scene Spec의 저장·복원, generation snapshot, 저장 명세
-기반 image-generation prompt와 Inspector 구조화 편집 UI를 실제 1280×720 Chromium 흐름까지
-검증해 P2를 종료했다. 다음 numbered phase는 P3이지만 아직 시작하지 않는다. 자연어 `specPatch`
-변환·자동 적용, 변경 카드와 revision/허용 경로 충돌 검사는 P3의 별도 범위다.
+S36에서는 생성 asset의 장시간 사용 수명주기를 구현한다. 프로젝트에 원본은 유지하되 generation
+목록은 Companion이 만든 제한 크기 thumbnail을 사용하고, 선택하지 않은 전체 해상도 이미지와
+읽기 전용 3D preview의 브라우저·GPU 자원을 해제한다. 원본/thumbnail 무결성, reload 복구와 많은
+generation에서의 메모리 상한을 자동 검증한다.

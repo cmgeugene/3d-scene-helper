@@ -528,6 +528,9 @@ export function EditorShell({
                     onRefinementModeChange={setRefinementModeActive}
                     refinementSource={refinementSource}
                     onRefinementSourceChange={setRefinementSource}
+                    onApplySpecPatchProposal={(proposal) =>
+                      store.getState().applySpecPatchProposal(proposal)
+                    }
                     clientFactory={assistantClientFactory}
                     createObjectUrl={createAssistantObjectUrl}
                     revokeObjectUrl={revokeAssistantObjectUrl}

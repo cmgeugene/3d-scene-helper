@@ -8,6 +8,7 @@ import { EditorShell, type WebGLState } from '../editor/components/EditorShell';
 import { AUTOSAVE_DEBOUNCE_MS, SCENE_STORAGE_KEY } from '../editor/constants';
 import {
   encodeSceneDocument,
+  parseSceneDocument,
   saveSceneDocument,
 } from '../editor/persistence/sceneCodec';
 import type { EditorStore } from '../editor/state/editorStore';
@@ -51,6 +52,29 @@ interface AppProps {
   canvasEnabled?: boolean;
   store?: StoreApi<EditorStore>;
   storage?: Storage;
+}
+
+function sceneContentFingerprint(document: EditorStore['document']) {
+  return encodeSceneDocument({
+    ...document,
+    sceneRevision: 0,
+    specRevision: 0,
+  });
+}
+
+function storedSceneHasSameContent(
+  serialized: string | null,
+  document: EditorStore['document'],
+) {
+  if (serialized === null) return false;
+  try {
+    return (
+      sceneContentFingerprint(parseSceneDocument(serialized)) ===
+      sceneContentFingerprint(document)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function App({
@@ -118,9 +142,14 @@ export function App({
 
       clearAutosaveTimer();
       if (!state.isDirty) {
-        persistedBaseline = readStoredScene();
+        const storedScene = readStoredScene();
+        const shouldPersistRevision =
+          encodeSceneDocument(state.document) !== storedScene &&
+          (storedSceneHasSameContent(storedScene, state.document) ||
+            (storedScene === null && previousState.isDirty));
+        persistedBaseline = storedScene;
         hasExternalConflict = false;
-        return;
+        if (!shouldPersistRevision) return;
       }
 
       const documentToPersist = state.document;

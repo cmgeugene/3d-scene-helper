@@ -1,6 +1,6 @@
 # AI Scene Assistant 및 이미지 생성 워크플로 설계안
 
-> 상태: 단계적 구현 중 — S19 키프레임 보정까지 구현. 최신 구현 순서와 완료 기준은
+> 상태: 단계적 구현 중 — S35 브라우저 배포 실행기와 패키징 결정까지 구현. 최신 구현 순서와 완료 기준은
 > `roadmap.md`를 따른다.
 > 대상: I2V 3D Scene Helper의 로컬 Codex 연동, 레퍼런스 관리, 대화형 장면 해석 및 이미지 생성
 
@@ -280,7 +280,7 @@ AI와 사용자가 합의한 의미와 연출 데이터다.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "intent": {
     "location": "한국 노포 야외 치킨집",
     "time": "sunset",
@@ -376,32 +376,139 @@ Scene Graph
 
 존재하지 않는 요소는 부정문으로 길게 설명하지 않고 블록 자체를 생략한다. 제약은 보통 5~7개 이내로 유지한다.
 
+### 6.5 Refinement Directive
+
+보정 생성은 자유 텍스트 `feedback`만을 권위 원본으로 사용하지 않는다. version 1
+`RefinementDirective`가 기존 키프레임에서 유지할 요소와 다시 생성할 요소를 분리한다.
+
+```json
+{
+  "version": 1,
+  "preserve": ["전체 구도", "인물 의상과 정체성"],
+  "change": ["전봇대 가림을 10% 이하로 줄이기", "표정을 더 밝게"]
+}
+```
+
+- `change`는 최소 한 항목이 필요하고 `preserve`는 명시 항목이 없을 수 있다.
+- 각 목록의 중복과 같은 항목의 유지·변경 동시 지정은 거부한다.
+- `edit` generation에는 directive가 필수이며 `fresh` generation에는 허용하지 않는다.
+- prompt는 directive JSON과 함께 `preserve` 우선, `change` 한정 재생성, 미지정 요소 보존 규칙을 전달한다.
+- Companion과 generation store가 브라우저와 같은 schema와 generation mode 조합을 다시 검증한다.
+- generation history는 구조화된 두 목록을 표시하며 구형 기록은 기존 `feedback`으로 fallback한다.
+
+### 6.6 Generation Version Comparison
+
+키프레임 작업 공간은 선택 generation의 부모와 같은 부모를 가진 형제 generation만 비교
+대상으로 제공한다. 계보 밖 ID가 브라우저 저장소에 남아 있어도 비교 대상으로 복원하지 않고,
+유효한 부모가 있으면 부모를 기본 대상으로 사용한다.
+
+한 비교 대상은 다음 정보를 같은 두 generation에 고정해 보여준다.
+
+- 선택 결과와 부모·형제 결과 이미지
+- version, `fresh`/`edit`, 상태, parent와 source generation ID
+- 두 `RefinementDirective`의 유지·변경 목록
+- `SceneDocument`의 revision, 카메라, 출력, Semantic Scene Spec, 오브젝트와 모션 차이
+- `LayoutSpec`의 프레임, 카메라 분석, 권위, 화면 배치와 가림 차이
+
+선택 generation과 비교 generation ID는 별도 키로 저장한다. 새로고침 뒤 목록을 다시 받은
+시점에 저장된 선택이 현재 계보에 속하는지 재검증한 뒤 비교 결과 이미지와 스냅샷 차이를 다시
+구성한다. 스냅샷이 없는 구형 기록과 장면 ID가 다른 기록은 `동일`로 취급하지 않고 각각 자료
+없음과 mismatch로 표시한다.
+
+### 6.7 Generation Request Lifecycle
+
+브라우저가 시작하는 새 generation 요청은 200자 이하의 고유 `requestId`를 가진다. Companion은
+정규화된 요청 전체의 SHA-256 fingerprint를 generation manifest에 함께 저장한다.
+
+- 같은 request ID와 같은 fingerprint의 동시·반복 POST는 최초 turn과 generation record를
+  반환하며 imagegen을 다시 실행하지 않는다.
+- 같은 request ID에 다른 prompt, snapshot, LayoutSpec, render 또는 reference 입력을 보내면
+  `409 Conflict`로 거부한다.
+- request ID가 없는 구형 클라이언트 요청은 서버가 호환용 ID를 부여하지만 재전송 idempotency를
+  보장하지 않는다. 현재 브라우저는 항상 명시적 ID를 보낸다.
+- 브라우저는 빠른 다중 클릭을 ref 경계에서 먼저 차단한다. 정규화한 POST payload는 응답을 받기
+  전 localStorage 복구 슬롯에 저장한다.
+- 네트워크 응답이 유실되면 payload를 새로 캡처하지 않고 같은 request ID로 명시적으로 다시
+  확인한다. 서버에 기록이 있으면 기존 상태를 반환하고, 없을 때만 최초 turn을 시작한다.
+- reload에서 저장된 `inProgress` generation의 thread/turn을 복원해 같은 turn을 중단할 수 있다.
+- Companion 프로세스 재시작 시 이전 프로세스의 `inProgress` record는 고아 작업으로 보고
+  `interrupted`와 복구 이유를 durable manifest에 기록한다. 동일 request ID 재전송은 이 terminal
+  record를 반환하며 자동 재실행하지 않는다.
+- `failed`와 `interrupted`는 terminal 상태다. 사용자가 다시 생성하면 새 request ID의 새 시도로
+  기록한다.
+
+### 6.8 Reproducible Generation Execution Summary
+
+신규 generation은 version 1 실행 요약을 불변 record에 저장한다. 요약은 prompt,
+`SceneDocument`, 별도 Semantic Scene Spec snapshot과 `LayoutSpec`의 SHA-256, 레이아웃 렌더 ID와
+파일 해시, 원본 키프레임 ID·결과 해시, 정렬된 레퍼런스 ID·해시를 포함한다. 실제 Codex turn에
+전달한 이미지 배열은 1부터 시작하는 attachment index와 `sourceGeneration`/`layout`/`reference`
+역할로 그대로 기록한다.
+
+Companion은 generation 목록과 콘텐츠 응답을 만들 때 manifest의 현재 저장값으로 요약을 다시
+계산한다. 저장 요약과의 차이 외에도 다음 근거를 독립적으로 검사한다.
+
+- `SceneDocument.semanticSceneSpec`과 별도 Semantic Scene Spec snapshot의 동일성
+- generation mode에 따른 원본, 레이아웃, 레퍼런스의 실제 첨부 순서
+- prompt 안의 versioned `SceneDocument`, `LayoutSpec`, Semantic Scene Spec과 레퍼런스 매니페스트
+  블록이 저장 스냅샷에서 직렬화한 값과 같은지 여부
+- 원본 키프레임과 모든 첨부에 확인 가능한 콘텐츠 해시가 있는지 여부
+
+공개 record에는 실행 요약과 `valid`/`legacy`/`mismatch` 무결성 상태 및 구체적 오류를 제공한다.
+키프레임 상세는 전체 해시와 첨부 순서를 표시한다. 실행 요약이 없는 이전 generation은 추정값을
+만들지 않고 `legacy`로 표시한다.
+
 ## 7. 대화와 변경 계약
 
 Scene Assistant의 응답은 사용자용 메시지와 기계 적용 데이터를 분리한다.
 
 ```json
 {
+  "version": 1,
   "requestId": "req_01",
   "baseSceneRevision": 12,
   "baseSpecRevision": 7,
-  "message": "노란 물체를 전경의 콘크리트 전봇대로 설정했어요.",
+  "message": "장소와 배경 손님 연출을 변경할게요.",
   "specPatch": [
     {
-      "op": "add",
-      "path": "/semanticObjects/foreground_01/type",
-      "value": "concrete_utility_pole"
+      "op": "replace",
+      "path": "/intent/location",
+      "value": "골목 치킨집"
     },
     {
-      "op": "add",
-      "path": "/semanticObjects/foreground_01/focus",
-      "value": "strong_blur"
+      "op": "replace",
+      "path": "/extras/enabled",
+      "value": true
+    },
+    {
+      "op": "replace",
+      "path": "/extras/minCount",
+      "value": 5
+    },
+    {
+      "op": "replace",
+      "path": "/extras/maxCount",
+      "value": 8
     }
   ],
-  "sceneCommands": [],
-  "warnings": []
+  "sceneCommands": [
+    {
+      "type": "setObjectTransform",
+      "objectId": "foreground_01",
+      "transform": {
+        "position": { "x": 1.25, "y": 0.85, "z": 0 },
+        "rotationDeg": { "x": 0, "y": 20, "z": 0 },
+        "scale": { "x": 1, "y": 1, "z": 1 }
+      }
+    }
+  ],
+  "warnings": ["전경 오브젝트의 위치와 회전을 함께 변경합니다."]
 }
 ```
+
+S25의 version 2 계약은 `setObjectTransform`만 허용한다. `specPatch`와 `sceneCommands`는 같은
+base revision에서 검증하고 하나의 원자 transaction으로 적용한다. object 생성·삭제와 포즈 변경은
+아직 제안하지 않는다.
 
 적용 규칙은 다음과 같다.
 
@@ -435,6 +542,13 @@ Scene Assistant의 응답은 사용자용 메시지와 기계 적용 데이터�
 
 첫 구현은 브라우저 기반 편집 UI를 유지하면서 작은 Local Companion이 Codex App Server와 로컬 파일 시스템을 중개하는 구조를 사용한다. Electron이나 Tauri 패키징은 필수가 아니며, 초기 버전은 로컬 실행기가 Companion을 시작하고 기본 브라우저에서 UI를 여는 방식으로 배포할 수 있다.
 
+S35에서 초기 배포 형태를 **platform별 Codex 포함 브라우저 bundle**로 확정했다. bundle은
+production 편집기 정적 파일, 단일 JavaScript Companion runner와 현재 platform용 Codex package를
+포함하고 사용자가 설치한 지원 Node.js에서 실행한다. 편집기와 API는 같은 무작위 loopback port를
+사용하므로 개발용 Vite 서버와 CORS 설정이 필요 없다. 프로젝트는 `--project-root`의 명시적 절대
+경로로 선택하고, 기본 브라우저를 열어 기존 WebGL·다운로드·접근성 경로를 그대로 사용한다.
+세부 비교와 데스크톱 shell 전환 조건은 `distribution-decision.md`를 따른다.
+
 ```text
 사용자 브라우저
   -> React/Vite UI
@@ -457,6 +571,18 @@ Scene Assistant의 응답은 사용자용 메시지와 기계 적용 데이터�
 - 매 요청은 현재 revision과 필요한 Scene/Spec 스냅샷을 명시적으로 전달한다.
 - thread의 기억만으로 확정된 장면 상태를 복원하지 않는다.
 - 긴 대화는 생성 완료 시 구조화된 요약을 프로젝트에 저장하고, 필요하면 최신 요약과 명세로 새 thread를 시작한다.
+
+S32부터 Local Companion은 프로젝트 루트의 `conversations.json`을 version 1 manifest로 관리한다.
+이 파일은 활성·보관 task의 thread ID, turn 수와 마지막 turn 상태, 크기가 제한된 최근 사용자
+요청·assistant 요약, scene/spec revision과 시각만 저장한다. 전체 prompt나 transcript는 저장하지
+않으며 `sessionStorage`는 구형 Companion·테스트를 위한 탭 단위 캐시에만 사용한다.
+
+프로젝트를 다시 열면 저장 task를 자동 재개하지 않는다. 사용자는 저장 task 재개 또는 새 task
+시작을 명시적으로 선택하며, 새 task는 이전 활성 task를 보관 상태로 전환한다. 재개 실패 때는
+저장 metadata를 유지한 채 다시 시도하거나 새 task를 시작할 수 있다. 일반 대화, spec patch와
+generation turn은 동일한 수명주기 metadata를 사용하고, Companion 재시작 시 완료를 확인할 수
+없는 `inProgress` turn은 `interrupted`로 복구한다. 이 metadata는 대화 연속성 보조 정보이며
+SceneDocument, Semantic Scene Spec과 generation record의 영구 원본 지위를 대체하지 않는다.
 
 예시:
 
@@ -500,11 +626,40 @@ MVP의 기본 생성 경로는 별도 OpenAI API 키를 요구하는 직접 API 
 
 Codex나 Local Companion 프로세스가 종료되거나 인증이 만료되어도 SceneDocument, Scene Spec, 레퍼런스와 생성 결과는 로컬 프로젝트에 남아야 한다. 재연결 시 프로젝트 revision과 마지막 적용 turn을 기준으로 상태를 맞추며, 완료 여부를 확인할 수 없는 요청을 자동으로 중복 실행하지 않는다.
 
+S34부터 로컬 실행기는 프로젝트 루트의 `.i2v-companion.lock`을 원자적으로 획득해 프로젝트별
+Companion을 하나만 허용한다. 살아 있는 PID의 중복 실행은 거부하고, 종료된 PID나 손상된 lock은
+stale 상태로 복구한다. lock에는 인증 토큰을 저장하지 않는다. 지정 포트 충돌은 기본적으로 OS가
+선택한 빈 포트로 한 번 전환하고 `--strict-port`에서는 실패한다. 준비가 끝나면 세션 토큰을 URL
+fragment에만 담은 편집기 주소를 기본 브라우저에서 열며 `--no-open`으로 생략할 수 있다. 정상
+신호 종료는 HTTP 서버, App Server와 소유 lock을 함께 정리한다.
+
+브라우저는 SSE 또는 런타임 상태 조회 실패 시 0.5초, 1초, 2초 간격으로 최대 3회 자동
+재연결한다. 각 시도는 런타임, 대화 session, generation과 runtime request 상태를 다시 읽고,
+진행 중이던 POST나 turn을 자동 재전송하지 않는다. 사용자는 대기 중 즉시 다시 연결하거나 자동
+시도 소진 뒤 수동 재시도를 선택할 수 있다. 복구된 저장 thread는 다음 사용자 동작에서만
+재개하므로, 응답 유실과 프로세스 재시작이 중복 turn을 만들지 않는다. Companion 프로세스가
+재시작되어 세션 토큰이 바뀌면 새로 열린 launcher URL로 연결 정보를 갱신한다.
+
+S33부터 command 실행 승인, 파일 변경 승인과 `request_user_input` 요청은 원시 App Server
+payload를 브라우저에 그대로 전달하지 않고 Companion이 검증·정규화한다. 브라우저는 thread,
+turn, 요청 이유와 영향·경로를 보여 준 뒤 이번 요청에 한정된 승인·거부 또는 질문 답변을
+인증된 API로 전송한다. 세션 전체 승인이나 protocol이 제안한 정책 변경은 UI에서 노출하지 않는다.
+
+프로젝트 루트의 `runtime-requests.json` version 1 manifest에는 최근 요청 50개의 제한된 metadata와
+상태만 저장한다. 사용자 답변, 특히 secret 답변은 App Server 응답에만 사용하고 파일·SSE·로그에
+저장하지 않는다. 동일 요청은 현재 App Server 연결에서 정확히 한 번만 응답할 수 있으며 외부
+auto-resolution은 `serverRequest/resolved` 알림으로 닫는다. Companion이 재시작되면 기존 JSON-RPC
+callback은 복원할 수 없으므로 남은 `pending` 요청을 실행 불가능한 `expired` 상태로 전환하고,
+새 요청이 도착할 때만 다시 결정하게 한다. 지원하지 않거나 잘못된 server request는 protocol
+error로 fail-closed 종료한다.
+
 ### 8.5 보안 경계
 
 - Local Companion은 loopback 인터페이스에만 바인딩하고 공개 네트워크에 노출하지 않는다.
 - 브라우저와 Companion 사이에는 실행 시 생성한 세션 토큰과 엄격한 Origin 검사를 사용한다.
 - Companion API는 임의 명령 실행이나 임의 경로 읽기를 제공하지 않는다.
+- 승인 API는 현재 App Server가 보낸 검증된 pending 요청 ID에만 응답하며 임의 JSON-RPC 호출을 제공하지 않는다.
+- secret 사용자 답변은 프로젝트 metadata, SSE와 로그에 남기지 않는다.
 - 프로젝트 루트와 명시적으로 가져온 파일만 접근 가능하게 한다.
 - 생성 요청에 포함될 파일 목록을 사용자에게 확인 가능하게 한다.
 - 외부 원본 이미지는 프로젝트 관리 영역으로 명시적으로 가져온다.
@@ -526,18 +681,19 @@ project/
   scene-spec.json    # Semantic Scene Spec
   references.json    # Reference Manifest
   generations.json   # 생성 관계와 재현 메타데이터
-  conversations/     # 작업별 구조화된 대화 요약
+  conversations.json # 활성·보관 Codex task와 제한된 대화 metadata
+  runtime-requests.json # 승인·질문 요청의 제한된 수명주기 metadata
 ```
 
 `project.json`은 최소한 `version`, `projectId`, `sceneRevision`, `specRevision`과 `codexSession`을 가진다. SceneDocument와 Scene Spec을 함께 변경하는 작업은 임시 파일에 모두 기록하고 검증한 뒤 교체하거나, 동일한 복구 로그를 사용하는 방식으로 원자성을 보장한다.
 
 각 생성 결과에는 다음 재현 정보를 함께 보관한다.
 
-- 생성 시점의 Scene Spec 버전
-- 레퍼런스 ID와 콘텐츠 해시
-- 실제 첨부 순서
-- 렌더된 최종 프롬프트
-- 모델과 생성 옵션
+- 생성 시점 SceneDocument와 Scene Spec의 revision·콘텐츠 해시
+- LayoutSpec과 레이아웃 렌더의 ID·콘텐츠 해시
+- 레퍼런스 및 원본 키프레임 ID와 콘텐츠 해시
+- 실제 이미지 첨부 순서와 역할
+- 렌더된 최종 프롬프트의 콘텐츠 해시와 저장 입력 블록 검증 결과
 - 원본 결과와 후속 수정 관계
 
 ### 9.1 브라우저 메모리 정책
@@ -708,10 +864,12 @@ extras:
 - Codex thread는 대화 연속성만 소유하고 프로젝트 파일이 영구적인 진실의 원천이다.
 - MVP 이미지 생성은 Codex 사용량을 사용하는 내장 imagegen을 기본 경로로 한다.
 - 브라우저는 전체 해상도 바이너리를 장기 상태에 보관하지 않는다.
+- 초기 내부 배포는 정적 편집기와 platform Codex를 포함한 브라우저 bundle을 사용한다.
+- Electron/Tauri는 네이티브 project picker, 서명 installer와 자동 업데이트가 출시 조건이 될 때
+  다시 평가한다.
 
 ### 14.2 열린 기술 결정
 
-- Local Companion의 배포 형태와 브라우저 자동 실행 방식
 - App Server에서 이미지 입력과 내장 imagegen 결과 이벤트를 전달하는 구체적인 프로토콜
 - 기존 `SceneDocument`에 의미 데이터를 포함할지 별도 `scene-spec.json`으로 유지할지
 - 프로젝트의 기본 작업 형식을 디렉터리로 하고 휴대용 내보내기를 단일 아카이브로 제공할지

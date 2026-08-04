@@ -11,12 +11,23 @@ import {
 } from './companionClient';
 import { parseGenerationUpdate } from './generationEvents';
 import {
+  compareGenerationVersions,
+  getGenerationComparisonCandidates,
+  type GenerationSnapshotComparison,
+} from './generationComparison';
+import {
   assessGenerationSceneIntegrity,
   compareSceneDocuments,
 } from './sceneSnapshotComparison';
+import {
+  KEYFRAME_COMPARISON_STORAGE_KEY,
+  KEYFRAME_SELECTION_STORAGE_KEY,
+} from './keyframeStorage';
 
-export const KEYFRAME_SELECTION_STORAGE_KEY =
-  'i2v.keyframe-workspace.selection.v1';
+export {
+  KEYFRAME_COMPARISON_STORAGE_KEY,
+  KEYFRAME_SELECTION_STORAGE_KEY,
+} from './keyframeStorage';
 
 interface KeyframeWorkspaceProps {
   connection: CompanionConnection | null;
@@ -35,6 +46,19 @@ const defaultClientFactory = (connection: CompanionConnection) =>
 const defaultCreateObjectUrl = (blob: Blob) => URL.createObjectURL(blob);
 const defaultRevokeObjectUrl = (url: string) => URL.revokeObjectURL(url);
 
+function revokeAfterRender(
+  revokeObjectUrl: (url: string) => void,
+  url: string,
+) {
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => revokeObjectUrl(url)),
+    );
+    return;
+  }
+  setTimeout(() => revokeObjectUrl(url), 32);
+}
+
 const STATUS_LABELS: Record<GenerationRecord['status'], string> = {
   inProgress: '진행 중',
   completed: '완료',
@@ -42,9 +66,23 @@ const STATUS_LABELS: Record<GenerationRecord['status'], string> = {
   interrupted: '중단됨',
 };
 
+const EXECUTION_INTEGRITY_LABELS = {
+  valid: '검증 통과',
+  legacy: '구형 기록',
+  mismatch: '불일치 발견',
+} as const;
+
 function readSelection(storage: Storage) {
   try {
     return storage.getItem(KEYFRAME_SELECTION_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function readComparison(storage: Storage) {
+  try {
+    return storage.getItem(KEYFRAME_COMPARISON_STORAGE_KEY);
   } catch {
     return null;
   }
@@ -55,6 +93,14 @@ function storeSelection(storage: Storage, generationId: string) {
     storage.setItem(KEYFRAME_SELECTION_STORAGE_KEY, generationId);
   } catch {
     // Selection persistence is best-effort and must not break browsing.
+  }
+}
+
+function storeComparison(storage: Storage, generationId: string) {
+  try {
+    storage.setItem(KEYFRAME_COMPARISON_STORAGE_KEY, generationId);
+  } catch {
+    // Comparison persistence is best-effort and must not break browsing.
   }
 }
 
@@ -71,6 +117,27 @@ function errorMessage(reason: unknown) {
   return reason instanceof Error
     ? reason.message
     : '저장된 이미지를 불러오지 못했습니다.';
+}
+
+const COMPARISON_STATUS_LABELS: Record<
+  GenerationSnapshotComparison['status'],
+  string
+> = {
+  same: '동일',
+  changed: '변경 있음',
+  unavailable: '비교 자료 없음',
+  mismatch: '장면 ID 다름',
+};
+
+function directiveItems(
+  directive: GenerationRecord['refinementDirective'],
+  field: 'preserve' | 'change',
+) {
+  if (directive === null) {
+    return field === 'preserve' ? '구조화 지시 없음' : 'fresh 또는 구형 기록';
+  }
+  const items = directive[field];
+  return items.length === 0 ? '명시 항목 없음' : items.join(' · ');
 }
 
 export function KeyframeWorkspace({
@@ -92,10 +159,15 @@ export function KeyframeWorkspace({
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     readSelection(storage),
   );
+  const [comparisonId, setComparisonId] = useState<string | null>(() =>
+    readComparison(storage),
+  );
   const [isLoading, setIsLoading] = useState(connection !== null);
   const [error, setError] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<ImageLoadState | null>(null);
   const [layoutImage, setLayoutImage] = useState<ImageLoadState | null>(null);
+  const [comparisonResultImage, setComparisonResultImage] =
+    useState<ImageLoadState | null>(null);
   const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(
     null,
   );
@@ -105,6 +177,7 @@ export function KeyframeWorkspace({
   const [applyError, setApplyError] = useState<string | null>(null);
   const resultUrlRef = useRef<string | null>(null);
   const layoutUrlRef = useRef<string | null>(null);
+  const comparisonResultUrlRef = useRef<string | null>(null);
   const applyInFlightRef = useRef(false);
 
   useEffect(() => {
@@ -158,6 +231,24 @@ export function KeyframeWorkspace({
 
   const selected =
     generations.find((generation) => generation.id === selectedId) ?? null;
+  const comparisonCandidates = useMemo(
+    () =>
+      selected === null
+        ? []
+        : getGenerationComparisonCandidates(selected, generations),
+    [generations, selected],
+  );
+  const comparisonCandidate =
+    comparisonCandidates.find(
+      ({ generation }) => generation.id === comparisonId,
+    ) ??
+    comparisonCandidates[0] ??
+    null;
+  const comparison = comparisonCandidate?.generation ?? null;
+  const versionComparison =
+    selected === null || comparison === null
+      ? null
+      : compareGenerationVersions(selected, comparison);
   const sceneIntegrity =
     selected === null ? null : assessGenerationSceneIntegrity(selected);
   const sceneComparison =
@@ -187,6 +278,14 @@ export function KeyframeWorkspace({
     currentResultImage?.status === 'loaded' ? currentResultImage.url : null;
   const layoutUrl =
     currentLayoutImage?.status === 'loaded' ? currentLayoutImage.url : null;
+  const currentComparisonResultImage =
+    comparisonResultImage?.generationId === comparison?.id
+      ? comparisonResultImage
+      : null;
+  const comparisonResultUrl =
+    currentComparisonResultImage?.status === 'loaded'
+      ? currentComparisonResultImage.url
+      : null;
 
   useEffect(() => {
     if (selected === null) return;
@@ -194,12 +293,21 @@ export function KeyframeWorkspace({
   }, [selected, storage]);
 
   useEffect(() => {
+    if (comparison === null) return;
+    storeComparison(storage, comparison.id);
+  }, [comparison, storage]);
+
+  useEffect(() => {
     const previousResultUrl = resultUrlRef.current;
     const previousLayoutUrl = layoutUrlRef.current;
     resultUrlRef.current = null;
     layoutUrlRef.current = null;
-    if (previousResultUrl !== null) revokeObjectUrl(previousResultUrl);
-    if (previousLayoutUrl !== null) revokeObjectUrl(previousLayoutUrl);
+    if (previousResultUrl !== null) {
+      revokeAfterRender(revokeObjectUrl, previousResultUrl);
+    }
+    if (previousLayoutUrl !== null) {
+      revokeAfterRender(revokeObjectUrl, previousLayoutUrl);
+    }
     if (client === null || selected === null) return undefined;
 
     const controller = new AbortController();
@@ -243,10 +351,45 @@ export function KeyframeWorkspace({
     return () => controller.abort();
   }, [client, createObjectUrl, revokeObjectUrl, selected]);
 
+  useEffect(() => {
+    const previousUrl = comparisonResultUrlRef.current;
+    comparisonResultUrlRef.current = null;
+    if (previousUrl !== null) revokeAfterRender(revokeObjectUrl, previousUrl);
+    if (client === null || comparison === null || comparison.result === null) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    void client
+      .loadGenerationBlob(comparison.id, controller.signal)
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        const url = createObjectUrl(blob);
+        comparisonResultUrlRef.current = url;
+        setComparisonResultImage({
+          generationId: comparison.id,
+          status: 'loaded',
+          url,
+        });
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        setComparisonResultImage({
+          generationId: comparison.id,
+          status: 'error',
+          message: errorMessage(reason),
+        });
+      });
+    return () => controller.abort();
+  }, [client, comparison, createObjectUrl, revokeObjectUrl]);
+
   useEffect(
     () => () => {
       if (resultUrlRef.current !== null) revokeObjectUrl(resultUrlRef.current);
       if (layoutUrlRef.current !== null) revokeObjectUrl(layoutUrlRef.current);
+      if (comparisonResultUrlRef.current !== null) {
+        revokeObjectUrl(comparisonResultUrlRef.current);
+      }
     },
     [revokeObjectUrl],
   );
@@ -524,26 +667,384 @@ export function KeyframeWorkspace({
                 </figure>
               </div>
 
+              <section
+                className="generation-version-comparison"
+                aria-labelledby="generation-version-comparison-title"
+              >
+                <header>
+                  <div>
+                    <h4 id="generation-version-comparison-title">
+                      부모·형제 generation 비교
+                    </h4>
+                    <span>
+                      결과와 생성 계약 스냅샷을 같은 두 버전으로 비교합니다.
+                    </span>
+                  </div>
+                  {comparison === null ? null : (
+                    <label>
+                      비교 대상
+                      <select
+                        aria-label="비교 대상 generation"
+                        value={comparison.id}
+                        onChange={(event) =>
+                          setComparisonId(event.currentTarget.value)
+                        }
+                      >
+                        {comparisonCandidates.map(
+                          ({ generation, relation }) => (
+                            <option key={generation.id} value={generation.id}>
+                              {relation === 'parent' ? '부모' : '형제'} · v
+                              {generation.versionNumber} · {generation.id}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                  )}
+                </header>
+                {comparison === null || versionComparison === null ? (
+                  <p className="generation-version-empty">
+                    비교 가능한 부모·형제 generation이 없습니다.
+                  </p>
+                ) : (
+                  <>
+                    <div className="generation-version-images">
+                      <figure>
+                        <figcaption>
+                          선택 · v{selected.versionNumber} ·{' '}
+                          {selected.generationMode}
+                        </figcaption>
+                        {resultUrl === null ? (
+                          <div className="generation-image-placeholder">
+                            {selected.result === null
+                              ? '저장된 결과 이미지 없음'
+                              : '결과 이미지 불러오는 중'}
+                          </div>
+                        ) : (
+                          <img
+                            src={resultUrl}
+                            alt="선택 generation 비교 결과"
+                          />
+                        )}
+                      </figure>
+                      <figure>
+                        <figcaption>
+                          {comparisonCandidate.relation === 'parent'
+                            ? '부모'
+                            : '형제'}{' '}
+                          · v{comparison.versionNumber} ·{' '}
+                          {comparison.generationMode}
+                        </figcaption>
+                        {comparisonResultUrl === null ? (
+                          <div
+                            className="generation-image-placeholder"
+                            role={
+                              currentComparisonResultImage?.status === 'error'
+                                ? 'alert'
+                                : undefined
+                            }
+                          >
+                            {currentComparisonResultImage?.status === 'error'
+                              ? `비교 결과 불러오기 실패 · ${currentComparisonResultImage.message}`
+                              : comparison.result === null
+                                ? '저장된 결과 이미지 없음'
+                                : '비교 결과 불러오는 중'}
+                          </div>
+                        ) : (
+                          <img
+                            src={comparisonResultUrl}
+                            alt="비교 generation 결과"
+                          />
+                        )}
+                      </figure>
+                    </div>
+
+                    <div className="generation-version-facts">
+                      <section>
+                        <h5>선택 generation</h5>
+                        <p>
+                          v{selected.versionNumber} · {selected.generationMode}{' '}
+                          · {STATUS_LABELS[selected.status]}
+                        </p>
+                        <p>
+                          parent {selected.parentGenerationId ?? '없음'} ·
+                          source {selected.sourceGenerationId ?? '없음'}
+                        </p>
+                      </section>
+                      <section>
+                        <h5>비교 generation</h5>
+                        <p>
+                          v{comparison.versionNumber} ·{' '}
+                          {comparison.generationMode} ·{' '}
+                          {STATUS_LABELS[comparison.status]}
+                        </p>
+                        <p>
+                          parent {comparison.parentGenerationId ?? '없음'} ·
+                          source {comparison.sourceGenerationId ?? '없음'}
+                        </p>
+                      </section>
+                    </div>
+
+                    <div className="generation-version-directives">
+                      <section>
+                        <h5>선택 RefinementDirective</h5>
+                        <dl>
+                          <div>
+                            <dt>유지</dt>
+                            <dd>
+                              {directiveItems(
+                                selected.refinementDirective,
+                                'preserve',
+                              )}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>변경</dt>
+                            <dd>
+                              {directiveItems(
+                                selected.refinementDirective,
+                                'change',
+                              )}
+                            </dd>
+                          </div>
+                        </dl>
+                      </section>
+                      <section>
+                        <h5>비교 RefinementDirective</h5>
+                        <dl>
+                          <div>
+                            <dt>유지</dt>
+                            <dd>
+                              {directiveItems(
+                                comparison.refinementDirective,
+                                'preserve',
+                              )}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>변경</dt>
+                            <dd>
+                              {directiveItems(
+                                comparison.refinementDirective,
+                                'change',
+                              )}
+                            </dd>
+                          </div>
+                        </dl>
+                      </section>
+                    </div>
+                    <p className="generation-version-directive-status">
+                      RefinementDirective ·{' '}
+                      {versionComparison.directiveChanged
+                        ? '변경 있음'
+                        : '동일'}
+                    </p>
+
+                    <div className="generation-version-differences">
+                      {(
+                        [
+                          ['SceneDocument', versionComparison.scene],
+                          ['LayoutSpec', versionComparison.layout],
+                        ] as const
+                      ).map(([label, comparisonResult]) => (
+                        <section key={label}>
+                          <h5>
+                            {label} ·{' '}
+                            {COMPARISON_STATUS_LABELS[comparisonResult.status]}
+                          </h5>
+                          {comparisonResult.differences.length === 0 ? (
+                            <p>두 generation의 저장 스냅샷이 같습니다.</p>
+                          ) : (
+                            <ul>
+                              {comparisonResult.differences.map((item) => (
+                                <li key={item.id}>
+                                  <strong>{item.label}</strong> · {item.detail}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </section>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </section>
+
               {selected.error === null ? null : (
                 <p className="generation-record-error" role="alert">
                   {selected.error}
                 </p>
               )}
 
-              <div className="generation-metadata">
+              <div
+                className="generation-metadata"
+                role="region"
+                aria-label="선택 Generation 메타데이터"
+              >
                 <section>
                   <h4>생성 지시</h4>
                   <p>{selected.prompt}</p>
                 </section>
                 <section>
-                  <h4>피드백</h4>
-                  <p>
-                    {selected.feedback ?? 'fresh generation · 별도 피드백 없음'}
-                  </p>
+                  <h4>보정 지시</h4>
+                  {selected.refinementDirective === null ? (
+                    <p>
+                      {selected.feedback ??
+                        'fresh generation · 별도 보정 지시 없음'}
+                    </p>
+                  ) : (
+                    <dl className="generation-refinement-directive">
+                      <div>
+                        <dt>유지</dt>
+                        <dd>
+                          {selected.refinementDirective.preserve.length === 0
+                            ? '명시 항목 없음'
+                            : selected.refinementDirective.preserve.join(' · ')}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>변경</dt>
+                        <dd>
+                          {selected.refinementDirective.change.join(' · ')}
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
                 </section>
                 <section>
                   <h4>생성 모델의 수정 프롬프트</h4>
                   <p>{selected.revisedPrompt ?? '기록 없음'}</p>
+                </section>
+                <section>
+                  <h4>Generation 요청 상태</h4>
+                  <p>
+                    request ID · {selected.requestId ?? '구형 기록 · 없음'}
+                    {' · '}
+                    {STATUS_LABELS[selected.status]}
+                  </p>
+                </section>
+                <section className="generation-execution-summary">
+                  <h4>재현 가능한 실행 요약</h4>
+                  {selected.executionSummary == null ? (
+                    <p>구형 기록 · 저장된 실행 요약 없음</p>
+                  ) : (
+                    <>
+                      <p>
+                        입력 무결성 ·{' '}
+                        {selected.executionIntegrity === undefined
+                          ? '검증 정보 없음'
+                          : EXECUTION_INTEGRITY_LABELS[
+                              selected.executionIntegrity.status
+                            ]}
+                      </p>
+                      <dl className="generation-execution-hashes">
+                        <div>
+                          <dt>prompt</dt>
+                          <dd>
+                            {selected.executionSummary.prompt.contentHash}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>SceneDocument</dt>
+                          <dd>
+                            {selected.executionSummary.sceneDocument.id} · scene
+                            r
+                            {
+                              selected.executionSummary.sceneDocument
+                                .sceneRevision
+                            }{' '}
+                            · spec r
+                            {
+                              selected.executionSummary.sceneDocument
+                                .specRevision
+                            }{' '}
+                            ·{' '}
+                            {
+                              selected.executionSummary.sceneDocument
+                                .contentHash
+                            }
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Semantic Scene Spec</dt>
+                          <dd>
+                            v
+                            {
+                              selected.executionSummary.semanticSceneSpec
+                                .version
+                            }{' '}
+                            ·{' '}
+                            {
+                              selected.executionSummary.semanticSceneSpec
+                                .contentHash
+                            }
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>LayoutSpec</dt>
+                          <dd>
+                            {selected.executionSummary.layoutSpec.sceneId} · v
+                            {selected.executionSummary.layoutSpec.version} ·{' '}
+                            {selected.executionSummary.layoutSpec.contentHash}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>레이아웃 렌더</dt>
+                          <dd>
+                            {selected.executionSummary.layoutRender.id} ·{' '}
+                            {selected.executionSummary.layoutRender.contentHash}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>원본 키프레임</dt>
+                          <dd>
+                            {selected.executionSummary.sourceGeneration === null
+                              ? '없음'
+                              : `${selected.executionSummary.sourceGeneration.id} · ${selected.executionSummary.sourceGeneration.usage} · ${selected.executionSummary.sourceGeneration.contentHash ?? '결과 해시 없음'}`}
+                          </dd>
+                        </div>
+                      </dl>
+                      <h5>실제 첨부 순서</h5>
+                      <ol>
+                        {selected.executionSummary.attachments.map(
+                          (attachment) => (
+                            <li
+                              key={`${attachment.attachmentIndex}-${attachment.type}-${attachment.id}`}
+                            >
+                              {attachment.attachmentIndex} · {attachment.type} ·{' '}
+                              {attachment.id} ·{' '}
+                              {attachment.contentHash ?? '해시 없음'}
+                            </li>
+                          ),
+                        )}
+                      </ol>
+                      <h5>레퍼런스</h5>
+                      {selected.executionSummary.references.length === 0 ? (
+                        <p>첨부 레퍼런스 없음</p>
+                      ) : (
+                        <ul>
+                          {selected.executionSummary.references.map(
+                            (reference) => (
+                              <li key={reference.id}>
+                                {reference.id} · {reference.kind} ·{' '}
+                                {reference.contentHash}
+                              </li>
+                            ),
+                          )}
+                        </ul>
+                      )}
+                      {selected.executionIntegrity?.issues.length ? (
+                        <ul
+                          className="generation-execution-issues"
+                          role="alert"
+                        >
+                          {selected.executionIntegrity.issues.map((issue) => (
+                            <li key={issue}>{issue}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </>
+                  )}
                 </section>
                 <section>
                   <h4>레퍼런스 스냅샷</h4>

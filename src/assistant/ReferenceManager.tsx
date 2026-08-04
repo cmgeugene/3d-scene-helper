@@ -407,6 +407,12 @@ function ConnectedReferenceManager({
               onChange={(event) => setTargetObjectId(event.target.value)}
             >
               <option value="">장면 전체 / 연결 안 함</option>
+              {targetObjectId !== '' &&
+              !targets.some(({ id }) => id === targetObjectId) ? (
+                <option value={targetObjectId} disabled>
+                  삭제된 object · {targetObjectId}
+                </option>
+              ) : null}
               {targets.map((target) => (
                 <option key={target.id} value={target.id}>
                   {target.name}
@@ -494,6 +500,12 @@ function ConnectedReferenceManager({
                 ? '설정'
                 : `연결 · ${targets.find(({ id }) => id === reference.targetObjectId)?.name ?? reference.targetObjectId}`}
             </button>
+            {reference.targetObjectId !== null &&
+            !targets.some(({ id }) => id === reference.targetObjectId) ? (
+              <span className="reference-integrity-warning" role="alert">
+                삭제된 object에 연결됨 · 설정에서 연결을 해제하세요.
+              </span>
+            ) : null}
           </article>
         ))}
       </div>

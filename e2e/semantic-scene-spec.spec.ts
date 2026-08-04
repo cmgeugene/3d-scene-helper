@@ -30,7 +30,31 @@ interface GenerationRequest {
   feedback: string | null;
   generationMode: 'fresh' | 'edit';
   layoutRenderId: string;
+  acknowledgedPreflightWarningIds: string[];
 }
+
+const preflightReference = {
+  id: 'ref-preflight-character',
+  name: '주인공 캐릭터 시트',
+  kind: 'character' as const,
+  artifactId: 'artifact-preflight-character',
+  contentHash: `sha256:${'b'.repeat(64)}`,
+  mimeType: 'image/png' as const,
+  width: 1,
+  height: 1,
+  originalFileName: 'character.png',
+  byteLength: 68,
+  createdAt: '2026-08-04T00:00:00.000Z',
+  targetObjectId: 'starter-mannequin',
+  use: ['face', 'pose'],
+  exclude: ['background'],
+  enabled: true,
+};
+
+const onePixelPng = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+);
 
 async function readRequest(request: IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -115,7 +139,35 @@ function createMockCompanion() {
       return;
     }
     if (request.method === 'GET' && url.pathname === '/api/references') {
-      sendJson(response, { version: 1, references: [] });
+      sendJson(response, { version: 1, references: [preflightReference] });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/runtime-requests') {
+      sendJson(response, { version: 1, requests: [] });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/api/conversation-session'
+    ) {
+      sendJson(response, {
+        version: 1,
+        activeTask: null,
+        archivedTaskCount: 0,
+      });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      url.pathname === `/api/references/${preflightReference.id}/content`
+    ) {
+      response.writeHead(200, {
+        'Content-Type': 'image/png',
+        'Content-Length': onePixelPng.byteLength,
+        'Access-Control-Allow-Origin': 'http://127.0.0.1:4173',
+        Vary: 'Origin',
+      });
+      response.end(onePixelPng);
       return;
     }
     if (request.method === 'GET' && url.pathname === '/api/generations') {
@@ -180,7 +232,7 @@ function createMockCompanion() {
             layoutSpec: generationRequest.layoutSpec,
             sceneSnapshot: generationRequest.sceneSnapshot,
             semanticSceneSpecSnapshot: generationSnapshot,
-            referenceSnapshots: [],
+            referenceSnapshots: [preflightReference],
             parentGenerationId: generationRequest.parentGenerationId,
             sourceGenerationId: generationRequest.sourceGenerationId,
             versionNumber: 1,
@@ -193,6 +245,11 @@ function createMockCompanion() {
                 type: 'layout',
                 id: generationRequest.layoutRenderId,
                 kind: 'layout',
+              },
+              {
+                type: 'reference',
+                id: preflightReference.id,
+                kind: preflightReference.kind,
               },
             ],
             revisedPrompt: null,
@@ -241,6 +298,7 @@ test('Semantic Scene Spec 편집·undo/redo·autosave/reload·generation snapsho
     'available',
   );
   await expect(page.getByText('연결됨')).toBeVisible();
+  await expect(page.getByText(preflightReference.name)).toBeVisible();
 
   const objectIds = await page.evaluate(() => {
     const runtime = globalThis as unknown as {
@@ -328,7 +386,30 @@ test('Semantic Scene Spec 편집·undo/redo·autosave/reload·generation snapsho
 
   const chatOnlyText = '채팅에만 있고 저장 spec에는 없는 문장';
   await page.getByLabel('장면에 대해 말하기').fill(chatOnlyText);
+  await page.evaluate(() => {
+    const runtime = globalThis as unknown as {
+      __I2V_EDITOR_STORE__?: {
+        getState(): { deleteObject(id: string): void };
+      };
+    };
+    const state = runtime.__I2V_EDITOR_STORE__?.getState();
+    if (state === undefined) throw new Error('editor test bridge missing');
+    state.deleteObject('starter-mannequin');
+  });
+  await expect(page.getByText(/삭제된 object에 연결됨/)).toBeVisible();
   await page.getByRole('button', { name: '이미지 생성' }).click();
+  await expect(page.getByText(/삭제된 object starter-mannequin/)).toBeVisible();
+  expect(generationRequest).toBeNull();
+
+  await page.getByRole('button', { name: '실행 취소' }).click();
+  await expect(page.getByText(/삭제된 object에 연결됨/)).toHaveCount(0);
+  await page.getByRole('button', { name: '이미지 생성' }).click();
+  const warningCard = page.getByRole('article', {
+    name: '생성 전 충돌 경고',
+  });
+  await expect(warningCard).toContainText('3D LayoutSpec의 포즈가 권위 원본');
+  expect(generationRequest).toBeNull();
+  await warningCard.getByRole('button', { name: '경고 확인 후 생성' }).click();
   await expect.poll(() => generationRequest).not.toBeNull();
 
   expect(generationRequest!.sceneSnapshot.semanticSceneSpec).toMatchObject({
@@ -349,6 +430,9 @@ test('Semantic Scene Spec 편집·undo/redo·autosave/reload·generation snapsho
   expect(generationRequest!.prompt).toContain('[인물/오브젝트 관계]');
   expect(generationRequest!.prompt).not.toContain(chatOnlyText);
   expect(generationRequest!.prompt).not.toContain('"semanticSceneSpec"');
+  expect(generationRequest!.acknowledgedPreflightWarningIds).toEqual([
+    'pose-authority-conflict:ref-preflight-character:starter-mannequin',
+  ]);
 
   expect(
     await page.evaluate(

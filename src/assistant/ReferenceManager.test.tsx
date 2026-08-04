@@ -160,6 +160,55 @@ describe('ReferenceManager', () => {
     expect(await screen.findByText('연결 · Blue actor')).toBeVisible();
   });
 
+  it('삭제된 object 연결을 표시하고 사용자가 연결을 해제할 수 있다', async () => {
+    const user = userEvent.setup();
+    const danglingReference = {
+      ...characterReference,
+      targetObjectId: 'deleted-mannequin',
+    };
+    const updateReference = vi.fn(async (_id, metadata) => ({
+      ...danglingReference,
+      ...metadata,
+    }));
+    const client = {
+      listReferences: async () => [danglingReference],
+      importReference: async () => danglingReference,
+      loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      updateReference,
+    };
+    render(
+      <ReferenceManager
+        connection={connection}
+        clientFactory={() => client}
+        createObjectUrl={() => 'blob:reference-1'}
+        revokeObjectUrl={() => undefined}
+        targets={[{ id: 'current-mannequin', name: 'Current actor' }]}
+      />,
+    );
+
+    expect(await screen.findByText(/삭제된 object에 연결됨/)).toBeVisible();
+    await user.click(
+      screen.getByRole('button', { name: '연결 · deleted-mannequin' }),
+    );
+    expect(
+      screen.getByRole('option', {
+        name: '삭제된 object · deleted-mannequin',
+      }),
+    ).toBeDisabled();
+    await user.selectOptions(screen.getByLabelText('연결 대상'), '');
+    await user.click(screen.getByRole('button', { name: '설정 저장' }));
+
+    await waitFor(() =>
+      expect(updateReference).toHaveBeenCalledWith('ref-1', {
+        targetObjectId: null,
+        use: characterReference.use,
+        exclude: characterReference.exclude,
+        enabled: true,
+      }),
+    );
+    expect(await screen.findByRole('button', { name: '설정' })).toBeVisible();
+  });
+
   it('생성에 사용할 레퍼런스를 최대 네 장으로 제한한다', async () => {
     const user = userEvent.setup();
     const references = Array.from({ length: 5 }, (_, index) => ({

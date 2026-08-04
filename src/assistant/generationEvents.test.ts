@@ -15,6 +15,7 @@ const generation = {
   parentGenerationId: null,
   versionNumber: 1,
   feedback: null,
+  refinementDirective: null,
   generationMode: 'fresh' as const,
   layoutRenderId: 'render-1',
   referenceIds: [],
