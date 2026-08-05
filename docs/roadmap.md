@@ -2,7 +2,7 @@
 
 > 기준일: 2026-08-04
 >
-> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료
+> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료; S36 수동 GPT 웹 fallback 완료
 >
 > 이 문서는 앞으로의 구현 순서와 완료 기준을 관리하는 단일 로드맵이다. 세부 설계는
 > `ai-scene-assistant.md`, 완료된 작업의 검증 기록은 `session-handoffs/`를 따른다.
@@ -33,6 +33,7 @@
 | 런타임 요청    | 명령·파일 승인과 사용자 질문의 인증 응답, 비밀 비저장, 재시작 만료 복구     | S33     |
 | 실행 수명주기  | 프로젝트 lock, 포트 fallback, 브라우저 자동 실행, 제한된 무중복 재연결      | S34     |
 | 브라우저 배포  | 동일-origin 정적 편집기, platform Codex bundle, 크기 manifest와 배포 결정   | S35     |
+| 수동 웹 생성   | GPT 웹용 동일 의미 프롬프트, 첨부 순서 안내, 모달 복사와 무부작용 fallback  | S36     |
 
 현재 기본 생성은 `3D 레이아웃 1장 + 레퍼런스 최대 4장`, 보정 생성은
 `원본 키프레임 1장 + 현재 3D 레이아웃 1장 + 레퍼런스 최대 3장`을 사용한다.
@@ -142,6 +143,14 @@
 Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semantic Scene Spec,
 레퍼런스 manifest와 generation record가 프로젝트의 영구 원본이라는 원칙은 유지한다.
 
+### P6. GPT 웹용 수동 생성 fallback — 완료 (S36)
+
+- [x] fresh/edit 생성과 같은 장면 의미·LayoutSpec·레퍼런스 매니페스트로 웹용 prompt 생성
+- [x] Codex 전용 `$imagegen` 명령을 제거하고 fresh 생성의 현재 사용자 지시 포함
+- [x] 모달에서 레이아웃·보정 원본·역할별 레퍼런스의 첨부 순서와 preflight 경고 표시
+- [x] 클립보드 복사, Escape 닫기와 imagegen capability 비의존 동작
+- [x] 수동 결과가 프로젝트 generation 이력에 자동 등록되지 않음을 명시
+
 ## 3. 장기 보류
 
 다음 항목은 위 단계가 안정화된 뒤 검토한다.
@@ -164,7 +173,7 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 
 ## 5. 바로 다음 작업
 
-S36에서는 생성 asset의 장시간 사용 수명주기를 구현한다. 프로젝트에 원본은 유지하되 generation
+S37에서는 생성 asset의 장시간 사용 수명주기를 구현한다. 프로젝트에 원본은 유지하되 generation
 목록은 Companion이 만든 제한 크기 thumbnail을 사용하고, 선택하지 않은 전체 해상도 이미지와
 읽기 전용 3D preview의 브라우저·GPU 자원을 해제한다. 원본/thumbnail 무결성, reload 복구와 많은
 generation에서의 메모리 상한을 자동 검증한다.

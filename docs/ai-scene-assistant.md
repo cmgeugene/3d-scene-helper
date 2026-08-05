@@ -1,6 +1,6 @@
 # AI Scene Assistant 및 이미지 생성 워크플로 설계안
 
-> 상태: 단계적 구현 중 — S35 브라우저 배포 실행기와 패키징 결정까지 구현. 최신 구현 순서와 완료 기준은
+> 상태: 단계적 구현 중 — S36 GPT 웹용 수동 생성 프롬프트 내보내기까지 구현. 최신 구현 순서와 완료 기준은
 > `roadmap.md`를 따른다.
 > 대상: I2V 3D Scene Helper의 로컬 Codex 연동, 레퍼런스 관리, 대화형 장면 해석 및 이미지 생성
 
@@ -612,6 +612,13 @@ MVP의 기본 생성 경로는 별도 OpenAI API 키를 요구하는 직접 API 
 - 취소, 사용 한도, 기능 미지원과 생성 실패 원인
 
 내장 imagegen 호출 방식, 결과 이벤트와 파일 경로 수신 방식, 후속 수정 시 이전 결과를 다시 전달하는 방식은 단계 0 기술 스파이크에서 실제 App Server 버전으로 고정한다.
+
+S36부터 Scene Assistant는 Codex imagegen이 오래 걸리거나 런타임에서 지원되지 않을 때 사용할
+수동 GPT 웹 fallback을 제공한다. `웹으로 내보내기`는 자동 생성과 같은 SceneDocument,
+Semantic Scene Spec, LayoutSpec, 레퍼런스 매니페스트와 보정 지시로 프롬프트를 만들되 Codex 전용
+`$imagegen` 명령은 제거한다. 모달은 OutputCamera 레이아웃, 보정 원본과 역할별 레퍼런스의 정확한
+첨부 순서, preflight 경고와 복사 버튼을 함께 보여 준다. 이 경로는 렌더 업로드, Codex turn 또는
+generation record를 시작하지 않으며 GPT 웹에서 만든 결과도 프로젝트 이력에 자동 편입하지 않는다.
 
 ### 8.3 인증 원칙
 

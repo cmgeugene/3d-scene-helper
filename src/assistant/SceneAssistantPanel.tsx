@@ -30,7 +30,10 @@ import {
   createImageGenerationPrompt,
   createImageRefinementPrompt,
   createSceneAssistantPrompt,
+  createWebImageGenerationPrompt,
+  createWebImageRefinementPrompt,
 } from './sceneAssistantPrompt';
+import { WebPromptExportDialog } from './WebPromptExportDialog';
 import { parseGenerationUpdate } from './generationEvents';
 import { parseSpecPatchProposalUpdate } from './specPatchProposalEvents';
 import { RuntimeRequestCard } from './RuntimeRequestCard';
@@ -66,6 +69,7 @@ import {
   type GenerationRequestRecovery,
 } from './generationRequestRecovery';
 import type { ConversationTaskMetadata } from '../../shared/conversationMetadata';
+import { referencePromptManifest } from '../../shared/generationPromptEvidence';
 
 type ConnectionPhase =
   'disconnected' | 'connecting' | 'reconnecting' | 'ready' | 'error';
@@ -281,6 +285,11 @@ function ConnectedSceneAssistant({
   const [pendingGenerationPreflight, setPendingGenerationPreflight] = useState<{
     fingerprint: string;
     warnings: GenerationPreflightIssue[];
+  } | null>(null);
+  const [webPromptExport, setWebPromptExport] = useState<{
+    prompt: string;
+    attachmentLabels: string[];
+    warnings: string[];
   } | null>(null);
   const [internalRefinementSource, setInternalRefinementSource] =
     useState<GenerationRecord | null>(null);
@@ -1100,6 +1109,118 @@ function ConnectedSceneAssistant({
     ],
   );
 
+  const exportPromptToWeb = useCallback(() => {
+    const message = draft.trim();
+    const sourceGeneration = refinementSource;
+    const editing = sourceGeneration !== null;
+    let refinementDirective: RefinementDirective | null = null;
+    if (editing) {
+      try {
+        refinementDirective = createRefinementDirective(
+          message,
+          refinementPreserveDraft,
+        );
+      } catch (reason) {
+        setConversationError(
+          reason instanceof Error
+            ? `보정 지시를 확인해 주세요. ${reason.message}`
+            : '보정 지시를 구조화하지 못했습니다.',
+        );
+        return;
+      }
+    }
+    const selectedReferences = getSelectedReferences();
+    if (
+      message === '' ||
+      phase !== 'ready' ||
+      activeTurnIdRef.current !== null ||
+      isSubmitting ||
+      conversationDecisionRequired ||
+      conversationSessionLoading
+    ) {
+      return;
+    }
+    const parsedScene = sceneDocumentSchema.safeParse(getSceneContext());
+    if (!parsedScene.success) {
+      setConversationError(
+        '현재 SceneDocument를 웹용 프롬프트로 내보낼 수 없습니다.',
+      );
+      return;
+    }
+    const scene = parsedScene.data;
+    let layoutSpec: ReturnType<typeof createLayoutSpec>;
+    try {
+      layoutSpec = createLayoutSpec(scene, selectedReferences);
+    } catch (reason) {
+      setConversationError(
+        reason instanceof Error
+          ? reason.message
+          : '현재 장면을 LayoutSpec으로 해석하지 못했습니다.',
+      );
+      return;
+    }
+    const preflight = evaluateGenerationPreflight({
+      scene,
+      layoutSpec,
+      references: selectedReferences,
+      includeLayout: true,
+      includeSourceKeyframe: editing,
+    });
+    if (preflight.blockers.length > 0) {
+      setConversationError(
+        `내보내기 전 무결성 검사 실패: ${preflight.blockers.map(({ message: blockerMessage }) => blockerMessage).join(' ')}`,
+      );
+      return;
+    }
+
+    const referenceManifest = referencePromptManifest(
+      selectedReferences,
+      editing ? 2 : 1,
+    );
+    setWebPromptExport({
+      prompt:
+        sourceGeneration === null
+          ? createWebImageGenerationPrompt(
+              scene,
+              layoutSpec,
+              selectedReferences,
+              message,
+            )
+          : createWebImageRefinementPrompt(
+              refinementDirective!,
+              scene,
+              layoutSpec,
+              sourceGeneration,
+              selectedReferences,
+            ),
+      attachmentLabels: [
+        ...(editing
+          ? [
+              `보정 원본 키프레임 v${sourceGeneration.versionNumber} (${sourceGeneration.id})`,
+            ]
+          : []),
+        '현재 OutputCamera의 3D 레이아웃 렌더',
+        ...referenceManifest.map(
+          ({ name, role }) => `레퍼런스 · ${name} (${role})`,
+        ),
+      ],
+      warnings: preflight.warnings.map(
+        ({ message: warningMessage }) => warningMessage,
+      ),
+    });
+    setConversationError(null);
+  }, [
+    conversationDecisionRequired,
+    conversationSessionLoading,
+    draft,
+    getSceneContext,
+    getSelectedReferences,
+    isSubmitting,
+    phase,
+    refinementPreserveDraft,
+    refinementSource,
+  ]);
+
   const retryRecoveredGenerationRequest = useCallback(async () => {
     if (
       generationRequestRecovery === null ||
@@ -1825,6 +1946,19 @@ function ConnectedSceneAssistant({
                 >
                   {refinementSource === null ? '이미지 생성' : '보정 생성'}
                 </button>
+                <button
+                  className="assistant-web-export"
+                  type="button"
+                  onClick={exportPromptToWeb}
+                  disabled={draft.trim() === '' || referenceSelectionOverLimit}
+                  title={
+                    referenceSelectionOverLimit
+                      ? `레퍼런스를 ${maximumReferences}장 이하로 줄여 주세요.`
+                      : 'GPT 웹에서 수동 생성할 프롬프트를 준비합니다.'
+                  }
+                >
+                  웹으로 내보내기
+                </button>
               </div>
             )}
           </form>
@@ -1906,6 +2040,15 @@ function ConnectedSceneAssistant({
           연결 정보 지우기
         </button>
       ) : null}
+
+      {webPromptExport === null ? null : (
+        <WebPromptExportDialog
+          prompt={webPromptExport.prompt}
+          attachmentLabels={webPromptExport.attachmentLabels}
+          warnings={webPromptExport.warnings}
+          onClose={() => setWebPromptExport(null)}
+        />
+      )}
     </section>
   );
 }

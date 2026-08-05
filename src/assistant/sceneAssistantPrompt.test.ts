@@ -3,6 +3,8 @@ import {
   createImageGenerationPrompt,
   createImageRefinementPrompt,
   createSceneAssistantPrompt,
+  createWebImageGenerationPrompt,
+  createWebImageRefinementPrompt,
 } from './sceneAssistantPrompt';
 import { TEST_LAYOUT_SPEC } from '../../shared/layoutSpecTestFixture';
 import { createStarterSceneDocument } from '../editor/persistence/sceneSchema';
@@ -222,5 +224,49 @@ describe('createImageRefinementPrompt', () => {
     expect(prompt).toContain('두 목록에 없는 요소도 기존 키프레임을 우선 보존');
     expect(prompt).toContain('"attachmentIndex":3');
     expect(prompt).toContain('"id":"generation-1"');
+  });
+});
+
+describe('GPT 웹용 이미지 프롬프트', () => {
+  it('fresh 생성 요청에서 Codex 명령을 제거하고 수동 지시를 포함한다', () => {
+    const scene = createStarterSceneDocument({
+      documentId: 'scene-web',
+      floorId: 'floor-web',
+      mannequinId: 'actor-web',
+    });
+    const prompt = createWebImageGenerationPrompt(
+      scene,
+      TEST_LAYOUT_SPEC,
+      [],
+      '비 오는 밤 장면으로 완성해줘.',
+    );
+
+    expect(prompt).not.toContain('$imagegen');
+    expect(prompt).toContain(
+      '[이번 수동 생성 요청]\n비 오는 밤 장면으로 완성해줘.',
+    );
+    expect(prompt).toContain('첨부 이미지 1은 현재 OutputCamera');
+    expect(prompt).toContain(
+      '[LayoutSpec / 3D 레이아웃과 최종 키프레임의 변환 계약]',
+    );
+  });
+
+  it('보정 요청에서 기존 키프레임과 구조화된 변경 지시를 유지한다', () => {
+    const prompt = createWebImageRefinementPrompt(
+      {
+        version: 1,
+        preserve: ['전체 구도'],
+        change: ['전봇대 가림만 줄이기'],
+      },
+      { id: 'scene-web-edit' },
+      TEST_LAYOUT_SPEC,
+      { id: 'generation-web-source', versionNumber: 2 },
+    );
+
+    expect(prompt).not.toContain('$imagegen');
+    expect(prompt).toContain('첨부 이미지 1은 보정의 기준');
+    expect(prompt).toContain('첨부 이미지 2는 현재 OutputCamera');
+    expect(prompt).toContain('"change":["전봇대 가림만 줄이기"]');
+    expect(prompt).toContain('"id":"generation-web-source"');
   });
 });

@@ -80,6 +80,66 @@ describe('SceneAssistantPanel', () => {
     localStorage.clear();
   });
 
+  it('Codex 이미지 생성 지원과 무관하게 GPT 웹용 프롬프트를 내보낸다', async () => {
+    const user = userEvent.setup();
+    const sceneSnapshot = createStarterSceneDocument({
+      documentId: 'scene-web-export',
+      floorId: 'floor-web-export',
+      mannequinId: 'mannequin-web-export',
+    });
+    const captureLayout = vi.fn(async () => new Blob());
+    const startGeneration = vi.fn<CompanionBrowserClient['startGeneration']>();
+    const client: CompanionBrowserClient = {
+      ...conversationMethods,
+      getRuntime: async () => ({
+        state: 'ready',
+        version: 'codex-test',
+        account: { type: 'chatgpt', email: null, planType: 'plus' },
+        requiresOpenaiAuth: true,
+        capabilities: {
+          namespaceTools: true,
+          imageGeneration: false,
+          webSearch: true,
+        },
+        error: null,
+      }),
+      startGeneration,
+      subscribe: () => () => undefined,
+    };
+
+    render(
+      <SceneAssistantPanel
+        connection={connection}
+        captureLayout={captureLayout}
+        getSceneContext={() => sceneSnapshot}
+        clientFactory={() => client}
+      />,
+    );
+
+    await user.type(
+      await screen.findByLabelText('장면에 대해 말하기'),
+      '비 오는 밤의 영화 장면으로 만들어줘.',
+    );
+    expect(screen.getByRole('button', { name: '이미지 생성' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '웹으로 내보내기' }));
+
+    expect(
+      screen.getByRole('dialog', { name: 'GPT 웹용 프롬프트 내보내기' }),
+    ).toBeVisible();
+    const prompt =
+      screen.getByLabelText<HTMLTextAreaElement>(
+        'GPT 웹용 생성 프롬프트',
+      ).value;
+    expect(prompt).toContain('비 오는 밤의 영화 장면으로 만들어줘.');
+    expect(prompt).toContain('[LayoutSpec /');
+    expect(prompt).not.toContain('$imagegen');
+    expect(
+      screen.getByText('현재 OutputCamera의 3D 레이아웃 렌더'),
+    ).toBeVisible();
+    expect(captureLayout).not.toHaveBeenCalled();
+    expect(startGeneration).not.toHaveBeenCalled();
+  });
+
   it('빠른 중복 클릭은 캡처와 generation 요청을 한 번만 시작한다', async () => {
     const user = userEvent.setup();
     const sceneSnapshot = createStarterSceneDocument({

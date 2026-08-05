@@ -77,6 +77,29 @@ ${JSON.stringify(sceneDocumentWithoutSemanticSpec)}
 ${JSON.stringify(referenceBlock)}`;
 }
 
+function createWebImagePrompt(codexPrompt: string, manualInstruction?: string) {
+  const promptWithoutSkillCommand = codexPrompt.replace(/^\$imagegen\n/, '');
+  const normalizedInstruction = manualInstruction?.trim() ?? '';
+  const instructionSection =
+    normalizedInstruction === ''
+      ? ''
+      : `[이번 수동 생성 요청]\n${normalizedInstruction}\n\n`;
+
+  return `아래 첨부 이미지와 지시를 사용해 한 장의 완성 이미지를 생성하세요. 첨부 순서는 프롬프트에 적힌 번호와 일치해야 합니다.\n\n${instructionSection}${promptWithoutSkillCommand}`;
+}
+
+export function createWebImageGenerationPrompt(
+  sceneDocument: SceneDocument,
+  layoutSpec: LayoutSpec,
+  references: ReferenceArtifact[] = [],
+  manualInstruction = '',
+) {
+  return createWebImagePrompt(
+    createImageGenerationPrompt(sceneDocument, layoutSpec, references),
+    manualInstruction,
+  );
+}
+
 export function createImageRefinementPrompt(
   directive: RefinementDirective,
   sceneDocument: unknown,
@@ -108,4 +131,22 @@ ${JSON.stringify(sceneDocument)}
 
 [선택 레퍼런스 매니페스트 / 첨부 순서]
 ${JSON.stringify(referenceBlock)}`;
+}
+
+export function createWebImageRefinementPrompt(
+  directive: RefinementDirective,
+  sceneDocument: unknown,
+  layoutSpec: LayoutSpec,
+  sourceGeneration: Pick<GenerationRecord, 'id' | 'versionNumber'>,
+  references: ReferenceArtifact[] = [],
+) {
+  return createWebImagePrompt(
+    createImageRefinementPrompt(
+      directive,
+      sceneDocument,
+      layoutSpec,
+      sourceGeneration,
+      references,
+    ),
+  );
 }

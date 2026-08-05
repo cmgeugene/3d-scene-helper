@@ -1231,6 +1231,12 @@ p {
   background: #294574;
 }
 
+.assistant-composer .assistant-web-export {
+  border-color: #50776e;
+  color: #dff7ef;
+  background: #1d4a42;
+}
+
 .assistant-composer .assistant-cancel {
   border-color: #744a43;
   color: #ffb0a0;
@@ -1535,6 +1541,103 @@ p {
   border-color: #7a98ce;
   color: #eef4ff;
   background: #294f85;
+}
+
+.web-prompt-export-backdrop {
+  position: fixed;
+  z-index: 110;
+  inset: 0;
+  display: grid;
+  padding: 1rem;
+  overflow: auto;
+  place-items: center;
+  background: rgb(3 7 12 / 82%);
+  backdrop-filter: blur(3px);
+}
+
+.web-prompt-export-dialog {
+  width: min(48rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  padding: 1rem;
+  overflow: auto;
+  border: 1px solid #56867b;
+  border-radius: 0.75rem;
+  color: #dce7f7;
+  background: #111b29;
+  box-shadow: 0 1.25rem 4rem rgb(0 0 0 / 60%);
+}
+
+.web-prompt-export-dialog header > * {
+  margin-top: 0;
+}
+
+.web-prompt-export-dialog header p:last-child,
+.web-prompt-export-note {
+  color: #9fb0c6;
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.web-prompt-export-attachments,
+.web-prompt-export-warnings {
+  margin: 0.75rem 0;
+  padding: 0.65rem 0.65rem 0.65rem 2rem;
+  border-radius: 0.5rem;
+  background: #0a121d;
+}
+
+.web-prompt-export-attachments {
+  color: #c8d8ee;
+  font-size: 0.76rem;
+}
+
+.web-prompt-export-warnings {
+  padding-left: 0.75rem;
+  color: #f1d4a4;
+  font-size: 0.74rem;
+}
+
+.web-prompt-export-warnings ul {
+  margin-bottom: 0;
+  padding-left: 1.25rem;
+}
+
+.web-prompt-export-dialog > label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #bfcde0;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.web-prompt-export-dialog textarea {
+  width: 100%;
+  min-height: 18rem;
+  resize: vertical;
+  padding: 0.75rem;
+  border: 1px solid #40587a;
+  border-radius: 0.5rem;
+  color: #e5edf7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  background: #080d14;
+}
+
+.web-prompt-export-dialog > [role='alert'] {
+  color: #ffb2a8;
+}
+
+.web-prompt-export-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.web-prompt-export-actions button:last-child {
+  border-color: #65a899;
+  color: #effffb;
+  background: #246256;
 }
 
 .scene-snapshot-preview {
