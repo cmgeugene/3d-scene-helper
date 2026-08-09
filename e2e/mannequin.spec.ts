@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
+import { createCinematicSubjectProfile } from '../src/editor/cinematography/cinematicSubjectProfile';
+import type { SceneObject } from '../src/editor/persistence/sceneSchema';
 
 async function openMannequin(page: Page) {
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -143,6 +145,78 @@ test('articulated mannequin hierarchy applies pose controls to actual WebGL pixe
   const tPose = await canvas.screenshot();
 
   expect(changedPixelCount(standing, tPose)).toBeGreaterThan(800);
+});
+
+test('cinematic subject profile matches actual rotated WebGL mannequin pivots', async ({
+  page,
+}, testInfo) => {
+  const { canvas, runtimeCanvas } = await openMannequin(page);
+  await page.getByRole('button', { name: '장면', exact: true }).click();
+  await page.evaluate(() => {
+    const store = globalThis.__I2V_EDITOR_STORE__;
+    if (store === undefined) throw new Error('E2E editor store가 없습니다.');
+    const state = store.getState() as unknown as {
+      document: { objects: SceneObject[] };
+      beginTransform: () => void;
+      commitTransform: (transform: SceneObject['transform']) => void;
+    };
+    const mannequin = state.document.objects.find(
+      ({ kind }) => kind === 'mannequin',
+    );
+    if (mannequin === undefined) throw new Error('마네킹이 없습니다.');
+    state.beginTransform();
+    state.commitTransform({
+      ...mannequin.transform,
+      rotationDeg: { x: 13, y: 37, z: -9 },
+      scale: { x: 1.2, y: 0.9, z: 1.4 },
+    });
+  });
+  await page.getByRole('button', { name: '걷기 준비' }).click();
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-mannequin-pose',
+    'walk-ready',
+  );
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-mannequin-cinematic-landmarks',
+    /faceCenter/,
+  );
+
+  const runtime = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-mannequin-cinematic-landmarks')) ??
+      '{}',
+  ) as Record<string, { x: number; y: number; z: number }>;
+  const object = await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
+      document: { objects: SceneObject[] };
+    };
+    return structuredClone(
+      state.document.objects.find(({ kind }) => kind === 'mannequin'),
+    );
+  });
+  if (object === undefined) throw new Error('마네킹이 없습니다.');
+  const pure = createCinematicSubjectProfile(object);
+  if (pure === null) throw new Error('cinematic subject profile이 없습니다.');
+
+  for (const key of [
+    'faceCenter',
+    'leftShoulder',
+    'rightShoulder',
+    'leftFoot',
+    'rightFoot',
+  ] as const) {
+    expect(runtime[key].x, `${key}.x`).toBeCloseTo(pure.landmarks[key].x, 6);
+    expect(runtime[key].y, `${key}.y`).toBeCloseTo(pure.landmarks[key].y, 6);
+    expect(runtime[key].z, `${key}.z`).toBeCloseTo(pure.landmarks[key].z, 6);
+  }
+
+  const evidencePath = testInfo.outputPath(
+    'cinematic-subject-runtime-parity.png',
+  );
+  await canvas.screenshot({ path: evidencePath });
+  await testInfo.attach('cinematic-subject-runtime-parity', {
+    path: evidencePath,
+    contentType: 'image/png',
+  });
 });
 
 test('custom torso, head, and wrist rotations keep rendered bounds and IK anchors aligned', async ({

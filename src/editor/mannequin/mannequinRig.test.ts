@@ -11,6 +11,7 @@ import {
 import { mannequinPoseSchema } from '../persistence/sceneSchema';
 import { createStudioMannequinGeometries } from './mannequinAppearance';
 import {
+  MANNEQUIN_BODY_PROPORTIONS,
   MANNEQUIN_BODY_TYPE_IDS,
   type MannequinBodyTypeId,
 } from './mannequinBodyType';
@@ -22,6 +23,7 @@ import {
   MANNEQUIN_LEG_LENGTHS,
   MANNEQUIN_POSE_PRESETS,
   applyMannequinIkRotation,
+  computeMannequinCinematicLandmarks,
   computeMannequinPoseBounds,
   createMannequinPose,
   getMannequinArmChain,
@@ -31,6 +33,7 @@ import {
   solveMannequinKneeIk,
   solveMannequinLegIk,
   solveTwoBoneArmIk,
+  type MannequinCinematicLandmarks,
 } from './mannequinRig';
 
 function vectorDistance(
@@ -188,6 +191,119 @@ describe('mannequin pose conventions and presets', () => {
       );
     }
   });
+});
+
+describe('pose-aware local cinematic landmarks', () => {
+  it('returns ordered, finite, plain JSON-safe landmarks without mutating the pose', () => {
+    const pose = createMannequinPose('default');
+    const before = structuredClone(pose);
+    const landmarks: MannequinCinematicLandmarks =
+      computeMannequinCinematicLandmarks(pose);
+
+    expect(landmarks.leftShoulder.x).toBeLessThan(landmarks.rightShoulder.x);
+    expect(landmarks.headTop.y).toBeGreaterThan(landmarks.eyeCenter.y);
+    expect(landmarks.eyeCenter.y).toBeGreaterThan(landmarks.neck.y);
+    expect(landmarks.neck.y).toBeGreaterThan(landmarks.chest.y);
+    expect(landmarks.chest.y).toBeGreaterThan(landmarks.pelvis.y);
+    expect(landmarks.leftFoot.y).toBeLessThan(landmarks.pelvis.y);
+    expect(landmarks.rightFoot.y).toBeLessThan(landmarks.pelvis.y);
+    expect(Object.keys(landmarks)).toEqual([
+      'eyeCenter',
+      'faceCenter',
+      'faceForward',
+      'headTop',
+      'headLeft',
+      'headRight',
+      'neck',
+      'chest',
+      'pelvis',
+      'leftShoulder',
+      'rightShoulder',
+      'leftElbow',
+      'rightElbow',
+      'leftHand',
+      'rightHand',
+      'leftHip',
+      'rightHip',
+      'leftKnee',
+      'rightKnee',
+      'leftFoot',
+      'rightFoot',
+    ]);
+    for (const point of Object.values(landmarks)) {
+      expect(Object.getPrototypeOf(point)).toBe(Object.prototype);
+      expect(Object.values(point).every(Number.isFinite)).toBe(true);
+    }
+    expect(JSON.parse(JSON.stringify(landmarks))).toEqual(landmarks);
+    expect(pose).toEqual(before);
+  });
+
+  it('turns face direction and anchors with head yaw without moving shoulders', () => {
+    const pose = createMannequinPose('default');
+    const facingForward = computeMannequinCinematicLandmarks(pose);
+    pose.headRotationDeg.y = 45;
+    const turned = computeMannequinCinematicLandmarks(pose);
+
+    expect(turned.faceForward).not.toEqual(facingForward.faceForward);
+    expect(turned.faceCenter).not.toEqual(facingForward.faceCenter);
+    expect(turned.eyeCenter).not.toEqual(facingForward.eyeCenter);
+    expect(turned.headLeft).not.toEqual(facingForward.headLeft);
+    expect(turned.headRight).not.toEqual(facingForward.headRight);
+    expect(turned.leftShoulder).toEqual(facingForward.leftShoulder);
+    expect(turned.rightShoulder).toEqual(facingForward.rightShoulder);
+  });
+
+  it('tracks walk-ready elbow, knee, and foot articulation', () => {
+    const standing = computeMannequinCinematicLandmarks(
+      createMannequinPose('default'),
+    );
+    const walking = computeMannequinCinematicLandmarks(
+      createMannequinPose('walk-ready'),
+    );
+
+    for (const key of [
+      'leftElbow',
+      'rightElbow',
+      'leftKnee',
+      'rightKnee',
+      'leftFoot',
+      'rightFoot',
+    ] as const) {
+      expect(vectorDistance(walking[key], standing[key])).toBeGreaterThan(0.01);
+    }
+  });
+
+  it('returns a unit face-forward vector along local -Z', () => {
+    const landmarks = computeMannequinCinematicLandmarks(
+      createMannequinPose('default'),
+    );
+
+    expect(landmarks.faceForward).toEqual(MANNEQUIN_FORWARD_AXIS);
+    expect(
+      Math.hypot(
+        landmarks.faceForward.x,
+        landmarks.faceForward.y,
+        landmarks.faceForward.z,
+      ),
+    ).toBeCloseTo(1, 12);
+  });
+
+  it.each(MANNEQUIN_BODY_TYPE_IDS)(
+    'uses %s head width and depth proportions for face anchors',
+    (bodyType) => {
+      const landmarks = computeMannequinCinematicLandmarks(
+        createMannequinPose('default'),
+        bodyType,
+      );
+      const head = MANNEQUIN_BODY_PROPORTIONS[bodyType].head;
+
+      expect(landmarks.headRight.x - landmarks.headLeft.x).toBeCloseTo(
+        2 * 0.119 * head.x,
+        12,
+      );
+      expect(landmarks.faceCenter.z).toBeCloseTo(-0.084 * head.z, 12);
+    },
+  );
 });
 
 describe('IK rotation gizmo pose updates', () => {
