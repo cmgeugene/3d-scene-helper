@@ -35,6 +35,143 @@ function dialoguePair(
 }
 
 describe('solveDialogueOts', () => {
+  it('honestly defaults existing callers to balanced dirty-single alternatives', () => {
+    const pair = dialoguePair();
+
+    const result = solveDialogueOts({
+      ...pair,
+      shoulderSide: 'left',
+      axisSidePolicy: { mode: 'positive' },
+      shotSize: 'medium-close',
+      intensity: 0.55,
+      lensMm: 50,
+      outputAspect: 16 / 9,
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      kind: 'balanced-dirty-single',
+      shoulderSide: 'left',
+    });
+    expect(result.candidates[0].id).toContain('balanced-dirty-single');
+  });
+
+  it('places a canonical shoulder-over camera behind and only modestly outside the foreground shoulder', () => {
+    const pair = dialoguePair();
+
+    const result = solveDialogueOts({
+      ...pair,
+      kind: 'canonical-shoulder-over',
+      shoulderSide: 'left',
+      axisSidePolicy: { mode: 'positive' },
+      shotSize: 'medium-close',
+      intensity: 0.55,
+      lensMm: 50,
+      outputAspect: 16 / 9,
+    });
+    const best = result.candidates[0];
+
+    expect(best.kind).toBe('canonical-shoulder-over');
+    expect(best.diagnostics.cameraBehindDot).toBeGreaterThanOrEqual(0.65);
+    expect(best.diagnostics.lateralToBehindRatio).toBeGreaterThanOrEqual(0.12);
+    expect(best.diagnostics.lateralToBehindRatio).toBeLessThanOrEqual(0.85);
+    expect(best.diagnostics.foregroundRearThreeQuarter).toBe(true);
+    expect(best.diagnostics.rejectionReasons).not.toContain(
+      'side-profile-two-shot',
+    );
+  });
+
+  it('requires a projected rear head-neck edge, inward shoulder ridge, and subject eyes above the canonical window', () => {
+    const pair = dialoguePair();
+
+    const result = solveDialogueOts({
+      ...pair,
+      kind: 'canonical-shoulder-over',
+      shoulderSide: 'left',
+      axisSidePolicy: { mode: 'positive' },
+      shotSize: 'medium-close',
+      intensity: 0.55,
+      lensMm: 50,
+      outputAspect: 16 / 9,
+    });
+    const best = result.candidates[0];
+
+    expect(best.diagnostics.foregroundHeadNeckEdgeAligned).toBe(true);
+    expect(best.diagnostics.foregroundShoulderRidgeNdcY).toBeTypeOf('number');
+    expect(
+      best.diagnostics.subjectEyeClearanceAboveShoulderRidge,
+    ).toBeGreaterThanOrEqual(0.12);
+    expect(
+      best.diagnostics.foregroundHeadWidthOccupancy,
+    ).toBeGreaterThanOrEqual(0.06);
+    expect(
+      best.diagnostics.foregroundShoulderWidthOccupancy,
+    ).toBeGreaterThanOrEqual(0.14);
+    expect(best.diagnostics.canonicalShoulderWindow).toBe(true);
+    expect(best.diagnostics.rejectionReasons).not.toContain('dirty-edge-only');
+    expect(best.diagnostics.rejectionReasons).not.toContain(
+      'shoulder-window-blocked',
+    );
+  });
+
+  it.each([50, 65, 85])(
+    'ranks deterministic canonical shoulder topology with a physical %dmm lens',
+    (lensMm) => {
+      const pair = dialoguePair('athletic', 'heavy');
+      const intent = {
+        ...pair,
+        kind: 'canonical-shoulder-over',
+        shoulderSide: 'left',
+        axisSidePolicy: { mode: 'positive' },
+        shotSize: 'medium-close',
+        intensity: 0.55,
+        lensMm,
+        outputAspect: 16 / 9,
+      } as const;
+
+      const first = solveDialogueOts(intent);
+      const second = solveDialogueOts(intent);
+      const best = first.candidates[0];
+
+      expect(best.camera.focalLengthMm).toBe(lensMm);
+      expect(best.kind).toBe('canonical-shoulder-over');
+      expect(best.diagnostics.canonicalShoulderWindow).toBe(true);
+      expect(
+        best.diagnostics.componentScores.canonicalTopology,
+      ).toBeGreaterThan(0.6);
+      expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+      expect(first.candidates.map(({ score }) => score)).toEqual(
+        [...first.candidates.map(({ score }) => score)].sort((a, b) => b - a),
+      );
+    },
+  );
+
+  it('keeps canonical camera height variable while lifting the subject face above the shoulder ridge', () => {
+    const pair = dialoguePair();
+
+    const result = solveDialogueOts({
+      ...pair,
+      kind: 'canonical-shoulder-over',
+      shoulderSide: 'left',
+      axisSidePolicy: { mode: 'positive' },
+      shotSize: 'medium-close',
+      intensity: 0.55,
+      lensMm: 50,
+      outputAspect: 16 / 9,
+    });
+    const evaluated = [...result.candidates, ...result.diagnostics.rejected];
+    const cameraHeights = evaluated.map(({ camera }) => camera.position.y);
+
+    expect(new Set(cameraHeights.map((value) => value.toFixed(6))).size).toBe(
+      3,
+    );
+    expect(
+      Math.max(...cameraHeights) - Math.min(...cameraHeights),
+    ).toBeGreaterThanOrEqual(0.12);
+    expect(
+      result.candidates[0].diagnostics.subjectFaceClearanceAboveShoulderRidge,
+    ).toBeGreaterThanOrEqual(0.05);
+  });
+
   it('returns JSON-safe transient left-shoulder candidates without mutating its inputs', () => {
     const pair = dialoguePair();
     const intent = {

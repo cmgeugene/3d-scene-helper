@@ -10,6 +10,8 @@ export type DialogueOtsProfileReference =
   CinematicSubjectProfile | { objectId: string };
 export type DialogueOtsShoulderSide = 'left' | 'right';
 export type DialogueOtsShotSize = 'medium-close' | 'tight';
+export type DialogueOtsCompositionKind =
+  'balanced-dirty-single' | 'canonical-shoulder-over';
 export type DialogueOtsAxisSidePolicy = {
   mode: 'positive' | 'negative' | 'preserve';
   continuitySign?: -1 | 1;
@@ -24,15 +26,19 @@ export interface DialogueOtsIntent {
   intensity: number;
   lensMm: number;
   outputAspect: number;
+  kind?: DialogueOtsCompositionKind;
 }
 
 export type DialogueOtsRejectionReason =
   | 'axis-discontinuity'
+  | 'dirty-edge-only'
   | 'face-blocked'
   | 'false-wide-two-shot'
   | 'foreground-torso-wall'
   | 'near-plane-unsafe'
   | 'same-side-imbalance'
+  | 'shoulder-window-blocked'
+  | 'side-profile-two-shot'
   | 'subject-critical-clipped'
   | 'subject-framing';
 
@@ -56,6 +62,14 @@ export interface DialogueOtsCandidateDiagnostics {
   foregroundOutlineWidthOccupancy: number;
   foregroundOutlineClippedCount: number;
   foregroundTorsoWall: boolean;
+  cameraBehindDot: number;
+  lateralToBehindRatio: number;
+  foregroundRearThreeQuarter: boolean;
+  foregroundHeadNeckEdgeAligned: boolean;
+  foregroundShoulderRidgeNdcY: number;
+  subjectEyeClearanceAboveShoulderRidge: number;
+  subjectFaceClearanceAboveShoulderRidge: number;
+  canonicalShoulderWindow: boolean;
   subjectCriticalClipped: readonly string[];
   foregroundClipped: readonly string[];
   nearPlaneMargin: number;
@@ -72,11 +86,13 @@ export interface DialogueOtsCandidateDiagnostics {
     nearPlane: number;
     axisContinuity: number;
     horizontalBalance: number;
+    canonicalTopology: number;
   };
 }
 
 export interface DialogueOtsCameraCandidate {
   id: string;
+  kind: DialogueOtsCompositionKind;
   shoulderSide: DialogueOtsShoulderSide;
   score: number;
   camera: SceneDocument['outputCamera'];
@@ -389,6 +405,53 @@ function diagnosticsForCandidate(
     foregroundWidthOccupancy > 0.38 ||
     (foregroundShoulderWidthOccupancy > 0.34 &&
       foregroundHeadWidthOccupancy > 0.28);
+  const shoulder =
+    foreground.landmarks[
+      intent.shoulderSide === 'left' ? 'leftShoulder' : 'rightShoulder'
+    ];
+  const shoulderToCamera = subtract(cameraData.position, shoulder);
+  const cameraBehindDirection = scale(foreground.basis.faceForward, -1);
+  const cameraBehindDistance = dot(shoulderToCamera, cameraBehindDirection);
+  const cameraLateralDistance = Math.abs(
+    dot(shoulderToCamera, foreground.basis.right),
+  );
+  const cameraBehindDot = dot(
+    normalize(shoulderToCamera, 'shoulder-to-camera direction'),
+    cameraBehindDirection,
+  );
+  const lateralToBehindRatio =
+    cameraLateralDistance / Math.max(cameraBehindDistance, 1e-9);
+  const foregroundRearThreeQuarter =
+    cameraBehindDot >= 0.65 &&
+    lateralToBehindRatio >= 0.12 &&
+    lateralToBehindRatio <= 0.85;
+  const expectedEdgeSign = expectedEdge === 'right' ? 1 : -1;
+  const projectedHeadTop = foregroundMetrics.landmarks.headTop.ndc;
+  const projectedNeck = foregroundMetrics.landmarks.neck.ndc;
+  const projectedShoulder =
+    foregroundMetrics.landmarks[
+      intent.shoulderSide === 'left' ? 'leftShoulder' : 'rightShoulder'
+    ].ndc;
+  const foregroundHeadNeckEdgeAligned =
+    expectedEdgeSign * projectedHeadTop.x >= 0.82 &&
+    expectedEdgeSign * projectedNeck.x >= 0.82 &&
+    Math.abs(projectedHeadTop.x - projectedNeck.x) <= 0.35 &&
+    expectedEdgeSign * projectedShoulder.x <=
+      expectedEdgeSign * projectedNeck.x - 0.08;
+  const foregroundShoulderRidgeNdcY = projectedShoulder.y;
+  const subjectEyeClearanceAboveShoulderRidge =
+    eye.y - foregroundShoulderRidgeNdcY;
+  const subjectFaceClearanceAboveShoulderRidge =
+    (subjectFaceRect?.minY ?? -1) - foregroundShoulderRidgeNdcY;
+  const canonicalShoulderWindow =
+    foregroundRearThreeQuarter &&
+    foregroundHeadNeckEdgeAligned &&
+    foregroundHeadWidthOccupancy >= 0.06 &&
+    foregroundShoulderWidthOccupancy >= 0.14 &&
+    subjectEyeClearanceAboveShoulderRidge >= 0.12 &&
+    subjectFaceClearanceAboveShoulderRidge >= 0.05;
+  const canonicalKind =
+    (intent.kind ?? 'balanced-dirty-single') === 'canonical-shoulder-over';
   const rejectionReasons: DialogueOtsRejectionReason[] = [];
   if (!axisContinuity) rejectionReasons.push('axis-discontinuity');
   if (faceOcclusion > 0.18 || faceClearance < 0.015)
@@ -396,6 +459,24 @@ function diagnosticsForCandidate(
   if (!foregroundEdgeContact || foregroundWidthOccupancy < 0.12)
     rejectionReasons.push('false-wide-two-shot');
   if (!subjectCounterPositioned) rejectionReasons.push('same-side-imbalance');
+  if (canonicalKind && !foregroundRearThreeQuarter) {
+    rejectionReasons.push('side-profile-two-shot');
+  }
+  if (
+    canonicalKind &&
+    (!foregroundHeadNeckEdgeAligned ||
+      foregroundHeadWidthOccupancy < 0.06 ||
+      foregroundShoulderWidthOccupancy < 0.14)
+  ) {
+    rejectionReasons.push('dirty-edge-only');
+  }
+  if (
+    canonicalKind &&
+    (subjectEyeClearanceAboveShoulderRidge < 0.12 ||
+      subjectFaceClearanceAboveShoulderRidge < 0.05)
+  ) {
+    rejectionReasons.push('shoulder-window-blocked');
+  }
   if (foregroundTorsoWall) rejectionReasons.push('foreground-torso-wall');
   if (!nearPlaneSafe) rejectionReasons.push('near-plane-unsafe');
   if (subjectCriticalClipped.length > 0)
@@ -423,6 +504,14 @@ function diagnosticsForCandidate(
     foregroundOutlineWidthOccupancy,
     foregroundOutlineClippedCount,
     foregroundTorsoWall,
+    cameraBehindDot,
+    lateralToBehindRatio,
+    foregroundRearThreeQuarter,
+    foregroundHeadNeckEdgeAligned,
+    foregroundShoulderRidgeNdcY,
+    subjectEyeClearanceAboveShoulderRidge,
+    subjectFaceClearanceAboveShoulderRidge,
+    canonicalShoulderWindow,
     subjectCriticalClipped,
     foregroundClipped,
     nearPlaneMargin,
@@ -456,22 +545,37 @@ function diagnosticsForCandidate(
             expectedSubjectSign * SUBJECT_COUNTER_POSITION_TARGET,
             0.22,
           ),
+      canonicalTopology:
+        0.2 * closeness(cameraBehindDot, 0.9, 0.35) +
+        0.15 * closeness(lateralToBehindRatio, 0.45, 0.45) +
+        0.2 * (foregroundHeadNeckEdgeAligned ? 1 : 0) +
+        0.15 * closeness(foregroundHeadWidthOccupancy, 0.14, 0.14) +
+        0.15 * closeness(foregroundShoulderWidthOccupancy, 0.22, 0.18) +
+        0.075 * clamp(subjectEyeClearanceAboveShoulderRidge / 0.3, 0, 1) +
+        0.075 * clamp(subjectFaceClearanceAboveShoulderRidge / 0.2, 0, 1),
     },
   };
 }
 
-function candidateScore(diagnostics: DialogueOtsCandidateDiagnostics) {
+function candidateScore(
+  diagnostics: DialogueOtsCandidateDiagnostics,
+  kind: DialogueOtsCompositionKind,
+) {
   const scores = diagnostics.componentScores;
+  const foregroundOccupancyWeight =
+    kind === 'canonical-shoulder-over' ? 12 : 22;
+  const canonicalTopologyWeight = kind === 'canonical-shoulder-over' ? 10 : 0;
   return roundScore(
     scores.eyePlacement * 12 +
       scores.headroom * 10 +
       scores.lookRoom * 8 +
       scores.faceClearance * 18 +
-      scores.foregroundOccupancy * 22 +
+      scores.foregroundOccupancy * foregroundOccupancyWeight +
       scores.clipping * 8 +
       scores.nearPlane * 5 +
       scores.axisContinuity * 7 +
-      scores.horizontalBalance * 10,
+      scores.horizontalBalance * 10 +
+      scores.canonicalTopology * canonicalTopologyWeight,
   );
 }
 
@@ -481,6 +585,7 @@ function buildCandidateCamera(
   foreground: CinematicSubjectProfile,
   behindDistance: number,
   outsideDistance: number,
+  cameraHeightOffset: number,
   eyeY: number,
   eyeX: number,
 ): SceneDocument['outputCamera'] {
@@ -490,10 +595,13 @@ function buildCandidateCamera(
     foreground.landmarks[
       intent.shoulderSide === 'left' ? 'leftShoulder' : 'rightShoulder'
     ];
-  const behind = normalize(
-    subtract(foregroundEye, subjectEye),
-    'conversation separation',
-  );
+  const behind =
+    intent.kind === 'canonical-shoulder-over'
+      ? scale(foreground.basis.faceForward, -1)
+      : normalize(
+          subtract(foregroundEye, subjectEye),
+          'conversation separation',
+        );
   const outward = normalize(
     subtract(shoulder, foreground.landmarks.neck),
     'foreground shoulder direction',
@@ -502,15 +610,23 @@ function buildCandidateCamera(
     { ...subtract(shoulder, foreground.landmarks.neck), y: 0 },
     'horizontal foreground shoulder direction',
   );
-  const anatomicalOutsideDistance = Math.min(outsideDistance, 0.6);
-  const additionalHorizontalDistance = Math.max(0, outsideDistance - 0.6);
+  const anatomicalOutsideLimit =
+    intent.kind === 'canonical-shoulder-over' ? 0 : 0.6;
+  const anatomicalOutsideDistance = Math.min(
+    outsideDistance,
+    anatomicalOutsideLimit,
+  );
+  const additionalHorizontalDistance = Math.max(
+    0,
+    outsideDistance - anatomicalOutsideLimit,
+  );
   const outsideOffset = add(
     scale(outward, anatomicalOutsideDistance),
     scale(horizontalOutward, additionalHorizontalDistance),
   );
   const position = add(
     add(shoulder, scale(behind, behindDistance)),
-    add(outsideOffset, scale(foreground.basis.up, 0.06)),
+    add(outsideOffset, scale(foreground.basis.up, cameraHeightOffset)),
   );
   const initialForward = normalize(
     subtract(subjectEye, position),
@@ -541,6 +657,7 @@ export function solveDialogueOts(
   validateIntent(intent);
   const subject = requireProfile(intent.subject, profiles);
   const foreground = requireProfile(intent.foreground, profiles);
+  const kind = intent.kind ?? 'balanced-dirty-single';
   if (subject.objectId === foreground.objectId) {
     throw new RangeError(
       'Dialogue OTS requires distinct subject and foreground profiles.',
@@ -553,40 +670,50 @@ export function solveDialogueOts(
       ? 0.38 + intent.intensity * 0.03
       : 0.3 + intent.intensity * 0.05;
   const intimacyScale = intent.shotSize === 'tight' ? 0.82 : 1;
-  const behindDistances = [0.35, 0.5, 0.65, 0.78, 0.94, 1.1, 1.26].map(
-    (value) => value * intimacyScale,
-  );
-  const outsideDistances = [
-    0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3,
-  ].map((value) => value * intimacyScale + intent.intensity * 0.06);
+  const behindDistances = (
+    kind === 'canonical-shoulder-over'
+      ? [0.55, 0.7, 0.85, 1, 1.15, 1.3]
+      : [0.35, 0.5, 0.65, 0.78, 0.94, 1.1, 1.26]
+  ).map((value) => value * intimacyScale);
+  const outsideDistances = (
+    kind === 'canonical-shoulder-over'
+      ? [0.12, 0.18, 0.24, 0.3, 0.36, 0.42]
+      : [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3]
+  ).map((value) => value * intimacyScale + intent.intensity * 0.06);
   const evaluated: DialogueOtsCameraCandidate[] = [];
+  const cameraHeightOffsets =
+    kind === 'canonical-shoulder-over' ? [0.16, 0.25, 0.34] : [0.06];
   let index = 0;
   for (const behindDistance of behindDistances) {
     for (const outsideDistance of outsideDistances) {
-      for (const eyeYOffset of [-0.03, 0.02]) {
-        const camera = buildCandidateCamera(
-          intent,
-          subject,
-          foreground,
-          behindDistance,
-          outsideDistance,
-          desiredEyeY + eyeYOffset,
-          desiredEyeX,
-        );
-        const diagnostics = diagnosticsForCandidate(
-          intent,
-          subject,
-          foreground,
-          camera,
-        );
-        evaluated.push({
-          id: `${intent.shoulderSide}-shoulder-${intent.shotSize}-${String(index).padStart(2, '0')}`,
-          shoulderSide: intent.shoulderSide,
-          score: candidateScore(diagnostics),
-          camera,
-          diagnostics,
-        });
-        index += 1;
+      for (const cameraHeightOffset of cameraHeightOffsets) {
+        for (const eyeYOffset of [-0.03, 0.02]) {
+          const camera = buildCandidateCamera(
+            intent,
+            subject,
+            foreground,
+            behindDistance,
+            outsideDistance,
+            cameraHeightOffset,
+            desiredEyeY + eyeYOffset,
+            desiredEyeX,
+          );
+          const diagnostics = diagnosticsForCandidate(
+            intent,
+            subject,
+            foreground,
+            camera,
+          );
+          evaluated.push({
+            id: `${kind}-${intent.shoulderSide}-shoulder-${intent.shotSize}-${String(index).padStart(2, '0')}`,
+            kind,
+            shoulderSide: intent.shoulderSide,
+            score: candidateScore(diagnostics, kind),
+            camera,
+            diagnostics,
+          });
+          index += 1;
+        }
       }
     }
   }
