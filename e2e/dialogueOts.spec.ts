@@ -276,21 +276,45 @@ test.describe
         height: Math.abs(faceBottom.y - faceTop.y) + 20,
       });
       expect(facePixels.count).toBeGreaterThan(180);
+      const frameCenterX = frameX + frameBox.width / 2;
+      const facePixelCenterX = (facePixels.minX + facePixels.maxX) / 2;
+      const faceCenterOffset =
+        Math.abs(facePixelCenterX - frameCenterX) / frameBox.width;
+      expect(faceCenterOffset).toBeGreaterThanOrEqual(0.1);
+      expect(faceCenterOffset).toBeLessThanOrEqual(0.25);
+      if (shoulderSide === 'left') {
+        expect(facePixelCenterX).toBeLessThan(frameCenterX);
+      } else {
+        expect(facePixelCenterX).toBeGreaterThan(frameCenterX);
+      }
       expect(current.candidate.diagnostics).toMatchObject({
         accepted: true,
         foregroundEdge: shoulderSide === 'left' ? 'right' : 'left',
         foregroundTorsoWall: false,
         nearPlaneSafe: true,
         axisContinuity: true,
+        subjectCounterPositioned: true,
       });
       expect(current.candidate.diagnostics.faceOcclusion).toBeLessThanOrEqual(
         0.18,
       );
       expect(current.candidate.diagnostics.subjectHeadroom).toBeGreaterThan(0);
       expect(current.candidate.diagnostics.subjectLookRoom).toBeGreaterThan(0);
+      console.info(
+        'S14_DIALOGUE_OTS_EVIDENCE',
+        JSON.stringify({
+          shoulderSide,
+          foregroundPixelWidth: foregroundWidth,
+          facePixelCenterOffset: faceCenterOffset,
+          subjectEyeNdcX: current.candidate.diagnostics.subjectEyeNdc.x,
+          subjectFaceNdcX: current.candidate.diagnostics.subjectFaceNdc.x,
+          headroom: current.candidate.diagnostics.subjectHeadroom,
+          lookRoom: current.candidate.diagnostics.subjectLookRoom,
+        }),
+      );
 
       await page.evaluate(
-        ({ side, score, occupancy }) => {
+        ({ side, score, occupancy, faceSide, faceOffset }) => {
           type EvidenceElement = {
             dataset: Record<string, string>;
             style: Record<string, string>;
@@ -310,7 +334,7 @@ test.describe
             throw new Error('Output frame is unavailable.');
           const label = browser.document.createElement('div');
           label.dataset.dialogueOtsEvidence = side;
-          label.textContent = `${side.toUpperCase()} SHOULDER OTS · SCORE ${score.toFixed(2)} · FOREGROUND ${Math.round(occupancy * 100)}%`;
+          label.textContent = `${side.toUpperCase()} SHOULDER OTS · SCORE ${score.toFixed(2)} · FOREGROUND ${Math.round(occupancy * 100)}% · FACE ${faceSide.toUpperCase()} ${Math.round(faceOffset * 100)}%`;
           Object.assign(label.style, {
             position: 'absolute',
             left: '8px',
@@ -329,6 +353,8 @@ test.describe
           side: shoulderSide,
           score: current.candidate.score,
           occupancy: current.candidate.diagnostics.foregroundWidthOccupancy,
+          faceSide: shoulderSide === 'left' ? 'left' : 'right',
+          faceOffset: faceCenterOffset,
         },
       );
       await page.screenshot({

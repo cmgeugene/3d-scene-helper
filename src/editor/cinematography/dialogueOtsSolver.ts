@@ -32,6 +32,7 @@ export type DialogueOtsRejectionReason =
   | 'false-wide-two-shot'
   | 'foreground-torso-wall'
   | 'near-plane-unsafe'
+  | 'same-side-imbalance'
   | 'subject-critical-clipped'
   | 'subject-framing';
 
@@ -39,6 +40,9 @@ export interface DialogueOtsCandidateDiagnostics {
   accepted: boolean;
   rejectionReasons: readonly DialogueOtsRejectionReason[];
   subjectEyeNdc: { x: number; y: number };
+  subjectFaceNdc: { x: number; y: number };
+  subjectCounterPositioned: boolean;
+  subjectHorizontalCenterOffset: number;
   subjectHeadroom: number;
   subjectLookRoom: number;
   subjectFaceHeightOccupancy: number;
@@ -67,6 +71,7 @@ export interface DialogueOtsCandidateDiagnostics {
     clipping: number;
     nearPlane: number;
     axisContinuity: number;
+    horizontalBalance: number;
   };
 }
 
@@ -94,6 +99,9 @@ type Rect = {
 };
 
 const OUTPUT_CAMERA_NEAR = 0.1;
+const SUBJECT_COUNTER_POSITION_MIN = 0.15;
+const SUBJECT_COUNTER_POSITION_MAX = 0.45;
+const SUBJECT_COUNTER_POSITION_TARGET = 0.23;
 const UP: Vec3 = { x: 0, y: 1, z: 0 };
 const SUBJECT_CRITICAL_LANDMARKS = [
   'eyeCenter',
@@ -354,6 +362,17 @@ function diagnosticsForCandidate(
   );
   const axisContinuity = sideSign === desiredAxisSign(intent.axisSidePolicy);
   const eye = subjectMetrics.landmarks.eyeCenter.ndc;
+  const face = subjectMetrics.landmarks.faceCenter.ndc;
+  const expectedSubjectSign = expectedEdge === 'right' ? -1 : 1;
+  const subjectHorizontalCenterOffset = Math.min(
+    Math.abs(eye.x),
+    Math.abs(face.x),
+  );
+  const subjectCounterPositioned =
+    Math.sign(eye.x) === expectedSubjectSign &&
+    Math.sign(face.x) === expectedSubjectSign &&
+    subjectHorizontalCenterOffset >= SUBJECT_COUNTER_POSITION_MIN &&
+    Math.max(Math.abs(eye.x), Math.abs(face.x)) <= SUBJECT_COUNTER_POSITION_MAX;
   const headroom = subjectMetrics.headroom ?? -1;
   const axes = cameraAxes(cameraData);
   const lookDirection = normalize(
@@ -376,6 +395,7 @@ function diagnosticsForCandidate(
     rejectionReasons.push('face-blocked');
   if (!foregroundEdgeContact || foregroundWidthOccupancy < 0.12)
     rejectionReasons.push('false-wide-two-shot');
+  if (!subjectCounterPositioned) rejectionReasons.push('same-side-imbalance');
   if (foregroundTorsoWall) rejectionReasons.push('foreground-torso-wall');
   if (!nearPlaneSafe) rejectionReasons.push('near-plane-unsafe');
   if (subjectCriticalClipped.length > 0)
@@ -387,6 +407,9 @@ function diagnosticsForCandidate(
     accepted: rejectionReasons.length === 0,
     rejectionReasons,
     subjectEyeNdc: { x: eye.x, y: eye.y },
+    subjectFaceNdc: { x: face.x, y: face.y },
+    subjectCounterPositioned,
+    subjectHorizontalCenterOffset,
     subjectHeadroom: headroom,
     subjectLookRoom: lookRoom,
     subjectFaceHeightOccupancy,
@@ -420,6 +443,19 @@ function diagnosticsForCandidate(
           : 0,
       nearPlane: nearPlaneSafe ? clamp(nearPlaneMargin / 0.3, 0, 1) : 0,
       axisContinuity: axisContinuity ? 1 : 0,
+      horizontalBalance:
+        0.5 *
+          closeness(
+            eye.x,
+            expectedSubjectSign * SUBJECT_COUNTER_POSITION_TARGET,
+            0.22,
+          ) +
+        0.5 *
+          closeness(
+            face.x,
+            expectedSubjectSign * SUBJECT_COUNTER_POSITION_TARGET,
+            0.22,
+          ),
     },
   };
 }
@@ -427,14 +463,15 @@ function diagnosticsForCandidate(
 function candidateScore(diagnostics: DialogueOtsCandidateDiagnostics) {
   const scores = diagnostics.componentScores;
   return roundScore(
-    scores.eyePlacement * 22 +
+    scores.eyePlacement * 12 +
       scores.headroom * 10 +
       scores.lookRoom * 8 +
       scores.faceClearance * 18 +
       scores.foregroundOccupancy * 22 +
       scores.clipping * 8 +
       scores.nearPlane * 5 +
-      scores.axisContinuity * 7,
+      scores.axisContinuity * 7 +
+      scores.horizontalBalance * 10,
   );
 }
 
@@ -461,9 +498,19 @@ function buildCandidateCamera(
     subtract(shoulder, foreground.landmarks.neck),
     'foreground shoulder direction',
   );
+  const horizontalOutward = normalize(
+    { ...subtract(shoulder, foreground.landmarks.neck), y: 0 },
+    'horizontal foreground shoulder direction',
+  );
+  const anatomicalOutsideDistance = Math.min(outsideDistance, 0.6);
+  const additionalHorizontalDistance = Math.max(0, outsideDistance - 0.6);
+  const outsideOffset = add(
+    scale(outward, anatomicalOutsideDistance),
+    scale(horizontalOutward, additionalHorizontalDistance),
+  );
   const position = add(
     add(shoulder, scale(behind, behindDistance)),
-    add(scale(outward, outsideDistance), scale(foreground.basis.up, 0.06)),
+    add(outsideOffset, scale(foreground.basis.up, 0.06)),
   );
   const initialForward = normalize(
     subtract(subjectEye, position),
@@ -499,19 +546,19 @@ export function solveDialogueOts(
       'Dialogue OTS requires distinct subject and foreground profiles.',
     );
   }
-  const side = intent.shoulderSide === 'left' ? 1 : -1;
-  const desiredEyeX = side * (0.2 + intent.intensity * 0.12);
+  const side = intent.shoulderSide === 'left' ? -1 : 1;
+  const desiredEyeX = side * (0.18 + intent.intensity * 0.08);
   const desiredEyeY =
     intent.shotSize === 'tight'
       ? 0.38 + intent.intensity * 0.03
       : 0.3 + intent.intensity * 0.05;
   const intimacyScale = intent.shotSize === 'tight' ? 0.82 : 1;
-  const behindDistances = [0.78, 0.94, 1.1, 1.26].map(
+  const behindDistances = [0.35, 0.5, 0.65, 0.78, 0.94, 1.1, 1.26].map(
     (value) => value * intimacyScale,
   );
-  const outsideDistances = [0.2, 0.3, 0.4, 0.5, 0.6].map(
-    (value) => value + intent.intensity * 0.06,
-  );
+  const outsideDistances = [
+    0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3,
+  ].map((value) => value * intimacyScale + intent.intensity * 0.06);
   const evaluated: DialogueOtsCameraCandidate[] = [];
   let index = 0;
   for (const behindDistance of behindDistances) {

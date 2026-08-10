@@ -5,9 +5,59 @@
 - Worktree: `/Users/js/Documents/3d-scene-helper-worktrees/dialogue-ots-solver`
 - Branch: `feat/dialogue-ots-solver`
 - Starting HEAD: `c164d5f54521cade33779f2d6075d02775eca2a0` (`test: strengthen cinematic projection visual evidence`)
-- Intended commit message: `feat: add deterministic dialogue ots solver`
-- Evidence time: `2026-08-10 11:58:00 KST`
-- Final commit SHA: this tracked handoff is part of that same commit, so it cannot contain its own cryptographic identity. The immutable SHA is recorded in the post-commit completion report.
+- Original Phase 2 commit: `f901a10fdc167aced887d61ee0c49d1938bf3cf8` (`feat: add deterministic dialogue ots solver`)
+- Counter-position correction baseline: clean `f901a10fdc167aced887d61ee0c49d1938bf3cf8`
+- Follow-up commit message: `fix: balance dialogue ots counter-positioning`
+- Initial evidence time: `2026-08-10 11:58:00 KST`
+- Correction evidence time: `2026-08-10 13:31:09 KST`
+- Follow-up commit SHA: this tracked handoff is part of that follow-up commit, so it cannot contain its own cryptographic identity. The immutable SHA is recorded in the post-commit completion report.
+
+## User-rejected composition and Phase 2 correction
+
+The user rejected both original accepted screenshots with: “인물들이 너무 한쪽으로 몰려있지 않아? 카메라 높이야 ots가 카메라 높이를 다양하게 가져갈 수 있지만 이건 너무 한쪽으로 몰려있는 것 같아.” Camera height was not treated as the defect.
+
+Root cause:
+
+- a left anatomical shoulder correctly placed the foreground on the right output edge, but `desiredEyeX` was also positive;
+- a right anatomical shoulder placed the foreground on the left edge, but `desiredEyeX` was also negative;
+- the eye-placement score used `abs(eye.x)`, so same-side clustering scored identically to proper counter-positioning;
+- the rendered result therefore clustered subject and foreground visual weight on the same side while leaving excessive empty space opposite them.
+
+Before any production edit, both previously accepted files were copied byte-for-byte to explicit rejected evidence paths. The correction stays inside `dialogueOtsSolver`; it does not impose a universal camera height or modify Phase 1 projection policy.
+
+### Correction RED → GREEN chronology
+
+1. **Counter-position sign RED**
+   - Added a focused two-case unit contract: foreground right edge requires negative subject eye NDC X, and foreground left edge requires positive subject eye NDC X; both must be 0.15–0.45 away from center for this explicit OTS family.
+   - Focused result: **2/2 failed as expected**. Left received sign `+1` instead of `-1`; right received `-1` instead of `+1`.
+2. **Minimal sign GREEN**
+   - Inverted the shoulder-to-subject aim sign without changing camera-height policy.
+   - Focused result: **2/2 passed**.
+3. **Explicit diagnostic/score RED**
+   - Extended the same focused contract to require JSON-safe `subjectFaceNdc`, `subjectCounterPositioned`, `subjectHorizontalCenterOffset`, and `componentScores.horizontalBalance`, plus absence of `same-side-imbalance` for accepted candidates.
+   - Focused result: **2/2 failed as expected** because the new diagnostic values were `undefined`.
+4. **Shot-local balance GREEN**
+   - Added signed eye/face counter-position diagnostics, a 0.15–0.45 local acceptance band, a signed horizontal-balance score around the calibrated opposite-side target, and the explicit `same-side-imbalance` rejection.
+   - Kept these thresholds entirely local to the dialogue OTS solver.
+   - Focused result: **2/2 passed**; full solver suite **18/18 passed**.
+5. **Real WebGL RED after sign correction**
+   - The first focused Chromium run failed at `accepted OTS candidate required`: after moving the subject opposite the foreground, the original camera sample grid could not simultaneously preserve foreground edge contact.
+6. **Real WebGL GREEN calibration**
+   - Added closer behind-shoulder samples and bounded wider lateral samples needed for near/far parallax.
+   - Beyond the original anatomical shoulder offset, extra offset is horizontal rather than continuing the neck-to-shoulder downward slope. This prevents balance correction from being implemented as a forced camera-height change; candidate height remains derived from the profile, shoulder geometry, shot size, and sampled placement.
+   - Calibrated the signed eye target to `0.18 + intensity × 0.08` and kept sufficient face clearance, edge contact, 15–30% rendered foreground width, near-plane safety, axis continuity, and torso-wall rejection.
+   - Focused Chromium/WebGL result: **2/2 passed**.
+7. **Tight-shot regression RED → GREEN**
+   - Full solver regression found the tight candidate’s face occupancy smaller than the medium-close candidate after the wider lateral grid.
+   - Scaled lateral samples with the existing tight-shot intimacy scale.
+   - Focused regression returned GREEN; solver suite returned **18/18 passed** and solver + Phase 1 projection regression returned **27/27 passed**.
+
+Actual rendered-pixel metrics from the final focused run:
+
+- left shoulder: foreground pixel width **25.3947%**, subject-face center **16.4474% left** of output-frame center, eye NDC X `-0.220717`, face NDC X `-0.231893`, headroom `0.253848`, look room `0.610359`;
+- right shoulder: foreground pixel width **26.0526%**, subject-face center **12.6316% right** of output-frame center, eye NDC X `0.220048`, face NDC X `0.224944`, headroom `0.262243`, look room `0.610024`.
+
+Both regenerated 1280×720 frames were inspected from actual pixels, not accepted from labels or numeric diagnostics alone. Each reads as an OTS with the foreground cropped on one edge, the unobstructed speaker face counter-positioned across center, plausible eye line/look room/headroom, no wide two-shot, and no torso wall.
 
 ## Phase 2 scope completed
 
@@ -51,6 +101,8 @@ Only accepted candidates are returned in a score-descending, ID-tie-broken ranki
 5. `docs/session-evidence/S14-dialogue-ots-left-accepted.png`
 6. `docs/session-evidence/S14-dialogue-ots-right-accepted.png`
 7. `docs/session-handoffs/S14-dialogue-ots-solver.md`
+8. `docs/session-evidence/S14-dialogue-ots-left-rejected-same-side-imbalance.png`
+9. `docs/session-evidence/S14-dialogue-ots-right-rejected-same-side-imbalance.png`
 
 No Phase 1 production file was modified. In particular, `projectionMetrics.ts` remains measurement-only and has no global required-landmark or pass/fail policy.
 
@@ -117,12 +169,14 @@ No Phase 1 production file was modified. In particular, `projectionMetrics.ts` r
 
 ## Unit coverage
 
-The final solver suite contains **16/16 passing tests** covering:
+The corrected solver suite contains **18/18 passing tests** covering:
 
 - inline profiles and object-ID references;
 - JSON serialization and source non-mutation;
 - standard, athletic, and heavy pairs;
 - both left and right shoulder directions;
+- signed eye/face counter-positioning opposite the foreground edge;
+- JSON-safe horizontal-balance diagnostics, score, and rejection reason;
 - head/shoulder/outline diagnostics;
 - axis preservation and explicit crossing rejection;
 - false-wide/no-shoulder rejection;
@@ -131,7 +185,7 @@ The final solver suite contains **16/16 passing tests** covering:
 - physical lens, output aspect, shot-size, and intensity sensitivity;
 - invalid numeric intent and unresolved ID failure.
 
-The focused solver + Phase 1 measurement regression is **25/25 passed**: 16 solver tests plus all 9 measurement-only projection tests.
+The focused solver + Phase 1 measurement regression is **27/27 passed**: 18 solver tests plus all 9 measurement-only projection tests.
 
 ## Chromium/WebGL evidence
 
@@ -142,21 +196,39 @@ The focused solver + Phase 1 measurement regression is **25/25 passed**: 16 solv
 - SHA-256: `feb27a82175abc605d716a6c098efc5c1f112f54a2eddb4d0864571c2b38430e`
 - Failure: actual foreground pixels occupied 33.29% of output width; the dark foreground head/torso/arm became a visual wall, while the speaker read too small and too close to a wide/full-body two-shot. This file is negative evidence only.
 
-### Accepted left shoulder
+### Rejected same-side imbalance — left shoulder
+
+- Path: `/Users/js/Documents/3d-scene-helper-worktrees/dialogue-ots-solver/docs/session-evidence/S14-dialogue-ots-left-rejected-same-side-imbalance.png`
+- Dimensions: **1280×720**
+- SHA-256: `2f4eacc508b41903bb36f1cc7f5110b5d8ef00f38f6b38412ad65ac977413f53`
+- Failure: the foreground occupied the right edge while the speaker was also right of center, clustering both figures on the same side and leaving excessive empty space on the left. This is the byte-for-byte preserved former accepted-left file.
+
+### Rejected same-side imbalance — right shoulder
+
+- Path: `/Users/js/Documents/3d-scene-helper-worktrees/dialogue-ots-solver/docs/session-evidence/S14-dialogue-ots-right-rejected-same-side-imbalance.png`
+- Dimensions: **1280×720**
+- SHA-256: `129db8ee8c73973fa14e75f677f64dc6d99185dda119bafaf3ca37ee58c95440`
+- Failure: the foreground occupied the left edge while the speaker was also left of center, clustering visual weight leftward. This is the byte-for-byte preserved former accepted-right file.
+
+### Corrected accepted left shoulder
 
 - Path: `/Users/js/Documents/3d-scene-helper-worktrees/dialogue-ots-solver/docs/session-evidence/S14-dialogue-ots-left-accepted.png`
 - Dimensions: **1280×720**
-- SHA-256: `2f4eacc508b41903bb36f1cc7f5110b5d8ef00f38f6b38412ad65ac977413f53`
-- Visual reading: dark foreground head/neck/shoulder is cropped against the right edge at the explicit 19% numeric calibration label; the speaker is a medium-close chest-up figure, face is unobstructed, eyes sit in the upper region, and positive look room/headroom remain.
+- SHA-256: `78f43c63b56ce3c25ced4597baaf4f34d70f5407332a20b5bcea9177995aa6fa`
+- Rendered foreground pixel width: **25.3947%** of output-frame width.
+- Rendered subject-face center: **16.4474% left** of output-frame center.
+- Visual reading: the dark foreground head/neck/shoulder touches the right edge without becoming a torso wall. The speaker face is unobstructed and counter-positioned left of center with positive eye line, look room, and headroom. It is a balanced medium-close OTS, not a wide two-shot.
 
-### Accepted right shoulder
+### Corrected accepted right shoulder
 
 - Path: `/Users/js/Documents/3d-scene-helper-worktrees/dialogue-ots-solver/docs/session-evidence/S14-dialogue-ots-right-accepted.png`
 - Dimensions: **1280×720**
-- SHA-256: `129db8ee8c73973fa14e75f677f64dc6d99185dda119bafaf3ca37ee58c95440`
-- Visual reading: the mirrored dark foreground head/neck/shoulder is cropped against the left edge at the explicit 16% label; the speaker face remains visible with plausible medium-close scale, look room, and headroom. It is neither a wide two-shot nor face-blocked.
+- SHA-256: `e53795cb6f77a45e32379759a71a6909828092340196d6eab18d6ff00ad9d322`
+- Rendered foreground pixel width: **26.0526%** of output-frame width.
+- Rendered subject-face center: **12.6316% right** of output-frame center.
+- Visual reading: the foreground head/neck/shoulder touches the left edge without becoming a torso wall. The speaker face is unobstructed and counter-positioned right of center with positive eye line, look room, and headroom. It is a balanced medium-close OTS, not a wide two-shot.
 
-The E2E test does not approve pixels from numeric diagnostics alone. It screenshots the actual WebGL canvas, hides the foreground and measures changed pixels in the projected head-to-chest corridor, verifies edge contact and 15–30% output-frame width, then hides the speaker and verifies changed pixels in the projected face region.
+The E2E test does not approve pixels from numeric diagnostics alone. It screenshots the actual WebGL canvas, hides the foreground and measures changed pixels in the projected head-to-chest corridor, verifies edge contact and 15–30% output-frame width, then hides the speaker and measures changed pixels in the projected face region. The rendered face-pixel center must lie on the opposite side of output-frame center from the foreground edge with a 10–25% center offset.
 
 ## Independent reviews
 
@@ -169,7 +241,19 @@ Required review backend: Antigravity CLI (`agy`) with provider/model **Gemini 3.
 - Important-or-higher disposition: **none; no fix or re-review was required**.
 - Review executor: Antigravity CLI (`agy`), provider/model **Google Gemini / `gemini-3.6-flash-high`** for both reviews. No substitute model was used.
 
+### Counter-position correction reviews
+
+The follow-up correction must be reviewed independently against its own exact implementation/test/evidence binary diff from baseline `f901a10fdc167aced887d61ee0c49d1938bf3cf8`.
+
+- Exact follow-up implementation/test/evidence binary diff SHA-256: `166fd937fc215f398ebc88a35350467f1d2ac42c4f3c2c1804460ffd99c01156`.
+- Spec-compliance review: **APPROVED** — `APPROVED: no Critical/Important spec findings.` No Critical, Important, or Minor findings.
+- Quality/correctness/security review: **APPROVED** — `APPROVED: no Critical/Important quality/correctness/security findings.` No Critical, Important, or Minor findings.
+- Important-or-higher disposition: **none; no fix or re-review was required**.
+- Review executor: Antigravity CLI (`agy`), Google Gemini / `gemini-3.6-flash-high` for both reviews. No substitute model was used.
+
 ## Verification gates
+
+### Original implementation gates
 
 A fresh fail-fast batch passed after both independent reviews on the staged final snapshot:
 
@@ -185,6 +269,24 @@ A fresh fail-fast batch passed after both independent reviews on the staged fina
 10. Forbidden-scope audit — exactly **7 expected Phase 2 files**, **0 unexpected**, **0 missing**.
 11. Ordinary production artifact string scan — **0** occurrences of the E2E store bridge or OTS evidence overlay diagnostics.
 12. Listener check — original `127.0.0.1:5173` remains PID `42743`; task-owned `4173` has no listener after the preview gate.
+
+### Counter-position correction gates
+
+The fresh post-review fail-fast batch passed on the unchanged implementation/test/evidence snapshot:
+
+1. `npm run typecheck` — exit `0`.
+2. `npm run lint` — exit `0`.
+3. `npm test -- --run` — exit `0`; **19 files, 263/263 passed**.
+4. `npm run build` — exit `0`; 687 modules; production bridge exclusion passed.
+5. `npm run test:e2e:preview` — exit `0`; **69/69 Chromium/WebGL tests passed** in approximately 1.0 minute, including both corrected OTS directions and their rendered face-pixel counter-position assertions.
+6. Final ordinary `npm run build` — exit `0`; 687 modules; ordinary production artifact restored and diagnostics absent.
+7. Phase-owned Prettier over solver, unit test, E2E, and handoff — exit `0`; all matched files formatted.
+8. `git diff --cached --check` — exit `0`.
+9. Added-line security scan — **0 findings**.
+10. Forbidden-scope audit — exactly **8 expected follow-up files**, **0 unexpected**, **0 missing**.
+11. Ordinary production artifact diagnostic string scan — **0 forbidden strings**.
+12. Reviewed implementation/test/evidence hash remained `166fd937fc215f398ebc88a35350467f1d2ac42c4f3c2c1804460ffd99c01156`.
+13. Original `127.0.0.1:5173` remained PID `42743`; task-owned `4173` was clear after preview shutdown.
 
 ## Explicit Phase 3/4/5 exclusions
 

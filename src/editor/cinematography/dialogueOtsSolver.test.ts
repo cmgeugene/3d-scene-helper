@@ -119,6 +119,57 @@ describe('solveDialogueOts', () => {
     );
   });
 
+  it.each([
+    ['left', 1, 'right', -1],
+    ['right', -1, 'left', 1],
+  ] as const)(
+    'counter-positions the subject opposite the %s shoulder foreground edge',
+    (shoulderSide, continuitySign, expectedEdge, expectedSubjectSign) => {
+      const pair = dialoguePair();
+
+      const result = solveDialogueOts({
+        ...pair,
+        shoulderSide,
+        axisSidePolicy: { mode: 'preserve', continuitySign },
+        shotSize: 'medium-close',
+        intensity: 0.55,
+        lensMm: 50,
+        outputAspect: 16 / 9,
+      });
+      const best = result.candidates[0];
+
+      expect(best.diagnostics.foregroundEdge).toBe(expectedEdge);
+      expect(Math.sign(best.diagnostics.subjectEyeNdc.x)).toBe(
+        expectedSubjectSign,
+      );
+      expect(Math.abs(best.diagnostics.subjectEyeNdc.x)).toBeGreaterThanOrEqual(
+        0.15,
+      );
+      expect(Math.abs(best.diagnostics.subjectEyeNdc.x)).toBeLessThanOrEqual(
+        0.45,
+      );
+      expect(Math.sign(best.diagnostics.subjectFaceNdc.x)).toBe(
+        expectedSubjectSign,
+      );
+      expect(
+        Math.abs(best.diagnostics.subjectFaceNdc.x),
+      ).toBeGreaterThanOrEqual(0.15);
+      expect(Math.abs(best.diagnostics.subjectFaceNdc.x)).toBeLessThanOrEqual(
+        0.45,
+      );
+      expect(best.diagnostics.subjectCounterPositioned).toBe(true);
+      expect(best.diagnostics.subjectHorizontalCenterOffset).toBeCloseTo(
+        Math.abs(best.diagnostics.subjectEyeNdc.x),
+      );
+      expect(
+        best.diagnostics.componentScores.horizontalBalance,
+      ).toBeGreaterThan(0.75);
+      expect(best.diagnostics.rejectionReasons).not.toContain(
+        'same-side-imbalance',
+      );
+    },
+  );
+
   it('solves an athletic speaker over a heavy listener right shoulder', () => {
     const pair = dialoguePair('athletic', 'heavy');
 
