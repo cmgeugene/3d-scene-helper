@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 import { createCinematicSubjectProfile } from '../src/editor/cinematography/cinematicSubjectProfile';
+import { solveDialogueOtsCoveragePair } from '../src/editor/cinematography/dialogueOtsCoveragePair';
 import { solveDialogueOts } from '../src/editor/cinematography/dialogueOtsSolver';
 import { computeCinematicProjectionMetrics } from '../src/editor/cinematography/projectionMetrics';
 import {
@@ -141,6 +142,72 @@ function canonicalFixture() {
   };
 }
 
+function coveragePairFixture() {
+  const document = createStarterSceneDocument({
+    documentId: 'dialogue-canonical-role-swapped-coverage-pair',
+    floorId: 'dialogue-coverage-floor',
+    mannequinId: 'unused-coverage-pair',
+  });
+  const identityA = createSceneObject('coverage-character-a', {
+    kind: 'mannequin',
+    name: 'Coverage character A — coral',
+    position: { x: 0.2, z: -1 },
+  });
+  identityA.transform.rotationDeg.y = 180;
+  identityA.color = '#d65345';
+  const identityB = createSceneObject('coverage-character-b', {
+    kind: 'mannequin',
+    name: 'Coverage character B — teal',
+    position: { x: -0.2, z: 1 },
+  });
+  identityB.color = '#287c8e';
+  const profileA = createCinematicSubjectProfile(identityA);
+  const profileB = createCinematicSubjectProfile(identityB);
+  if (profileA === null || profileB === null) {
+    throw new Error('coverage-pair dialogue profiles are required');
+  }
+  const result = solveDialogueOtsCoveragePair({
+    identityA: { id: identityA.id, profile: profileA },
+    identityB: { id: identityB.id, profile: profileB },
+    canonicalAxisSide: 'negative',
+    shotSize: 'medium-close',
+    intensity: 0.55,
+    lensMm: 50,
+    outputAspect: 16 / 9,
+  });
+  const shotA = result.shotA;
+  const reverseB = result.reverseB;
+  const canonicalAxis = result.canonicalAxis;
+  if (
+    !result.accepted ||
+    shotA === null ||
+    reverseB === null ||
+    canonicalAxis === null
+  ) {
+    throw new Error(
+      `accepted role-swapped coverage pair required: ${JSON.stringify(result.diagnostics)}`,
+    );
+  }
+  document.objects = [document.objects[0], identityA, identityB];
+  document.output = {
+    aspectRatioId: '16:9',
+    width: 1280,
+    height: 720,
+    mode: 'clean',
+  };
+  return {
+    baseDocument: document,
+    identityA,
+    identityB,
+    profileA,
+    profileB,
+    result,
+    shotA,
+    reverseB,
+    canonicalAxis,
+  };
+}
+
 async function openFixture(page: Page, document: SceneDocument) {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
@@ -235,6 +302,49 @@ function changedBounds(
   return { count, minX, maxX, minY, maxY };
 }
 
+function changedMeanRgb(
+  visible: Buffer,
+  hidden: Buffer,
+  region: { x: number; y: number; width: number; height: number },
+) {
+  const first = PNG.sync.read(visible);
+  const second = PNG.sync.read(hidden);
+  expect([second.width, second.height]).toEqual([first.width, first.height]);
+  const minX = Math.max(0, Math.floor(region.x));
+  const minY = Math.max(0, Math.floor(region.y));
+  const maxX = Math.min(first.width, Math.ceil(region.x + region.width));
+  const maxY = Math.min(first.height, Math.ceil(region.y + region.height));
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  let count = 0;
+  for (let y = minY; y < maxY; y += 1) {
+    for (let x = minX; x < maxX; x += 1) {
+      const index = (y * first.width + x) * 4;
+      const delta =
+        Math.abs(first.data[index] - second.data[index]) +
+        Math.abs(first.data[index + 1] - second.data[index + 1]) +
+        Math.abs(first.data[index + 2] - second.data[index + 2]);
+      if (delta <= 30) continue;
+      red += first.data[index];
+      green += first.data[index + 1];
+      blue += first.data[index + 2];
+      count += 1;
+    }
+  }
+  if (count === 0) return { count, red: 0, green: 0, blue: 0 };
+  return {
+    count,
+    red: roundPixel(red / count),
+    green: roundPixel(green / count),
+    blue: roundPixel(blue / count),
+  };
+}
+
+function roundPixel(value: number) {
+  return Math.round(value * 1000) / 1000;
+}
+
 function changedMask(
   visible: Buffer,
   hidden: Buffer,
@@ -268,6 +378,7 @@ function changedMask(
 function foregroundBandsConnect(
   changed: ReturnType<typeof changedMask>,
   frame: { x: number; y: number; width: number; height: number },
+  edge: 'left' | 'right',
 ) {
   const minX = Math.floor(frame.x);
   const maxX = Math.ceil(frame.x + frame.width);
@@ -276,12 +387,16 @@ function foregroundBandsConnect(
   const upperMaxY = frame.y + frame.height * 0.55;
   const lowerMinY = frame.y + frame.height * 0.42;
   const lowerMaxY = frame.y + frame.height * 0.82;
-  const edgeMinX = frame.x + frame.width * 0.82;
-  const inwardMaxX = frame.x + frame.width * 0.82;
+  const edgeBoundary =
+    edge === 'right'
+      ? frame.x + frame.width * 0.82
+      : frame.x + frame.width * 0.18;
   const queue: number[] = [];
   const visited = new Uint8Array(changed.mask.length);
   for (let y = minY; y <= upperMaxY; y += 1) {
-    for (let x = Math.floor(edgeMinX); x < maxX; x += 1) {
+    const startX = edge === 'right' ? Math.floor(edgeBoundary) : minX;
+    const endX = edge === 'right' ? maxX : Math.ceil(edgeBoundary);
+    for (let x = startX; x < endX; x += 1) {
       const index = y * changed.width + x;
       if (changed.mask[index] === 0) continue;
       visited[index] = 1;
@@ -292,7 +407,9 @@ function foregroundBandsConnect(
     const index = queue[cursor];
     const x = index % changed.width;
     const y = Math.floor(index / changed.width);
-    if (y >= lowerMinY && y <= lowerMaxY && x <= inwardMaxX) return true;
+    const reachedInward =
+      edge === 'right' ? x <= edgeBoundary : x >= edgeBoundary;
+    if (y >= lowerMinY && y <= lowerMaxY && reachedInward) return true;
     for (let dy = -2; dy <= 2; dy += 1) {
       for (let dx = -2; dx <= 2; dx += 1) {
         if (dx === 0 && dy === 0) continue;
@@ -567,7 +684,7 @@ test.describe
     expect(lowerWidth).toBeGreaterThanOrEqual(0.18);
     expect(lowerWidth).toBeLessThanOrEqual(0.48);
     expect(bottomWidth).toBeLessThanOrEqual(0.48);
-    expect(foregroundBandsConnect(foreground, frameRegion)).toBe(true);
+    expect(foregroundBandsConnect(foreground, frameRegion, 'right')).toBe(true);
 
     await setVisibility(page, current.subject.id, false);
     const subjectHidden = await canvas.screenshot();
@@ -659,5 +776,290 @@ test.describe
         upperHeadNeckWidth: upperWidth,
       }),
     );
+  });
+
+  test('role-swapped canonical coverage pair renders both identities on one axis side with corresponding pixels', async ({
+    page,
+  }, testInfo) => {
+    const current = coveragePairFixture();
+    const legs = [
+      {
+        evidenceName:
+          'S15-canonical-ots-coverage-shot-a-subject-A-foreground-B',
+        leg: current.shotA,
+        subject: current.identityA,
+        subjectProfile: current.profileA,
+        foreground: current.identityB,
+        foregroundProfile: current.profileB,
+      },
+      {
+        evidenceName:
+          'S15-canonical-ots-coverage-reverse-b-subject-B-foreground-A',
+        leg: current.reverseB,
+        subject: current.identityB,
+        subjectProfile: current.profileB,
+        foreground: current.identityA,
+        foregroundProfile: current.profileA,
+      },
+    ] as const;
+    const rendered: {
+      edge: 'left' | 'right';
+      faceCenterX: number;
+      frameCenterX: number;
+      foregroundColor: ReturnType<typeof changedMeanRgb>;
+      subjectColor: ReturnType<typeof changedMeanRgb>;
+    }[] = [];
+
+    for (const item of legs) {
+      const document = structuredClone(current.baseDocument);
+      document.outputCamera = item.leg.candidate.camera;
+      const foregroundMetrics = computeCinematicProjectionMetrics(
+        item.foregroundProfile,
+        item.leg.candidate.camera,
+        16 / 9,
+      );
+      const subjectMetrics = computeCinematicProjectionMetrics(
+        item.subjectProfile,
+        item.leg.candidate.camera,
+        16 / 9,
+      );
+      const { canvas, frame } = await openFixture(page, document);
+      const canvasBox = await canvas.boundingBox();
+      const frameBox = await frame.boundingBox();
+      if (canvasBox === null || frameBox === null) {
+        throw new Error(
+          'coverage-pair Canvas/output frame bounds are unavailable.',
+        );
+      }
+      const frameRegion = {
+        x: frameBox.x - canvasBox.x,
+        y: frameBox.y - canvasBox.y,
+        width: frameBox.width,
+        height: frameBox.height,
+      };
+      const edge = item.leg.candidate.diagnostics.foregroundEdge;
+      if (edge === null)
+        throw new Error('canonical foreground edge is required');
+      const visible = await canvas.screenshot();
+      await page.screenshot({
+        path: testInfo.outputPath(
+          `${item.evidenceName}-output-camera-1280x720.png`,
+        ),
+      });
+
+      await setVisibility(page, item.foreground.id, false);
+      const foregroundHidden = await canvas.screenshot();
+      await setVisibility(page, item.foreground.id, true);
+      const foregroundMask = changedMask(
+        visible,
+        foregroundHidden,
+        frameRegion,
+      );
+      const upperRegion = {
+        ...frameRegion,
+        height: frameRegion.height * 0.55,
+      };
+      const lowerRegion = {
+        x: frameRegion.x,
+        y: frameRegion.y + frameRegion.height * 0.42,
+        width: frameRegion.width,
+        height: frameRegion.height * 0.4,
+      };
+      const bottomRegion = {
+        x: frameRegion.x,
+        y: frameRegion.y + frameRegion.height * 0.72,
+        width: frameRegion.width,
+        height: frameRegion.height * 0.28,
+      };
+      const upper = changedBounds(visible, foregroundHidden, upperRegion);
+      const lower = changedBounds(visible, foregroundHidden, lowerRegion);
+      const bottom = changedBounds(visible, foregroundHidden, bottomRegion);
+      const upperWidth = (upper.maxX - upper.minX + 1) / frameRegion.width;
+      const lowerWidth = (lower.maxX - lower.minX + 1) / frameRegion.width;
+      const bottomWidth = (bottom.maxX - bottom.minX + 1) / frameRegion.width;
+      const expectedEdgeX =
+        edge === 'right' ? frameRegion.x + frameRegion.width : frameRegion.x;
+      const edgeDistance =
+        edge === 'right'
+          ? Math.abs(expectedEdgeX - upper.maxX)
+          : Math.abs(upper.minX - expectedEdgeX);
+
+      expect(item.leg.foregroundIdentityId).toBe(item.foreground.id);
+      expect(item.leg.subjectIdentityId).toBe(item.subject.id);
+      expect(
+        item.leg.foregroundTopology.neckEdgeCoordinate,
+      ).toBeGreaterThanOrEqual(
+        current.result.diagnostics.tolerances.neckEdgeCoordinateMin,
+      );
+      expect(
+        item.leg.foregroundTopology.neckEdgeCoordinate,
+      ).toBeLessThanOrEqual(
+        current.result.diagnostics.tolerances.neckEdgeCoordinateMax,
+      );
+      expect(
+        item.leg.foregroundTopology.shoulderInwardReach,
+      ).toBeGreaterThanOrEqual(
+        current.result.diagnostics.tolerances.shoulderInwardReachMin,
+      );
+      expect(
+        item.leg.foregroundTopology.shoulderRidgeNdcY,
+      ).toBeGreaterThanOrEqual(
+        current.result.diagnostics.tolerances.shoulderRidgeNdcYMin,
+      );
+      expect(foregroundMask.count).toBeGreaterThan(3_000);
+      expect(upper.count).toBeGreaterThan(1_000);
+      expect(lower.count).toBeGreaterThan(1_000);
+      expect(edgeDistance).toBeLessThan(12);
+      expect(upperWidth).toBeGreaterThanOrEqual(0.1);
+      expect(upperWidth).toBeLessThanOrEqual(0.3);
+      expect(lowerWidth).toBeGreaterThanOrEqual(0.28);
+      expect(lowerWidth - upperWidth).toBeGreaterThanOrEqual(0.08);
+      expect(lowerWidth).toBeLessThanOrEqual(0.48);
+      expect(bottomWidth).toBeLessThanOrEqual(0.48);
+      expect(foregroundBandsConnect(foregroundMask, frameRegion, edge)).toBe(
+        true,
+      );
+
+      await setVisibility(page, item.subject.id, false);
+      const subjectHidden = await canvas.screenshot();
+      await setVisibility(page, item.subject.id, true);
+      const faceTop = toCanvasPoint(
+        subjectMetrics.landmarks.headTop.ndc,
+        canvasBox,
+        frameBox,
+      );
+      const faceBottom = toCanvasPoint(
+        subjectMetrics.landmarks.neck.ndc,
+        canvasBox,
+        frameBox,
+      );
+      const faceLeft = toCanvasPoint(
+        subjectMetrics.landmarks.headLeft.ndc,
+        canvasBox,
+        frameBox,
+      );
+      const faceRight = toCanvasPoint(
+        subjectMetrics.landmarks.headRight.ndc,
+        canvasBox,
+        frameBox,
+      );
+      const faceRegion = {
+        x: Math.min(faceLeft.x, faceRight.x) - 10,
+        y: Math.min(faceTop.y, faceBottom.y) - 10,
+        width: Math.abs(faceRight.x - faceLeft.x) + 20,
+        height: Math.abs(faceBottom.y - faceTop.y) + 20,
+      };
+      const face = changedBounds(visible, subjectHidden, faceRegion);
+      const ridge = toCanvasPoint(
+        foregroundMetrics.landmarks[
+          item.leg.shoulderSide === 'left' ? 'leftShoulder' : 'rightShoulder'
+        ].ndc,
+        canvasBox,
+        frameBox,
+      );
+      const frameCenterX = frameRegion.x + frameRegion.width / 2;
+      const faceCenterX = (face.minX + face.maxX) / 2;
+      expect(face.count).toBeGreaterThan(180);
+      expect(face.maxY).toBeLessThan(ridge.y - 20);
+      if (edge === 'right') {
+        expect(face.maxX).toBeLessThan(lower.minX + frameRegion.width * 0.08);
+      } else {
+        expect(face.minX).toBeGreaterThan(
+          lower.maxX - frameRegion.width * 0.08,
+        );
+      }
+      expect(item.leg.candidate.diagnostics).toMatchObject({
+        accepted: true,
+        canonicalShoulderWindow: true,
+        foregroundHeadNeckEdgeAligned: true,
+        foregroundRearThreeQuarter: true,
+        foregroundTorsoWall: false,
+        nearPlaneSafe: true,
+        subjectCounterPositioned: true,
+      });
+
+      const foregroundColor = changedMeanRgb(
+        visible,
+        foregroundHidden,
+        upperRegion,
+      );
+      const subjectColor = changedMeanRgb(visible, subjectHidden, faceRegion);
+      expect(foregroundColor.count).toBeGreaterThan(1_000);
+      expect(subjectColor.count).toBeGreaterThan(180);
+      rendered.push({
+        edge,
+        faceCenterX,
+        frameCenterX,
+        foregroundColor,
+        subjectColor,
+      });
+
+      await page.getByRole('button', { name: 'PNG 내보내기' }).click();
+      const dialog = page.getByRole('dialog', { name: 'PNG 내보내기' });
+      await dialog.getByLabel('해상도').selectOption('custom');
+      await dialog.getByLabel('사용자 지정 너비').fill('1280');
+      await dialog.getByLabel('사용자 지정 높이').fill('720');
+      await dialog.getByLabel('파일 이름').fill(`${item.evidenceName}-clean`);
+      const downloadPromise = page.waitForEvent('download');
+      await dialog.getByRole('button', { name: 'PNG 내보내기' }).click();
+      const download = await downloadPromise;
+      const downloadPath = await download.path();
+      if (downloadPath === null)
+        throw new Error('coverage-pair clean PNG download is missing');
+      const cleanPng = await readFile(downloadPath);
+      const decoded = PNG.sync.read(cleanPng);
+      expect([decoded.width, decoded.height]).toEqual([1280, 720]);
+      await writeFile(
+        testInfo.outputPath(`${item.evidenceName}-clean-1280x720.png`),
+        cleanPng,
+      );
+      console.info(
+        'S15_CANONICAL_OTS_COVERAGE_LEG_EVIDENCE',
+        JSON.stringify({
+          label: item.leg.label,
+          subjectIdentityId: item.leg.subjectIdentityId,
+          foregroundIdentityId: item.leg.foregroundIdentityId,
+          canonicalAxisHalfPlaneSign: item.leg.canonicalAxisHalfPlaneSign,
+          canonicalAxisSignedValue: item.leg.canonicalAxisSignedValue,
+          foregroundTopology: item.leg.foregroundTopology,
+          edge,
+          faceCenterOffset: (faceCenterX - frameCenterX) / frameRegion.width,
+          faceAboveRidgePixels: ridge.y - face.maxY,
+          foregroundPixels: foregroundMask.count,
+          upperHeadNeckWidth: upperWidth,
+          lowerShoulderWidth: lowerWidth,
+          bottomWidth,
+          foregroundColor,
+          subjectColor,
+        }),
+      );
+    }
+
+    expect(rendered).toHaveLength(2);
+    expect(rendered[0].edge).not.toBe(rendered[1].edge);
+    expect(Math.sign(rendered[0].faceCenterX - rendered[0].frameCenterX)).toBe(
+      -Math.sign(rendered[1].faceCenterX - rendered[1].frameCenterX),
+    );
+    const subjectColorDistance = Math.hypot(
+      rendered[0].subjectColor.red - rendered[1].subjectColor.red,
+      rendered[0].subjectColor.green - rendered[1].subjectColor.green,
+      rendered[0].subjectColor.blue - rendered[1].subjectColor.blue,
+    );
+    const foregroundColorDistance = Math.hypot(
+      rendered[0].foregroundColor.red - rendered[1].foregroundColor.red,
+      rendered[0].foregroundColor.green - rendered[1].foregroundColor.green,
+      rendered[0].foregroundColor.blue - rendered[1].foregroundColor.blue,
+    );
+    expect(subjectColorDistance).toBeGreaterThan(20);
+    expect(foregroundColorDistance).toBeGreaterThan(20);
+    expect(current.shotA.canonicalAxisHalfPlaneSign).toBe(-1);
+    expect(current.reverseB.canonicalAxisHalfPlaneSign).toBe(-1);
+    expect(current.result.diagnostics.continuity).toMatchObject({
+      lensMatched: true,
+      shotSizeMatched: true,
+      screenDirectionsOpposed: true,
+      targetFacesCounterPositioned: true,
+      nearShoulderEdgeReversed: true,
+    });
   });
 });
