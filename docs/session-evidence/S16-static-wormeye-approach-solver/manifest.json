@@ -1,0 +1,78 @@
+{
+  "phase": "S16-static-wormeye-approach-solver",
+  "generatedAt": "2026-08-10T17:22:00-07:00",
+  "runtime": {
+    "engine": "actual WebGL through Playwright Chromium",
+    "outputResolution": [1280, 720],
+    "candidateId": "static-wormeye-approach-072",
+    "score": 83.733035117,
+    "camera": {
+      "position": { "x": 0, "y": 0.08, "z": 0 },
+      "target": { "x": 0.047874036, "y": 0.821306734, "z": 2.105683731 },
+      "focalLengthMm": 24,
+      "rollDeg": 0,
+      "motion": "none"
+    },
+    "subjectStaging": {
+      "yawDeltaDeg": -32,
+      "translationDelta": {
+        "x": -0.35,
+        "y": -0.168693266,
+        "z": 1.2999999999999998
+      },
+      "groundingDeltaY": -0.168693266
+    },
+    "diagnostics": {
+      "approachAlignment": 1,
+      "cameraHeightM": 0.08,
+      "cameraHeightAboveFloorM": 0.03,
+      "upwardPitchDeg": 19.389999496,
+      "groundRoom": 0.071182601,
+      "headroom": 0.204879676,
+      "leadingSide": "right",
+      "leadingKneePelvisSeparation": 0.205159908,
+      "leadingFootPelvisSeparation": 0.437931549,
+      "pelvisDominanceRatio": 0.578717725,
+      "opposingLimbPhase": true,
+      "handsBelowHead": true,
+      "supportContactErrorM": 0,
+      "supportFootWorldY": 0.056,
+      "minimumFootClearanceM": 0.006,
+      "freeFootClearanceM": 0.260296788,
+      "occupancy": {
+        "width": 0.10745156220200358,
+        "height": 0.7239377227631534
+      }
+    },
+    "pixelIsolation": {
+      "subjectPixelCount": 21827,
+      "subjectPixelHeightRatio": 0.7485380116959064,
+      "floorBottomPixelCount": 25519,
+      "selectedVsDeselectedCleanMismatchRatio": 0,
+      "cleanVsReferenceMismatchMinimum": 0.001
+    }
+  },
+  "evidence": [
+    {
+      "path": "S16-static-wormeye-approach-accepted-clean-1280x720.png",
+      "sha256": "a1e121365b480ec3a32d4bc75354c1002afa69c0bf1da02b90cdc41ad21cc5a2",
+      "role": "accepted actual clean 1280x720 PNG"
+    },
+    {
+      "path": "S16-static-wormeye-approach-accepted-output-camera-1280x720.png",
+      "sha256": "84453f93c2940c159847968a4cc5d69289355eb23ecf8b3414eba19e7502fdb7",
+      "role": "accepted actual WebGL OutputCamera/editor screenshot"
+    },
+    {
+      "path": "S16-static-wormeye-approach-rejected-standing-output-camera-1280x720.png",
+      "sha256": "a7c35f52542eb630b93147daf452afcf6e7ce44248a360a98e289938f1894a62",
+      "role": "honest rejected standing/generic-low-angle negative control"
+    }
+  ],
+  "visualTargetOnly": {
+    "path": "/Users/js/Documents/3d-scene-helper/artifacts/wormeye-front-running-24mm-1280x720.png",
+    "sha256": "f3a85cafdf779188ebc6b02c47b91b3cb534e98cc2abade12747324fc8c5c944",
+    "solverEvidence": false,
+    "copied": false
+  }
+}
