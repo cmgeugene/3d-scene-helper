@@ -166,6 +166,42 @@ describe('computeCinematicProjectionMetrics', () => {
     expect(metrics.clippedLandmarks).toEqual(['headTop']);
   });
 
+  it('returns mixed safe, unsafe, and cropped landmarks as measurements without applying shot policy', () => {
+    const center = worldAtNdc(0, 0);
+    const unsafeFace = worldAtNdc(0.95, 0.2);
+    const croppedHead = worldAtNdc(-1.1, 0.4);
+    const safeFoot = worldAtNdc(0.7, -0.75);
+
+    const metrics = computeCinematicProjectionMetrics(
+      syntheticProfile(center, {
+        faceCenter: unsafeFace,
+        headTop: croppedHead,
+        leftFoot: safeFoot,
+      }),
+      CAMERA,
+      1,
+    );
+
+    expect(metrics.landmarks.faceCenter).toMatchObject({
+      inFront: true,
+      insideFrame: true,
+      insideActionSafe: false,
+    });
+    expect(metrics.landmarks.headTop).toMatchObject({
+      inFront: true,
+      insideFrame: false,
+      insideActionSafe: false,
+    });
+    expect(metrics.landmarks.leftFoot).toMatchObject({
+      inFront: true,
+      insideFrame: true,
+      insideActionSafe: true,
+    });
+    expect(metrics.clippedLandmarks).toEqual(['headTop']);
+    expect(metrics).not.toHaveProperty('passed');
+    expect(metrics).not.toHaveProperty('requiredLandmarks');
+  });
+
   it('derives normalized headroom from projected headTop rather than world Y', () => {
     const center = worldAtNdc(0, 0);
     const projectedHeadTop = worldAtNdc(0, 0.6);

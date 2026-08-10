@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 import { createCinematicSubjectProfile } from '../src/editor/cinematography/cinematicSubjectProfile';
+import { computeCinematicProjectionMetrics } from '../src/editor/cinematography/projectionMetrics';
 import type { SceneObject } from '../src/editor/persistence/sceneSchema';
 
 async function openMannequin(page: Page) {
@@ -28,6 +29,32 @@ function changedPixelCount(before: Buffer, after: Buffer) {
       Math.abs(first.data[index + 1] - second.data[index + 1]) +
       Math.abs(first.data[index + 2] - second.data[index + 2]);
     if (delta > 24) changed += 1;
+  }
+  return changed;
+}
+
+function changedPixelCountInRect(
+  before: Buffer,
+  after: Buffer,
+  rect: { x: number; y: number; width: number; height: number },
+) {
+  const first = PNG.sync.read(before);
+  const second = PNG.sync.read(after);
+  expect([second.width, second.height]).toEqual([first.width, first.height]);
+  const minX = Math.max(0, Math.floor(rect.x));
+  const minY = Math.max(0, Math.floor(rect.y));
+  const maxX = Math.min(first.width, Math.ceil(rect.x + rect.width));
+  const maxY = Math.min(first.height, Math.ceil(rect.y + rect.height));
+  let changed = 0;
+  for (let y = minY; y < maxY; y += 1) {
+    for (let x = minX; x < maxX; x += 1) {
+      const index = (y * first.width + x) * 4;
+      const delta =
+        Math.abs(first.data[index] - second.data[index]) +
+        Math.abs(first.data[index + 1] - second.data[index + 1]) +
+        Math.abs(first.data[index + 2] - second.data[index + 2]);
+      if (delta > 24) changed += 1;
+    }
   }
   return changed;
 }
@@ -147,10 +174,11 @@ test('articulated mannequin hierarchy applies pose controls to actual WebGL pixe
   expect(changedPixelCount(standing, tPose)).toBeGreaterThan(800);
 });
 
-test('cinematic subject profile matches actual rotated WebGL mannequin pivots', async ({
+test('full-body fixture uses OutputCamera evidence while preserving actual rotated WebGL pivot parity', async ({
   page,
 }, testInfo) => {
   const { canvas, runtimeCanvas } = await openMannequin(page);
+  await page.getByRole('combobox', { name: '화면비' }).selectOption('16:9');
   await page.getByRole('button', { name: '장면', exact: true }).click();
   await page.evaluate(() => {
     const store = globalThis.__I2V_EDITOR_STORE__;
@@ -180,19 +208,39 @@ test('cinematic subject profile matches actual rotated WebGL mannequin pivots', 
     'data-mannequin-cinematic-landmarks',
     /faceCenter/,
   );
+  await page.getByRole('button', { name: '카메라', exact: true }).click();
+  await page
+    .getByRole('group', { name: '샷 프리셋' })
+    .getByRole('button', { name: '전신' })
+    .click();
+  await expect(page.locator('.status-bar')).toContainText(
+    '전신 샷을 적용했습니다.',
+  );
 
   const runtime = JSON.parse(
     (await runtimeCanvas.getAttribute('data-mannequin-cinematic-landmarks')) ??
       '{}',
   ) as Record<string, { x: number; y: number; z: number }>;
-  const object = await page.evaluate(() => {
+  const fixture = await page.evaluate(() => {
     const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as {
-      document: { objects: SceneObject[] };
+      document: {
+        objects: SceneObject[];
+        outputCamera: {
+          position: { x: number; y: number; z: number };
+          target: { x: number; y: number; z: number };
+          focalLengthMm: number;
+          rollDeg: number;
+        };
+      };
     };
-    return structuredClone(
-      state.document.objects.find(({ kind }) => kind === 'mannequin'),
-    );
+    return {
+      object: structuredClone(
+        state.document.objects.find(({ kind }) => kind === 'mannequin'),
+      ),
+      outputCamera: structuredClone(state.document.outputCamera),
+    };
   });
+  const { object } = fixture;
   if (object === undefined) throw new Error('마네킹이 없습니다.');
   const pure = createCinematicSubjectProfile(object);
   if (pure === null) throw new Error('cinematic subject profile이 없습니다.');
@@ -209,11 +257,198 @@ test('cinematic subject profile matches actual rotated WebGL mannequin pivots', 
     expect(runtime[key].z, `${key}.z`).toBeCloseTo(pure.landmarks[key].z, 6);
   }
 
-  const evidencePath = testInfo.outputPath(
-    'cinematic-subject-runtime-parity.png',
+  const fixtureMetrics = computeCinematicProjectionMetrics(
+    pure,
+    fixture.outputCamera,
+    16 / 9,
   );
-  await canvas.screenshot({ path: evidencePath });
-  await testInfo.attach('cinematic-subject-runtime-parity', {
+  for (const key of ['headTop', 'leftFoot', 'rightFoot'] as const) {
+    expect(
+      fixtureMetrics.landmarks[key].insideActionSafe,
+      `full-body fixture ${key} must be action-safe`,
+    ).toBe(true);
+  }
+  const lowestFootY = Math.min(
+    fixtureMetrics.landmarks.leftFoot.ndc.y,
+    fixtureMetrics.landmarks.rightFoot.ndc.y,
+  );
+  const headToFootOccupancy =
+    (fixtureMetrics.landmarks.headTop.ndc.y - lowestFootY) / 2;
+  expect(headToFootOccupancy).toBeGreaterThan(0.55);
+
+  const frame = page.locator('[data-camera-frame]');
+  await expect(frame).toHaveAttribute('data-output-aspect', String(16 / 9));
+  const gateStyle = await frame.evaluate((element) => {
+    const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+    return {
+      boxShadow: style?.boxShadow ?? 'none',
+      pointerEvents: style?.pointerEvents ?? '',
+    };
+  });
+  expect(gateStyle.boxShadow).not.toBe('none');
+  expect(gateStyle.pointerEvents).toBe('none');
+  const runtimeCamera = JSON.parse(
+    (await runtimeCanvas.getAttribute('data-runtime-camera')) ?? '{}',
+  ) as { outputAspect?: number };
+  expect(runtimeCamera.outputAspect).toBeCloseTo(16 / 9, 5);
+
+  const canvasBox = await runtimeCanvas.boundingBox();
+  const frameBox = await frame.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  expect(frameBox).not.toBeNull();
+  if (canvasBox === null || frameBox === null) {
+    throw new Error('Canvas/output gate bounds가 없습니다.');
+  }
+  const toCanvasPoint = ({ x, y }: { x: number; y: number }) => ({
+    x: frameBox.x - canvasBox.x + ((x + 1) / 2) * frameBox.width,
+    y: frameBox.y - canvasBox.y + ((1 - y) / 2) * frameBox.height,
+  });
+  const projected = {
+    headTop: toCanvasPoint(fixtureMetrics.landmarks.headTop.ndc),
+    leftKnee: toCanvasPoint(fixtureMetrics.landmarks.leftKnee.ndc),
+    rightKnee: toCanvasPoint(fixtureMetrics.landmarks.rightKnee.ndc),
+    leftFoot: toCanvasPoint(fixtureMetrics.landmarks.leftFoot.ndc),
+    rightFoot: toCanvasPoint(fixtureMetrics.landmarks.rightFoot.ndc),
+  };
+  expect(
+    Math.hypot(
+      projected.leftFoot.x - projected.rightFoot.x,
+      projected.leftFoot.y - projected.rightFoot.y,
+    ),
+  ).toBeGreaterThan(20);
+
+  await page.keyboard.press('Escape');
+  await expect(
+    page.getByRole('button', { name: 'Mannequin', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'false');
+  const visibleFixture = await canvas.screenshot();
+  await page.evaluate((id) => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState();
+    if (state === undefined) throw new Error('E2E editor store가 없습니다.');
+    state.setObjectVisibility(id, false);
+  }, object.id);
+  await page.evaluate(() => {
+    const browser = globalThis as unknown as {
+      requestAnimationFrame: (callback: () => void) => number;
+    };
+    return new Promise<void>((resolve) =>
+      browser.requestAnimationFrame(() =>
+        browser.requestAnimationFrame(() => resolve()),
+      ),
+    );
+  });
+  const hiddenFixture = await canvas.screenshot();
+
+  for (const side of ['left', 'right'] as const) {
+    const foot = projected[`${side}Foot`];
+    const knee = projected[`${side}Knee`];
+    expect(
+      changedPixelCountInRect(visibleFixture, hiddenFixture, {
+        x: foot.x - 24,
+        y: foot.y - 24,
+        width: 48,
+        height: 48,
+      }),
+      `${side} foot must have fixture pixels distinct from the hidden baseline`,
+    ).toBeGreaterThan(30);
+    expect(
+      changedPixelCountInRect(visibleFixture, hiddenFixture, {
+        x: Math.min(knee.x, foot.x) - 20,
+        y: Math.min(knee.y, foot.y) - 20,
+        width: Math.abs(knee.x - foot.x) + 40,
+        height: Math.abs(knee.y - foot.y) + 40,
+      }),
+      `${side} knee-to-foot corridor must have readable leg pixels`,
+    ).toBeGreaterThan(150);
+  }
+
+  await page.evaluate((id) => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState();
+    if (state === undefined) throw new Error('E2E editor store가 없습니다.');
+    state.setObjectVisibility(id, true);
+  }, object.id);
+  await page.getByRole('checkbox', { name: '액션 안전 영역' }).check();
+  await expect(page.getByTestId('action-safe')).toBeVisible();
+  await page.evaluate(
+    ({ points, occupancy }) => {
+      type FixtureElement = {
+        dataset: Record<string, string>;
+        style: Record<string, string>;
+        textContent: string | null;
+        append: (...nodes: FixtureElement[]) => void;
+      };
+      const browser = globalThis as unknown as {
+        document: {
+          querySelector: (selector: string) => FixtureElement | null;
+          createElement: (tagName: string) => FixtureElement;
+        };
+      };
+      const frameElement = browser.document.querySelector(
+        '[data-camera-frame]',
+      );
+      if (frameElement === null) throw new Error('output gate가 없습니다.');
+      const overlay = browser.document.createElement('div');
+      overlay.dataset.cinematicFullBodyFixture = 'true';
+      Object.assign(overlay.style, {
+        position: 'absolute',
+        inset: '0',
+        pointerEvents: 'none',
+        zIndex: '4',
+      });
+      const title = browser.document.createElement('div');
+      title.textContent = `FULL-BODY FIXTURE · OUTPUT CAMERA · OCCUPANCY ${occupancy.toFixed(3)}`;
+      Object.assign(title.style, {
+        position: 'absolute',
+        left: '8px',
+        top: '8px',
+        color: '#ffffff',
+        background: 'rgb(0 0 0 / 78%)',
+        border: '1px solid #57e3ff',
+        padding: '4px 7px',
+        font: '700 10px/1.2 monospace',
+      });
+      overlay.append(title);
+      for (const [name, point] of Object.entries(points)) {
+        const marker = browser.document.createElement('div');
+        marker.textContent = name;
+        Object.assign(marker.style, {
+          position: 'absolute',
+          left: `${((point.x + 1) / 2) * 100}%`,
+          top: `${((1 - point.y) / 2) * 100}%`,
+          transform: 'translate(-50%, -50%)',
+          width: '18px',
+          height: '18px',
+          border: '2px solid #57e3ff',
+          borderRadius: '50%',
+          boxShadow: '0 0 0 2px rgb(0 0 0 / 75%)',
+          color: '#ffffff',
+          font: '700 9px/1 monospace',
+          textIndent: '22px',
+          whiteSpace: 'nowrap',
+        });
+        overlay.append(marker);
+      }
+      frameElement.append(overlay);
+    },
+    {
+      occupancy: headToFootOccupancy,
+      points: {
+        'HEAD TOP': fixtureMetrics.landmarks.headTop.ndc,
+        'LEFT FOOT': fixtureMetrics.landmarks.leftFoot.ndc,
+        'RIGHT FOOT': fixtureMetrics.landmarks.rightFoot.ndc,
+      },
+    },
+  );
+  await expect(
+    page.locator('[data-cinematic-full-body-fixture="true"]'),
+  ).toBeVisible();
+
+  const evidencePath = testInfo.outputPath(
+    'cinematic-subject-full-body-fixture-output-camera.png',
+  );
+  const evidence = PNG.sync.read(await page.screenshot({ path: evidencePath }));
+  expect([evidence.width, evidence.height]).toEqual([1280, 720]);
+  await testInfo.attach('cinematic-subject-full-body-fixture-output-camera', {
     path: evidencePath,
     contentType: 'image/png',
   });
