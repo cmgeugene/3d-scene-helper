@@ -52,10 +52,20 @@ function Primitive({
   switch (kind) {
     case 'cube':
       return (
-        <mesh castShadow={castShadow} receiveShadow={receiveShadow}>
-          <boxGeometry args={[dimensions.x, dimensions.y, dimensions.z]} />
-          {material}
-        </mesh>
+        <>
+          <mesh castShadow={castShadow} receiveShadow={receiveShadow}>
+            <boxGeometry args={[dimensions.x, dimensions.y, dimensions.z]} />
+            {material}
+          </mesh>
+          <SurfaceGrid
+            color={object.color}
+            depth={dimensions.z}
+            kind="cube"
+            parentScale={object.transform.scale}
+            positionY={dimensions.y / 2 + 0.002}
+            width={dimensions.x}
+          />
+        </>
       );
     case 'floor':
       return (
@@ -100,19 +110,29 @@ function Primitive({
       );
     case 'plane':
       return (
-        <mesh
-          castShadow={castShadow}
-          receiveShadow={receiveShadow}
-          rotation={[-Math.PI / 2, 0, 0]}
-        >
-          <planeGeometry args={[dimensions.x, dimensions.z]} />
-          <meshStandardMaterial
+        <>
+          <mesh
+            castShadow={castShadow}
+            receiveShadow={receiveShadow}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            <planeGeometry args={[dimensions.x, dimensions.z]} />
+            <meshStandardMaterial
+              color={object.color}
+              roughness={0.82}
+              metalness={0}
+              side={DoubleSide}
+            />
+          </mesh>
+          <SurfaceGrid
             color={object.color}
-            roughness={0.82}
-            metalness={0}
-            side={DoubleSide}
+            depth={dimensions.z}
+            kind="plane"
+            parentScale={object.transform.scale}
+            positionY={0.002}
+            width={dimensions.x}
           />
-        </mesh>
+        </>
       );
     case 'mannequin':
       return (

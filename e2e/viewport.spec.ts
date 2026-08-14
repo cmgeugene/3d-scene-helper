@@ -161,6 +161,72 @@ test('viewport 방 세트는 기본 카메라에 실내를 보이며 천장·앞
   ).toBeVisible();
 });
 
+test('cube joins surface grid owners while unsupported kinds do not', async ({
+  page,
+}) => {
+  await openViewport(page);
+  const runtimeCanvas = page.locator('canvas[data-engine]');
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor',
+  );
+
+  await page.getByRole('button', { name: '큐브 추가' }).click();
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor,cube',
+  );
+
+  for (const label of ['구', '원기둥', '마네킹']) {
+    await page.getByRole('button', { name: `${label} 추가` }).click();
+  }
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor,cube',
+  );
+
+  await page.getByRole('button', { name: '방 세트 추가' }).click();
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor,room,cube',
+  );
+});
+
+test('plane joins the surface grid owners', async ({ page }) => {
+  await openViewport(page);
+  const runtimeCanvas = page.locator('canvas[data-engine]');
+
+  await page.getByRole('button', { name: '평면 추가' }).click();
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor,plane',
+  );
+});
+
+test('plane grid follows owner rotation and visibility', async ({ page }) => {
+  const canvas = await openViewport(page);
+  const runtimeCanvas = page.locator('canvas[data-engine]');
+  await page.getByRole('button', { name: '평면 추가' }).click();
+  await page.getByRole('button', { name: '카메라', exact: true }).click();
+  await page.getByRole('button', { name: '선택 프레임 맞춤' }).click();
+  await page.getByRole('button', { name: '장면', exact: true }).click();
+  const beforeRotation = await canvas.screenshot();
+
+  await page.getByLabel('회전 X').fill('30');
+  await page.getByLabel('회전 X').press('Enter');
+  const rotated = await waitForCanvasChange(canvas, beforeRotation);
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor,plane',
+  );
+
+  await page.getByRole('checkbox', { name: '표시' }).click();
+  await waitForCanvasChange(canvas, rotated);
+  await expect(
+    page.getByRole('button', { name: 'Plane', exact: true }),
+  ).toContainText('○');
+});
+
 test('viewport asset 여섯 종류를 deterministic meter 위치에 추가한다', async ({
   page,
 }) => {

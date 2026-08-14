@@ -14,7 +14,7 @@ import {
   type SurfaceGridLine,
 } from './surfaceGridGeometry';
 
-type SurfaceGridKind = 'floor' | 'room';
+type SurfaceGridKind = 'floor' | 'room' | 'cube' | 'plane';
 
 interface SurfaceGridProps {
   color: string;
@@ -33,7 +33,13 @@ const mountedGridLineCounts = new WeakMap<
   HTMLCanvasElement,
   Map<SurfaceGridKind, Map<object, number>>
 >();
-const GRID_KIND_ORDER: readonly SurfaceGridKind[] = ['floor', 'room'];
+const GRID_KIND_ORDER: readonly SurfaceGridKind[] = [
+  'floor',
+  'room',
+  'cube',
+  'plane',
+];
+const SURFACE_GRID_VISIBILITY_EVENT = 'i2v:e2e-surface-grid-visibility';
 
 function publishGridKinds(
   runtimeCanvas: HTMLCanvasElement,
@@ -160,6 +166,26 @@ export function SurfaceGrid({
     publishGridLineCount(runtimeCanvas, kind, instance, lines.length);
     return () => publishGridLineCount(runtimeCanvas, kind, instance, null);
   }, [instance, kind, lines.length, runtimeCanvas]);
+
+  useLayoutEffect(() => {
+    if (!IS_EDITOR_TEST_BRIDGE_ENABLED) return;
+    const setTestVisibility = (event: Event) => {
+      const visible = (event as CustomEvent<{ visible?: unknown }>).detail
+        ?.visible;
+      if (typeof visible === 'boolean' && groupRef.current !== null) {
+        groupRef.current.visible = visible;
+      }
+    };
+    runtimeCanvas.addEventListener(
+      SURFACE_GRID_VISIBILITY_EVENT,
+      setTestVisibility,
+    );
+    return () =>
+      runtimeCanvas.removeEventListener(
+        SURFACE_GRID_VISIBILITY_EVENT,
+        setTestVisibility,
+      );
+  }, [runtimeCanvas]);
 
   const common = {
     dispose: null,

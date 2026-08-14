@@ -25,6 +25,7 @@ const forbiddenMarkers = [
   'ikDragging',
   'ikHandleProjections',
   'ikHandPositions',
+  'i2v:e2e-surface-grid-visibility',
 ];
 
 async function collectFiles(directory) {

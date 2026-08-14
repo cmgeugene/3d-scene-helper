@@ -40,9 +40,17 @@ test('persistence refresh restores the latest autosaved scene', async ({
 }) => {
   await openPersistence(page);
   await page.getByRole('button', { name: '큐브 추가' }).click();
+  await page.getByRole('button', { name: '평면 추가' }).click();
   await expect(
     page.getByRole('button', { name: 'Cube', exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Plane', exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('canvas[data-engine]')).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor,cube,plane',
+  );
   await waitForAutosave(page);
 
   const serializedBeforeReload = await page.evaluate(
@@ -60,6 +68,13 @@ test('persistence refresh restores the latest autosaved scene', async ({
   await expect(
     page.getByRole('button', { name: 'Cube', exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Plane', exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('canvas[data-engine]')).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor,cube,plane',
+  );
   expect(
     await page.evaluate(
       (key) =>
