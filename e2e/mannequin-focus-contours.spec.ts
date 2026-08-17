@@ -25,7 +25,7 @@ interface ContourStoreGlobal {
 async function openContourEditor(page: Page) {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
-  await expect(page.getByRole('status')).toHaveAttribute(
+  await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
     'data-webgl-state',
     'available',
   );
@@ -115,7 +115,7 @@ test('global focus-contour toggle updates every mannequin surface without materi
 
   await page.getByRole('button', { name: '로컬 저장' }).click();
   await page.reload();
-  await expect(page.getByRole('status')).toHaveAttribute(
+  await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
     'data-webgl-state',
     'available',
   );

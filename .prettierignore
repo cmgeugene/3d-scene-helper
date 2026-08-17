@@ -1,0 +1,7 @@
+# Preserve legacy baseline prose without unrelated integration churn.
+docs/architecture.md
+docs/product-brief.md
+
+# Preserve exact immutable independent-review records and their hashes.
+docs/session-evidence/S16-static-wormeye-approach-solver/review-quality-gemini-3.6-flash-high.md
+docs/session-evidence/S16-static-wormeye-approach-solver/review-spec-gemini-3.6-flash-high.md
