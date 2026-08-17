@@ -1,11 +1,15 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { SceneObject } from '../persistence/sceneSchema';
 import { MANNEQUIN_BODY_TYPE_PRESETS } from '../mannequin/mannequinBodyType';
 import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
-import { MAX_F_STOP, MIN_F_STOP } from '../scene/lensDepthOfField';
+import {
+  PHOTOGRAPHIC_F_STOPS,
+  getPhotographicFStopAtIndex,
+  getPhotographicFStopIndex,
+} from '../scene/lensDepthOfField';
 import type { EditorStore } from '../state/editorStore';
 import type { EditorPanel } from '../types';
 
@@ -133,6 +137,92 @@ function SubjectMotionControls({
   );
 }
 
+function DepthOfFieldSlider({ store }: InspectorProps) {
+  const camera = useStore(store, (state) => state.document.outputCamera);
+  const committedIndex = getPhotographicFStopIndex(camera.depthOfField.fStop);
+  const [draftIndex, setDraftIndex] = useState<number | null>(null);
+  const draftIndexRef = useRef<number | null>(null);
+  const pointerActiveRef = useRef(false);
+  const sliderIndex = draftIndex ?? committedIndex;
+  const displayedFStop =
+    draftIndex === null
+      ? camera.depthOfField.fStop
+      : getPhotographicFStopAtIndex(draftIndex);
+  const maxIndex = PHOTOGRAPHIC_F_STOPS.length - 1;
+
+  const clearPointerDraft = () => {
+    pointerActiveRef.current = false;
+    draftIndexRef.current = null;
+    setDraftIndex(null);
+  };
+  const commitPointerDraft = () => {
+    if (!pointerActiveRef.current) return;
+    const nextIndex = draftIndexRef.current;
+    clearPointerDraft();
+    if (nextIndex !== null && nextIndex !== committedIndex) {
+      store.getState().setCameraFStop(getPhotographicFStopAtIndex(nextIndex));
+    }
+  };
+
+  return (
+    <div className="depth-slider-field">
+      <div className="depth-slider-heading">
+        <label htmlFor="camera-depth-slider">조리개/심도</label>
+        <output htmlFor="camera-depth-slider">f/{displayedFStop}</output>
+      </div>
+      <input
+        id="camera-depth-slider"
+        aria-label="조리개/심도"
+        aria-valuetext={`f/${displayedFStop}`}
+        type="range"
+        min={0}
+        max={maxIndex}
+        step={1}
+        value={sliderIndex}
+        disabled={camera.depthOfField.apertureMode !== 'manual'}
+        onPointerDown={() => {
+          pointerActiveRef.current = true;
+          draftIndexRef.current = committedIndex;
+          setDraftIndex(committedIndex);
+        }}
+        onChange={(event) => {
+          if (!pointerActiveRef.current) return;
+          const nextIndex = Number(event.currentTarget.value);
+          if (!Number.isFinite(nextIndex)) return;
+          draftIndexRef.current = nextIndex;
+          setDraftIndex(nextIndex);
+        }}
+        onPointerUp={commitPointerDraft}
+        onPointerCancel={clearPointerDraft}
+        onBlur={commitPointerDraft}
+        onKeyDown={(event) => {
+          let nextIndex: number | undefined;
+          if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+            nextIndex = committedIndex - 1;
+          } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+            nextIndex = committedIndex + 1;
+          } else if (event.key === 'Home') {
+            nextIndex = 0;
+          } else if (event.key === 'End') {
+            nextIndex = maxIndex;
+          }
+          if (nextIndex === undefined) return;
+          event.preventDefault();
+          clearPointerDraft();
+          const nextFStop = getPhotographicFStopAtIndex(nextIndex);
+          if (nextFStop !== camera.depthOfField.fStop) {
+            store.getState().setCameraFStop(nextFStop);
+          }
+        }}
+      />
+      <div className="depth-slider-guidance" aria-hidden="true">
+        <span>얕은 심도·강한 아웃포커스</span>
+        <span>깊은 심도·약한 아웃포커스</span>
+      </div>
+    </div>
+  );
+}
+
 function CameraControls({ store }: InspectorProps) {
   const camera = useStore(store, (state) => state.document.outputCamera);
   const motionGuide = useStore(
@@ -204,17 +294,7 @@ function CameraControls({ store }: InspectorProps) {
             <span>수동</span>
           </label>
         </div>
-        <label className="camera-field">
-          <span>조리개 F값</span>
-          <LightingNumberInput
-            ariaLabel="조리개 F값"
-            value={camera.depthOfField.fStop}
-            min={MIN_F_STOP}
-            max={MAX_F_STOP}
-            disabled={camera.depthOfField.apertureMode !== 'manual'}
-            onCommit={(fStop) => store.getState().setCameraFStop(fStop)}
-          />
-        </label>
+        <DepthOfFieldSlider store={store} />
         <p>타겟 평면을 선명하게 유지하는 시네마틱 심도 근사입니다.</p>
       </fieldset>
       <fieldset>

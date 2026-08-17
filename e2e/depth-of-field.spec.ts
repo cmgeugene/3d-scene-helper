@@ -45,6 +45,7 @@ interface DofFixtureState {
     };
     outputCamera: DofFixtureCamera;
   };
+  history: { past: unknown[] };
   addObject: (input: { kind: 'cube'; name: string }) => string;
   selectObject: (id: string | null) => void;
   setObjectVisibility: (id: string, visible: boolean) => void;
@@ -241,6 +242,86 @@ async function setFixtureLens(
     { focalLengthMm, enabled },
   );
 }
+
+test('photographic depth slider keeps one range across lenses and commits bounded pointer and keyboard adjustments', async ({
+  page,
+}) => {
+  const canvas = await openDofEditor(page);
+  await setupDofFixture(page);
+  await page.getByRole('button', { name: '카메라' }).click();
+  const lens = page.getByLabel('렌즈');
+  const slider = page.getByRole('slider', { name: '조리개/심도' });
+  const sliderField = slider.locator('..');
+  await expect(sliderField.locator('.depth-slider-heading')).toHaveCSS(
+    'display',
+    'flex',
+  );
+  await expect(sliderField.locator('.depth-slider-guidance')).toHaveCSS(
+    'justify-content',
+    'space-between',
+  );
+
+  await expect(slider).toHaveAttribute('min', '0');
+  await expect(slider).toHaveAttribute('max', '24');
+  await expect(slider).toBeDisabled();
+  await lens.selectOption('18');
+  await expect(slider).toHaveAttribute('aria-valuetext', 'f/8');
+  await expect.poll(async () => (await readRuntimeDof(canvas)).fStop).toBe(8);
+  await lens.selectOption('85');
+  await expect(slider).toHaveAttribute('min', '0');
+  await expect(slider).toHaveAttribute('max', '24');
+  await expect(slider).toHaveAttribute('aria-valuetext', 'f/2');
+  await expect.poll(async () => (await readRuntimeDof(canvas)).fStop).toBe(2);
+  await setFixtureLens(page, 85, true);
+  const auto85Png = decodePng(await downloadDofFrame(page));
+
+  await page.getByRole('radio', { name: '수동 조리개' }).check();
+  await expect(slider).toBeEnabled();
+  const historyBeforePointer = await page.evaluate(
+    () =>
+      (
+        globalThis as unknown as DofFixtureGlobal
+      ).__I2V_EDITOR_STORE__?.getState().history.past.length ?? -1,
+  );
+  const sliderBox = await slider.boundingBox();
+  if (sliderBox === null) throw new Error('심도 slider bounds가 없습니다.');
+  await page.mouse.click(
+    sliderBox.x + sliderBox.width * 0.99,
+    sliderBox.y + sliderBox.height * 0.5,
+  );
+  await expect(slider).toHaveAttribute('aria-valuetext', 'f/22');
+  await expect.poll(async () => (await readRuntimeDof(canvas)).fStop).toBe(22);
+  const historyAfterPointer = await page.evaluate(
+    () =>
+      (
+        globalThis as unknown as DofFixtureGlobal
+      ).__I2V_EDITOR_STORE__?.getState().history.past.length ?? -1,
+  );
+  expect(historyAfterPointer).toBe(historyBeforePointer + 1);
+
+  await slider.press('ArrowLeft');
+  await expect(slider).toHaveAttribute('aria-valuetext', 'f/20');
+  await expect.poll(async () => (await readRuntimeDof(canvas)).fStop).toBe(20);
+  const historyAfterArrow = await page.evaluate(
+    () =>
+      (
+        globalThis as unknown as DofFixtureGlobal
+      ).__I2V_EDITOR_STORE__?.getState().history.past.length ?? -1,
+  );
+  expect(historyAfterArrow).toBe(historyAfterPointer + 1);
+  const manual85Png = decodePng(await downloadDofFrame(page));
+  const changedPixelRatio = mismatchRatio(auto85Png, manual85Png);
+  console.log('slider optics PNG changed-pixel ratio', changedPixelRatio);
+  expect(changedPixelRatio).toBeGreaterThan(0.002);
+
+  await lens.selectOption('24');
+  await expect(slider).toHaveAttribute('aria-valuetext', 'f/20');
+  await expect.poll(async () => (await readRuntimeDof(canvas)).fStop).toBe(20);
+  await page.getByRole('radio', { name: '자동 조리개' }).check();
+  await expect(slider).toHaveValue('12');
+  await expect(slider).toHaveAttribute('aria-valuetext', 'f/5.6');
+  await expect.poll(async () => (await readRuntimeDof(canvas)).fStop).toBe(5.6);
+});
 
 test('serialized target optics drive the actual Canvas DOF after target, lens, resize, shot, frame, and orbit end', async ({
   page,

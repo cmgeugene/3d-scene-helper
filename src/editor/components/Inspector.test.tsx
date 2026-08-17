@@ -204,33 +204,81 @@ describe('Inspector', () => {
 
   it('camera panel에서 lens와 shot을 적용하고 방향 view는 제공하지 않는다', async () => {
     const user = userEvent.setup();
-    render(<Inspector store={store} />);
+    render(
+      <>
+        <EditorShortcuts store={store} />
+        <Inspector store={store} />
+      </>,
+    );
     await user.click(screen.getByRole('button', { name: '카메라' }));
 
     const lens = screen.getByLabelText('렌즈');
     expect(screen.getAllByRole('option', { name: /mm$/ })).toHaveLength(
       LENS_PRESETS.length,
     );
-    await user.selectOptions(lens, '35');
+    const dofGroup = screen.getByRole('group', { name: '시네마틱 심도' });
+    const depthSlider = within(dofGroup).getByRole('slider', {
+      name: '조리개/심도',
+    });
+    expect(depthSlider).toHaveAttribute('min', '0');
+    expect(depthSlider).toHaveAttribute('max', '24');
+    expect(depthSlider).toHaveAttribute('aria-valuetext', 'f/2.8');
+    expect(depthSlider).toBeDisabled();
+    expect(
+      within(dofGroup).queryByRole('textbox', { name: '조리개 F값' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(dofGroup).getByText('얕은 심도·강한 아웃포커스'),
+    ).toBeVisible();
+    expect(
+      within(dofGroup).getByText('깊은 심도·약한 아웃포커스'),
+    ).toBeVisible();
+
+    await user.selectOptions(lens, '18');
+    expect(depthSlider).toHaveAttribute('min', '0');
+    expect(depthSlider).toHaveAttribute('max', '24');
+    expect(depthSlider).toHaveValue('15');
+    expect(depthSlider).toHaveAttribute('aria-valuetext', 'f/8');
+    await user.selectOptions(lens, '85');
+    expect(depthSlider).toHaveValue('3');
+    expect(depthSlider).toHaveAttribute('aria-valuetext', 'f/2');
     expect(store.getState().document.outputCamera).toMatchObject({
-      focalLengthMm: 35,
-      depthOfField: { apertureMode: 'auto', fStop: 4 },
+      focalLengthMm: 85,
+      depthOfField: { apertureMode: 'auto', fStop: 2 },
     });
 
-    expect(screen.getByRole('group', { name: '시네마틱 심도' })).toBeVisible();
     await user.click(screen.getByRole('checkbox', { name: '심도 사용' }));
     expect(store.getState().document.outputCamera.depthOfField.enabled).toBe(
       false,
     );
     await user.click(screen.getByRole('radio', { name: '수동 조리개' }));
-    const fStop = screen.getByLabelText('조리개 F값');
-    await user.clear(fStop);
-    await user.type(fStop, '1.8');
-    fireEvent.blur(fStop);
+    expect(depthSlider).toBeEnabled();
+    const historyBeforeDrag = store.getState().history.past.length;
+    fireEvent.pointerDown(depthSlider);
+    fireEvent.change(depthSlider, { target: { value: '4' } });
+    fireEvent.change(depthSlider, { target: { value: '5' } });
+    fireEvent.change(depthSlider, { target: { value: '6' } });
+    expect(store.getState().document.outputCamera.depthOfField.fStop).toBe(2);
+    fireEvent.pointerUp(depthSlider, { currentTarget: { value: '6' } });
     expect(store.getState().document.outputCamera.depthOfField).toMatchObject({
       apertureMode: 'manual',
-      fStop: 1.8,
+      fStop: 2.8,
     });
+    expect(store.getState().history.past).toHaveLength(historyBeforeDrag + 1);
+
+    const historyBeforeArrow = store.getState().history.past.length;
+    await user.click(depthSlider);
+    await user.keyboard('{ArrowRight}');
+    expect(store.getState().document.outputCamera.depthOfField.fStop).toBe(3.2);
+    expect(depthSlider).toHaveAttribute('aria-valuetext', 'f/3.2');
+    expect(store.getState().history.past).toHaveLength(historyBeforeArrow + 1);
+    await user.keyboard('{Delete}');
+    expect(
+      store.getState().document.objects.some(({ id }) => id === MANNEQUIN_ID),
+    ).toBe(true);
+    await user.selectOptions(lens, '24');
+    expect(depthSlider).toHaveValue('7');
+    expect(depthSlider).toHaveAttribute('aria-valuetext', 'f/3.2');
 
     const shotGroup = screen.getByRole('group', { name: '샷 프리셋' });
     for (const preset of CAMERA_SHOT_PRESETS) {
@@ -265,6 +313,23 @@ describe('Inspector', () => {
     expect(store.getState().statusMessage).toBe(
       'Mannequin을 카메라 타겟·초점으로 설정했습니다.',
     );
+  });
+
+  it('photographic slider는 기존 non-stop manual f-stop을 숨기지 않고 nearest thumb와 정확한 현재값을 표시한다', async () => {
+    const user = userEvent.setup();
+    store.getState().setCameraApertureMode('manual');
+    store.getState().setCameraFStop(2.7);
+    render(<Inspector store={store} />);
+    await user.click(screen.getByRole('button', { name: '카메라' }));
+
+    const depthSlider = screen.getByRole('slider', { name: '조리개/심도' });
+    expect(depthSlider).toHaveValue('6');
+    expect(depthSlider).toHaveAttribute('aria-valuetext', 'f/2.7');
+    expect(screen.getByText('f/2.7')).toBeVisible();
+
+    fireEvent.change(depthSlider, { target: { value: '24' } });
+    expect(depthSlider).toHaveValue('6');
+    expect(depthSlider).toHaveAttribute('aria-valuetext', 'f/2.7');
   });
 
   it('camera selected action은 selection이 없을 때 camera를 보존하고 status를 설정한다', async () => {

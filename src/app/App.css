@@ -531,6 +531,45 @@ p {
   padding: 0.35rem;
 }
 
+.depth-slider-field {
+  display: grid;
+  gap: 0.35rem;
+  color: #aebbd0;
+  font-size: 0.72rem;
+}
+
+.depth-slider-heading,
+.depth-slider-guidance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.depth-slider-heading output {
+  color: #f2f6ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.depth-slider-field input[type='range'] {
+  width: 100%;
+  accent-color: #6f9dff;
+}
+
+.depth-slider-field input[type='range']:disabled {
+  opacity: 0.55;
+}
+
+.depth-slider-guidance {
+  color: #7f8da2;
+  font-size: 0.62rem;
+  line-height: 1.25;
+}
+
+.depth-slider-guidance span:last-child {
+  text-align: right;
+}
+
 .lighting-field input[type='color'] {
   width: 100%;
   height: 2rem;

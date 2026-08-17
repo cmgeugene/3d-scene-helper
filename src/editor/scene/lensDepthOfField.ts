@@ -1,5 +1,37 @@
-export const MIN_F_STOP = 1.4 as const;
-export const MAX_F_STOP = 22 as const;
+export const PHOTOGRAPHIC_F_STOPS = [
+  1.4, 1.6, 1.8, 2, 2.2, 2.5, 2.8, 3.2, 3.5, 4, 4.5, 5, 5.6, 6.3, 7.1, 8, 9, 10,
+  11, 13, 14, 16, 18, 20, 22,
+] as const;
+
+export const MIN_F_STOP = PHOTOGRAPHIC_F_STOPS[0];
+export const MAX_F_STOP = PHOTOGRAPHIC_F_STOPS.at(-1) as 22;
+
+export function getPhotographicFStopAtIndex(index: number): number {
+  if (!Number.isFinite(index)) {
+    throw new RangeError('Photographic stop index must be finite.');
+  }
+  const boundedIndex = Math.min(
+    PHOTOGRAPHIC_F_STOPS.length - 1,
+    Math.max(0, Math.round(index)),
+  );
+  return PHOTOGRAPHIC_F_STOPS[boundedIndex];
+}
+
+export function getPhotographicFStopIndex(fStop: number): number {
+  if (!Number.isFinite(fStop)) {
+    throw new RangeError('f-stop must be finite.');
+  }
+  let nearestIndex = 0;
+  let nearestDistance = Math.abs(fStop - PHOTOGRAPHIC_F_STOPS[0]);
+  for (let index = 1; index < PHOTOGRAPHIC_F_STOPS.length; index += 1) {
+    const distance = Math.abs(fStop - PHOTOGRAPHIC_F_STOPS[index]);
+    if (distance < nearestDistance) {
+      nearestIndex = index;
+      nearestDistance = distance;
+    }
+  }
+  return nearestIndex;
+}
 
 export const LENS_AUTO_APERTURE_MAP = {
   18: 8,

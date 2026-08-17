@@ -1,12 +1,43 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PHOTOGRAPHIC_F_STOPS,
   createLensDepthOfFieldSettings,
   getAutoApertureForLens,
   getDepthOfFieldRuntimeParameters,
   getFocusDistanceM,
+  getPhotographicFStopAtIndex,
+  getPhotographicFStopIndex,
 } from './lensDepthOfField';
 
 describe('lens-aware depth of field optics', () => {
+  it('exposes a deterministic ordered photographic stop scale with exact lens presets', () => {
+    expect(PHOTOGRAPHIC_F_STOPS).toEqual([
+      1.4, 1.6, 1.8, 2, 2.2, 2.5, 2.8, 3.2, 3.5, 4, 4.5, 5, 5.6, 6.3, 7.1, 8, 9,
+      10, 11, 13, 14, 16, 18, 20, 22,
+    ]);
+    expect(PHOTOGRAPHIC_F_STOPS[0]).toBe(1.4);
+    expect(PHOTOGRAPHIC_F_STOPS.at(-1)).toBe(22);
+    expect(
+      [18, 24, 35, 50, 85].map((lens) =>
+        getPhotographicFStopIndex(getAutoApertureForLens(lens)),
+      ),
+    ).toEqual([15, 12, 9, 6, 3]);
+  });
+
+  it('maps slider indices deterministically with endpoint clamping and rejects non-finite values', () => {
+    expect(getPhotographicFStopAtIndex(-10)).toBe(1.4);
+    expect(getPhotographicFStopAtIndex(0)).toBe(1.4);
+    expect(getPhotographicFStopAtIndex(6)).toBe(2.8);
+    expect(getPhotographicFStopAtIndex(999)).toBe(22);
+    expect(getPhotographicFStopIndex(0.7)).toBe(0);
+    expect(getPhotographicFStopIndex(2.7)).toBe(6);
+    expect(getPhotographicFStopIndex(30)).toBe(24);
+    expect(() => getPhotographicFStopAtIndex(Number.NaN)).toThrow(RangeError);
+    expect(() => getPhotographicFStopIndex(Number.POSITIVE_INFINITY)).toThrow(
+      RangeError,
+    );
+  });
+
   it('uses deterministic automatic aperture presets and derives focus only from camera target', () => {
     expect(
       [18, 24, 35, 50, 85].map((focalLengthMm) =>
