@@ -1,5 +1,7 @@
 import {
+  BoxGeometry,
   LinearSRGBColorSpace,
+  Mesh,
   Scene,
   Vector3,
   Vector4,
@@ -8,6 +10,12 @@ import {
 } from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
+import {
+  createMannequinFocusContourMaterialSet,
+  disposeMannequinFocusContourMaterialSet,
+  getMannequinFocusContourMaterialState,
+  setMannequinFocusContourMaterialSetEnabled,
+} from '../mannequin/mannequinFocusContours';
 import {
   calculateAspectLockedDimensions,
   calculateExportSampleCount,
@@ -378,6 +386,85 @@ function createCanvasDouble(blob = new Blob(['png'], { type: 'image/png' })) {
 }
 
 describe('exportFrame offscreen runtime', () => {
+  it('Clean/Reference export와 injected allocation failure가 shared contour material state를 바꾸지 않는다', async () => {
+    const materials = createMannequinFocusContourMaterialSet(
+      '#a8a8a8',
+      '#979797',
+    );
+    setMannequinFocusContourMaterialSetEnabled(materials, true);
+    const geometry = new BoxGeometry(1, 1, 1);
+    const scene = new Scene();
+    scene.add(new Mesh(geometry, materials.axial));
+    const uuids = Object.values(materials).map(({ uuid }) => uuid);
+    const versions = Object.values(materials).map(({ version }) => version);
+
+    for (const mode of ['clean', 'reference'] as const) {
+      const runtime = createRendererDouble();
+      const target = {
+        texture: { colorSpace: LinearSRGBColorSpace },
+        dispose: vi.fn(),
+      } as unknown as WebGLRenderTarget;
+      const source = createCanvasDouble();
+      const output = createCanvasDouble();
+      const createCanvas = vi
+        .fn<() => HTMLCanvasElement>()
+        .mockReturnValueOnce(source.canvas)
+        .mockReturnValueOnce(output.canvas);
+
+      await exportFrame(
+        {
+          renderer: runtime.renderer,
+          scene,
+          document: createExportDocument(mode),
+          guideVisibility: {
+            thirds: false,
+            center: false,
+            actionSafe: false,
+            titleSafe: false,
+            motion: false,
+          },
+        },
+        { createRenderTarget: () => target, createCanvas },
+      );
+      expect(
+        getMannequinFocusContourMaterialState(materials.axial).enabled,
+      ).toBe(true);
+    }
+
+    const failingRuntime = createRendererDouble();
+    await expect(
+      exportFrame(
+        {
+          renderer: failingRuntime.renderer,
+          scene,
+          document: createExportDocument('clean'),
+          guideVisibility: {
+            thirds: false,
+            center: false,
+            actionSafe: false,
+            titleSafe: false,
+            motion: false,
+          },
+        },
+        {
+          createRenderTarget: () => {
+            throw new Error('injected contour export allocation failure');
+          },
+        },
+      ),
+    ).rejects.toThrow('injected contour export allocation failure');
+    expect(getMannequinFocusContourMaterialState(materials.axial).enabled).toBe(
+      true,
+    );
+    expect(Object.values(materials).map(({ uuid }) => uuid)).toEqual(uuids);
+    expect(Object.values(materials).map(({ version }) => version)).toEqual(
+      versions,
+    );
+
+    geometry.dispose();
+    disposeMannequinFocusContourMaterialSet(materials);
+  });
+
   it('enabled DOF는 shared composer optics로 render/readback하고 pipeline을 dispose한다', async () => {
     const runtime = createRendererDouble();
     const baseTarget = {

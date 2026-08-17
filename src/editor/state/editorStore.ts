@@ -66,6 +66,7 @@ export const DOCUMENT_MUTATION_KINDS = [
   'update-output',
   'update-motion-metadata',
   'commit-mannequin-pose',
+  'update-mannequin-appearance',
 ] as const;
 
 export type DocumentMutationKind = (typeof DOCUMENT_MUTATION_KINDS)[number];
@@ -123,6 +124,7 @@ export interface EditorStore {
     apertureMode: SceneDocument['outputCamera']['depthOfField']['apertureMode'],
   ) => void;
   setCameraFStop: (fStop: number) => void;
+  setMannequinFocusContoursEnabled: (enabled: boolean) => void;
   applyCameraShot: (presetId: CameraShotPreset['id']) => void;
   frameSelected: () => void;
   targetSelected: () => void;
@@ -626,6 +628,25 @@ export function createEditorStore(options: EditorStoreOptions) {
         depthOfField: { ...camera.depthOfField, fStop },
       });
       set({ statusMessage: `수동 조리개 f/${fStop}을 적용했습니다.` });
+    },
+    setMannequinFocusContoursEnabled: (enabled) => {
+      set((state) => {
+        if (
+          state.document.mannequinAppearance.focusContoursEnabled === enabled
+        ) {
+          return state;
+        }
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          mannequinAppearance: { focusContoursEnabled: enabled },
+        });
+        return {
+          ...recordMutation(state, nextDocument, 'update-mannequin-appearance'),
+          statusMessage: enabled
+            ? '모든 마네킹의 초점 확인 등고선을 표시합니다.'
+            : '모든 마네킹의 초점 확인 등고선을 숨깁니다.',
+        };
+      });
     },
     applyCameraShot: (presetId) => {
       const preset = CAMERA_SHOT_PRESETS.find(({ id }) => id === presetId);

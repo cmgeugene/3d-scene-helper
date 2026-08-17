@@ -23,6 +23,7 @@ interface SceneObjectProps {
   onRootReady: (id: string, root: Group | null) => void;
   runtimeMannequinPose?: MannequinPose;
   mannequinIK?: MannequinIKBinding;
+  focusContoursEnabled: boolean;
 }
 
 interface PrimitiveProps {
@@ -31,6 +32,7 @@ interface PrimitiveProps {
   runtimeMannequinPose?: MannequinPose;
   castShadow: boolean;
   receiveShadow: boolean;
+  focusContoursEnabled: boolean;
 }
 
 function Primitive({
@@ -39,6 +41,7 @@ function Primitive({
   runtimeMannequinPose,
   castShadow,
   receiveShadow,
+  focusContoursEnabled,
 }: PrimitiveProps) {
   const { dimensions, kind } = object;
   const material = (
@@ -137,6 +140,7 @@ function Primitive({
     case 'mannequin':
       return (
         <ArticulatedMannequin
+          objectId={object.id}
           color={object.color}
           dimensions={dimensions}
           bodyType={object.mannequinBodyType ?? 'standard'}
@@ -148,6 +152,7 @@ function Primitive({
           selected={selected}
           castShadow={castShadow}
           receiveShadow={receiveShadow}
+          focusContoursEnabled={focusContoursEnabled}
         />
       );
     case 'room':
@@ -229,6 +234,7 @@ export function SceneObject({
   onRootReady,
   runtimeMannequinPose,
   mannequinIK,
+  focusContoursEnabled,
 }: SceneObjectProps) {
   const model = getSceneObjectModel(object);
   const { position, rotationDeg, scale } = object.transform;
@@ -263,6 +269,7 @@ export function SceneObject({
         runtimeMannequinPose={runtimeMannequinPose}
         castShadow={model.castShadow}
         receiveShadow={model.receiveShadow}
+        focusContoursEnabled={focusContoursEnabled}
       />
       {object.kind === 'mannequin' && mannequinIK !== undefined ? (
         <MannequinIKControls object={object} {...mannequinIK} />

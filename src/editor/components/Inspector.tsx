@@ -225,6 +225,10 @@ function DepthOfFieldSlider({ store }: InspectorProps) {
 
 function CameraControls({ store }: InspectorProps) {
   const camera = useStore(store, (state) => state.document.outputCamera);
+  const focusContoursEnabled = useStore(
+    store,
+    (state) => state.document.mannequinAppearance.focusContoursEnabled,
+  );
   const motionGuide = useStore(
     store,
     (state) => state.document.cameraMotionGuide,
@@ -272,6 +276,19 @@ function CameraControls({ store }: InspectorProps) {
           />
           <span>시네마틱 심도 사용</span>
         </label>
+        <label className="camera-field">
+          <input
+            aria-label="마네킹 초점 확인 등고선"
+            type="checkbox"
+            checked={focusContoursEnabled}
+            onChange={(event) => {
+              store
+                .getState()
+                .setMannequinFocusContoursEnabled(event.currentTarget.checked);
+            }}
+          />
+          <span>마네킹 초점 확인 등고선</span>
+        </label>
         <div role="radiogroup" aria-label="조리개 모드">
           <label>
             <input
@@ -295,7 +312,10 @@ function CameraControls({ store }: InspectorProps) {
           </label>
         </div>
         <DepthOfFieldSlider store={store} />
-        <p>타겟 평면을 선명하게 유지하는 시네마틱 심도 근사입니다.</p>
+        <p>
+          타겟 평면을 선명하게 유지하는 시네마틱 심도 근사입니다. 등고선은 모든
+          마네킹과 PNG 표면에 함께 적용됩니다.
+        </p>
       </fieldset>
       <fieldset>
         <legend>샷 프리셋</legend>

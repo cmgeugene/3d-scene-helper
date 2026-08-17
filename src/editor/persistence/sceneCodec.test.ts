@@ -72,6 +72,7 @@ describe('sceneCodec', () => {
     }
     mannequin.mannequinPose.id = 'custom';
     mannequin.mannequinPose.arms.left.elbowBendDeg = 74;
+    document.mannequinAppearance.focusContoursEnabled = true;
 
     const encoded = encodeSceneDocument(document);
     const decoded = parseSceneDocument(encoded);
@@ -82,6 +83,7 @@ describe('sceneCodec', () => {
     expect(
       decoded.objects.find(({ kind }) => kind === 'mannequin'),
     ).toHaveProperty('mannequinPose.arms.left.elbowBendDeg', 74);
+    expect(decoded.mannequinAppearance.focusContoursEnabled).toBe(true);
   });
 
   it('기존 v2 문서는 기존 외관 보존을 위해 DOF disabled로 migration한다', () => {
@@ -92,6 +94,9 @@ describe('sceneCodec', () => {
       enabled: false,
       apertureMode: 'auto',
       fStop: 2.8,
+    });
+    expect(migrated.mannequinAppearance).toEqual({
+      focusContoursEnabled: false,
     });
   });
 

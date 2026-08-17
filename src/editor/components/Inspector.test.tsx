@@ -332,6 +332,33 @@ describe('Inspector', () => {
     expect(depthSlider).toHaveAttribute('aria-valuetext', 'f/2.7');
   });
 
+  it('Camera > 시네마틱 심도에서 전역 마네킹 초점 등고선을 DOF와 독립적으로 토글한다', async () => {
+    const user = userEvent.setup();
+    store.getState().setCameraDepthOfFieldEnabled(false);
+    const cameraBefore = structuredClone(
+      store.getState().document.outputCamera,
+    );
+    render(<Inspector store={store} />);
+    await user.click(screen.getByRole('button', { name: '카메라' }));
+
+    const dofGroup = screen.getByRole('group', { name: '시네마틱 심도' });
+    const contours = within(dofGroup).getByRole('checkbox', {
+      name: '마네킹 초점 확인 등고선',
+    });
+    expect(contours).not.toBeChecked();
+
+    await user.click(contours);
+
+    expect(contours).toBeChecked();
+    expect(store.getState().document.mannequinAppearance).toEqual({
+      focusContoursEnabled: true,
+    });
+    expect(store.getState().document.outputCamera).toEqual(cameraBefore);
+    expect(store.getState().statusMessage).toBe(
+      '모든 마네킹의 초점 확인 등고선을 표시합니다.',
+    );
+  });
+
   it('camera selected action은 selection이 없을 때 camera를 보존하고 status를 설정한다', async () => {
     const user = userEvent.setup();
     store.getState().selectObject(null);

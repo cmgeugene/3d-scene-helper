@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   MathUtils,
   Box3,
@@ -6,6 +6,9 @@ import {
   Vector3,
   type BufferGeometry,
   type Group,
+  type Material,
+  type Mesh,
+  type MeshStandardMaterial,
 } from 'three';
 import { useThree } from '@react-three/fiber';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
@@ -18,6 +21,13 @@ import {
   type MannequinBodyTypeId,
 } from '../mannequin/mannequinBodyType';
 import {
+  createMannequinFocusContourMaterialSet,
+  disposeMannequinFocusContourMaterialSet,
+  getMannequinFocusContourMaterialState,
+  setMannequinFocusContourMaterialSetEnabled,
+  type MannequinFocusContourMaterialSet,
+} from '../mannequin/mannequinFocusContours';
+import {
   MANNEQUIN_ARM_ANCHORS,
   MANNEQUIN_ARM_LENGTHS,
   MANNEQUIN_LEG_ANCHORS,
@@ -28,6 +38,7 @@ import {
 } from '../mannequin/mannequinRig';
 
 interface ArticulatedMannequinProps {
+  objectId: string;
   color: string;
   dimensions: { x: number; y: number; z: number };
   bodyType: MannequinBodyTypeId;
@@ -35,6 +46,7 @@ interface ArticulatedMannequinProps {
   selected: boolean;
   castShadow: boolean;
   receiveShadow: boolean;
+  focusContoursEnabled: boolean;
 }
 
 interface MeshPartProps {
@@ -51,6 +63,7 @@ interface MeshPartProps {
   rotation?: [number, number, number];
   scale?: [number, number, number];
   unlit?: boolean;
+  material?: MeshStandardMaterial;
 }
 
 const toRadians = ({ x, y, z }: MannequinEulerDegrees) =>
@@ -71,6 +84,7 @@ function MeshPart({
   rotation,
   scale,
   unlit = false,
+  material,
 }: MeshPartProps) {
   return (
     <mesh
@@ -95,6 +109,8 @@ function MeshPart({
       ) : null}
       {unlit ? (
         <meshBasicMaterial color={color} toneMapped={false} />
+      ) : material !== undefined ? (
+        <primitive object={material} attach="material" />
       ) : (
         <meshStandardMaterial
           color={color}
@@ -116,6 +132,7 @@ function Arm({
   receiveShadow,
   jointColor,
   geometries,
+  materials,
 }: {
   side: MannequinSide;
   pose: MannequinPose;
@@ -124,6 +141,7 @@ function Arm({
   receiveShadow: boolean;
   jointColor: string;
   geometries: StudioMannequinGeometries;
+  materials: MannequinFocusContourMaterialSet;
 }) {
   const arm = pose.arms[side];
   const anchor = MANNEQUIN_ARM_ANCHORS[side].shoulder;
@@ -141,6 +159,7 @@ function Arm({
         receiveShadow={receiveShadow}
         geometry="sphere"
         args={[0.058, 20]}
+        material={materials.limb}
       />
       <MeshPart
         name={`${prefix}-upper-arm`}
@@ -148,6 +167,7 @@ function Arm({
         castShadow={castShadow}
         receiveShadow={receiveShadow}
         geometry={geometries.upperArm}
+        material={materials.limb}
       />
       <group
         name={`${prefix}-elbow-pivot`}
@@ -165,6 +185,7 @@ function Arm({
           receiveShadow={receiveShadow}
           geometry="sphere"
           args={[0.048, 20]}
+          material={materials.joint}
         />
         <MeshPart
           name={`${prefix}-forearm`}
@@ -172,6 +193,7 @@ function Arm({
           castShadow={castShadow}
           receiveShadow={receiveShadow}
           geometry={geometries.forearm}
+          material={materials.limb}
         />
         <group
           name={`${prefix}-wrist-pivot`}
@@ -184,6 +206,7 @@ function Arm({
             castShadow={castShadow}
             receiveShadow={receiveShadow}
             geometry={geometries.hand}
+            material={materials.limb}
           />
           <MeshPart
             name={`${prefix}-thumb`}
@@ -191,6 +214,7 @@ function Arm({
             castShadow={castShadow}
             receiveShadow={receiveShadow}
             geometry={geometries.thumb}
+            material={materials.limb}
             position={[side === 'left' ? 0.027 : -0.027, -0.05, -0.003]}
             rotation={[0, 0, side === 'left' ? -0.42 : 0.42]}
           />
@@ -208,6 +232,7 @@ function Leg({
   receiveShadow,
   jointColor,
   geometries,
+  materials,
 }: {
   side: MannequinSide;
   pose: MannequinPose;
@@ -216,6 +241,7 @@ function Leg({
   receiveShadow: boolean;
   jointColor: string;
   geometries: StudioMannequinGeometries;
+  materials: MannequinFocusContourMaterialSet;
 }) {
   const leg = pose.legs[side];
   const anchor = MANNEQUIN_LEG_ANCHORS[side].hip;
@@ -233,6 +259,7 @@ function Leg({
         receiveShadow={receiveShadow}
         geometry="sphere"
         args={[0.06, 20]}
+        material={materials.limb}
       />
       <MeshPart
         name={`${prefix}-thigh`}
@@ -240,6 +267,7 @@ function Leg({
         castShadow={castShadow}
         receiveShadow={receiveShadow}
         geometry={geometries.thigh}
+        material={materials.limb}
       />
       <group
         name={`${prefix}-knee-pivot`}
@@ -257,6 +285,7 @@ function Leg({
           receiveShadow={receiveShadow}
           geometry="sphere"
           args={[0.048, 20]}
+          material={materials.joint}
         />
         <MeshPart
           name={`${prefix}-shin`}
@@ -264,6 +293,7 @@ function Leg({
           castShadow={castShadow}
           receiveShadow={receiveShadow}
           geometry={geometries.shin}
+          material={materials.limb}
         />
         <group
           name={`${prefix}-ankle-pivot`}
@@ -277,6 +307,7 @@ function Leg({
             receiveShadow={receiveShadow}
             geometry="sphere"
             args={[0.038, 18]}
+            material={materials.joint}
           />
           <MeshPart
             name={`${prefix}-foot`}
@@ -284,6 +315,7 @@ function Leg({
             castShadow={castShadow}
             receiveShadow={receiveShadow}
             geometry={geometries.foot}
+            material={materials.limb}
           />
         </group>
       </group>
@@ -328,7 +360,60 @@ function clearMannequinDiagnostics(canvas: HTMLCanvasElement) {
   delete canvas.dataset.mannequinBounds;
 }
 
+interface FocusContourDiagnostic {
+  objectId: string;
+  enabled: boolean;
+  eligibleSurfaceCount: number;
+  enabledSurfaceCount: number;
+  materialUuids: string[];
+  programKeys: string[];
+}
+
+const focusContourDiagnostics = new WeakMap<
+  HTMLCanvasElement,
+  Map<string, FocusContourDiagnostic>
+>();
+
+function publishFocusContourDiagnostic(
+  canvas: HTMLCanvasElement,
+  diagnostic: FocusContourDiagnostic,
+) {
+  if (!IS_EDITOR_TEST_BRIDGE_ENABLED) return;
+  const entries = focusContourDiagnostics.get(canvas) ?? new Map();
+  entries.set(diagnostic.objectId, diagnostic);
+  focusContourDiagnostics.set(canvas, entries);
+  canvas.dataset.mannequinFocusContours = JSON.stringify(
+    [...entries.values()].sort((left, right) =>
+      left.objectId.localeCompare(right.objectId),
+    ),
+  );
+}
+
+function clearFocusContourDiagnostic(
+  canvas: HTMLCanvasElement,
+  objectId: string,
+) {
+  if (!IS_EDITOR_TEST_BRIDGE_ENABLED) return;
+  const entries = focusContourDiagnostics.get(canvas);
+  entries?.delete(objectId);
+  if (entries === undefined || entries.size === 0) {
+    focusContourDiagnostics.delete(canvas);
+    delete canvas.dataset.mannequinFocusContours;
+    return;
+  }
+  canvas.dataset.mannequinFocusContours = JSON.stringify(
+    [...entries.values()].sort((left, right) =>
+      left.objectId.localeCompare(right.objectId),
+    ),
+  );
+}
+
+function materialList(material: Material | Material[]) {
+  return Array.isArray(material) ? material : [material];
+}
+
 export function ArticulatedMannequin({
+  objectId,
   color,
   dimensions,
   bodyType,
@@ -336,6 +421,7 @@ export function ArticulatedMannequin({
   selected,
   castShadow,
   receiveShadow,
+  focusContoursEnabled,
 }: ArticulatedMannequinProps) {
   const contentRef = useRef<Group>(null);
   const canvas = useThree((state) => state.gl.domElement);
@@ -345,8 +431,84 @@ export function ArticulatedMannequin({
     () => `#${new Color(color).multiplyScalar(0.9).getHexString()}`,
     [color],
   );
-  const common = { color, castShadow, receiveShadow };
-  const articulatedCommon = { ...common, jointColor, geometries };
+  const materials = useMemo(
+    () => createMannequinFocusContourMaterialSet(color, jointColor),
+    [color, jointColor],
+  );
+  const pendingMaterialDisposal = useRef<{
+    materials: MannequinFocusContourMaterialSet;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  const common = {
+    color,
+    castShadow,
+    receiveShadow,
+    material: materials.axial,
+  };
+  const articulatedCommon = {
+    color,
+    castShadow,
+    receiveShadow,
+    jointColor,
+    geometries,
+    materials,
+  };
+
+  useEffect(() => {
+    const pending = pendingMaterialDisposal.current;
+    if (pending?.materials === materials) {
+      clearTimeout(pending.timer);
+      pendingMaterialDisposal.current = null;
+    }
+    return () => {
+      const timer = setTimeout(() => {
+        disposeMannequinFocusContourMaterialSet(materials);
+        if (pendingMaterialDisposal.current?.materials === materials) {
+          pendingMaterialDisposal.current = null;
+        }
+      }, 0);
+      pendingMaterialDisposal.current = { materials, timer };
+    };
+  }, [materials]);
+
+  useLayoutEffect(() => {
+    setMannequinFocusContourMaterialSetEnabled(materials, focusContoursEnabled);
+    const content = contentRef.current;
+    if (!IS_EDITOR_TEST_BRIDGE_ENABLED || content === null) return;
+    const ownedMaterials = new Set(Object.values(materials));
+    let eligibleSurfaceCount = 0;
+    let enabledSurfaceCount = 0;
+    content.traverse((child) => {
+      const mesh = child as Mesh;
+      if (!mesh.isMesh) return;
+      for (const material of materialList(mesh.material)) {
+        if (!ownedMaterials.has(material as MeshStandardMaterial)) continue;
+        eligibleSurfaceCount += 1;
+        if (
+          getMannequinFocusContourMaterialState(
+            material as MeshStandardMaterial,
+          ).enabled
+        ) {
+          enabledSurfaceCount += 1;
+        }
+      }
+    });
+    publishFocusContourDiagnostic(canvas, {
+      objectId,
+      enabled: focusContoursEnabled,
+      eligibleSurfaceCount,
+      enabledSurfaceCount,
+      materialUuids: Object.values(materials).map(({ uuid }) => uuid),
+      programKeys: [
+        ...new Set(
+          Object.values(materials).map((material) =>
+            material.customProgramCacheKey(),
+          ),
+        ),
+      ],
+    });
+    return () => clearFocusContourDiagnostic(canvas, objectId);
+  }, [canvas, focusContoursEnabled, materials, objectId]);
 
   useLayoutEffect(() => {
     if (

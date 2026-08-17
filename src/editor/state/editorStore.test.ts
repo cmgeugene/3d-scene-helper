@@ -575,6 +575,7 @@ describe('editorStore', () => {
       'update-output',
       'update-motion-metadata',
       'commit-mannequin-pose',
+      'update-mannequin-appearance',
     ]);
   });
 
@@ -676,6 +677,44 @@ describe('editorStore', () => {
     expect(store.getState().document.outputCamera.depthOfField.fStop).toBe(2.8);
     store.getState().redo();
     expect(store.getState().document.outputCamera.depthOfField.fStop).toBe(11);
+  });
+
+  it('전역 마네킹 초점 등고선을 한 번 commit하고 no-op/undo/redo로 보존한다', () => {
+    const cameraBefore = structuredClone(
+      store.getState().document.outputCamera,
+    );
+    const objectsBefore = structuredClone(store.getState().document.objects);
+    const historyBefore = store.getState().history.past.length;
+
+    store.getState().setMannequinFocusContoursEnabled(true);
+
+    expect(store.getState().document.mannequinAppearance).toEqual({
+      focusContoursEnabled: true,
+    });
+    expect(store.getState().document.outputCamera).toEqual(cameraBefore);
+    expect(store.getState().document.objects).toEqual(objectsBefore);
+    expect(store.getState().history.past).toHaveLength(historyBefore + 1);
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'update-mannequin-appearance',
+    );
+    expect(store.getState().statusMessage).toBe(
+      '모든 마네킹의 초점 확인 등고선을 표시합니다.',
+    );
+
+    const documentAfterEnable = store.getState().document;
+    const historyAfterEnable = store.getState().history;
+    store.getState().setMannequinFocusContoursEnabled(true);
+    expect(store.getState().document).toBe(documentAfterEnable);
+    expect(store.getState().history).toBe(historyAfterEnable);
+
+    store.getState().undo();
+    expect(
+      store.getState().document.mannequinAppearance.focusContoursEnabled,
+    ).toBe(false);
+    store.getState().redo();
+    expect(
+      store.getState().document.mannequinAppearance.focusContoursEnabled,
+    ).toBe(true);
   });
 
   it('lighting preset과 reset을 한 번씩 commit하고 camera와 objects를 보존한다', () => {

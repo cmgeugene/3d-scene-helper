@@ -256,6 +256,12 @@ const cameraMotionGuideSchema = z.strictObject({
   label: z.string().trim().min(1),
 });
 
+const mannequinAppearanceSchema = z
+  .strictObject({
+    focusContoursEnabled: z.boolean(),
+  })
+  .default({ focusContoursEnabled: false });
+
 export const sceneDocumentSchema = z
   .strictObject({
     version: z.literal(SCENE_DOCUMENT_VERSION),
@@ -267,6 +273,7 @@ export const sceneDocumentSchema = z
     background: backgroundSchema,
     output: outputSchema,
     sceneNotes: z.string().max(MAX_SCENE_NOTES_LENGTH),
+    mannequinAppearance: mannequinAppearanceSchema,
     subjectMotionGuide: subjectMotionGuideSchema.optional(),
     cameraMotionGuide: cameraMotionGuideSchema.optional(),
   })
@@ -463,5 +470,6 @@ export function createStarterSceneDocument(
       mode: 'clean',
     },
     sceneNotes: '',
+    mannequinAppearance: { focusContoursEnabled: false },
   });
 }

@@ -65,6 +65,22 @@ describe('sceneDocumentSchema', () => {
         fStop: 2.8,
       },
     });
+    expect(parsed.mannequinAppearance.focusContoursEnabled).toBe(false);
+  });
+
+  it('기존 current-version JSON의 누락된 마네킹 초점 등고선을 OFF로 보정한다', () => {
+    const legacyCurrent = createStarterSceneDocument(
+      STARTER_IDS,
+    ) as unknown as {
+      mannequinAppearance?: unknown;
+    };
+    delete legacyCurrent.mannequinAppearance;
+
+    const parsed = sceneDocumentSchema.parse(
+      JSON.parse(JSON.stringify(legacyCurrent)),
+    );
+
+    expect(parsed.mannequinAppearance).toEqual({ focusContoursEnabled: false });
   });
 
   it('기존 마네킹 JSON에 체형이 없으면 일반 체형으로 복원한다', () => {
