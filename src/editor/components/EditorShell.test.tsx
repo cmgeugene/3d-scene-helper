@@ -306,6 +306,26 @@ describe('EditorShell', () => {
     );
   });
 
+  it('한국어 IME에서도 물리 T 키로 선택 오브젝트를 타겟·초점에 설정한다', async () => {
+    const user = userEvent.setup();
+    const store = createTestStore();
+    render(<EditorShell store={store} webGLState="available" />);
+    await user.click(screen.getByRole('button', { name: 'Mannequin' }));
+
+    const originalTarget = structuredClone(
+      store.getState().document.outputCamera.target,
+    );
+    fireEvent.keyDown(window, { key: 'ㅅ', code: 'KeyT' });
+
+    expect(store.getState().document.outputCamera.target).not.toEqual(
+      originalTarget,
+    );
+    expect(store.getState().history.past).toHaveLength(1);
+    expect(store.getState().statusMessage).toContain(
+      '카메라 타겟·초점으로 설정했습니다.',
+    );
+  });
+
   it('undo/redo 버튼과 Cmd/Ctrl+Z shortcut을 focus guard와 함께 연결한다', async () => {
     const user = userEvent.setup();
     const store = createTestStore();

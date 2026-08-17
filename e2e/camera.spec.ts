@@ -406,6 +406,28 @@ test('camera lens, shot actions, selected helper, and no-selection status use ex
   ).toEqual(cameraAfterButton);
   expect(await commitCount()).toBe(1);
 
+  await resetCommitCount();
+  await page.evaluate(() => {
+    const browserGlobal = globalThis as unknown as {
+      KeyboardEvent: new (
+        type: string,
+        init: Record<string, unknown>,
+      ) => unknown;
+      dispatchEvent: (event: unknown) => boolean;
+    };
+    browserGlobal.dispatchEvent(
+      new browserGlobal.KeyboardEvent('keydown', {
+        key: 'ㅅ',
+        code: 'KeyT',
+        bubbles: true,
+      }),
+    );
+  });
+  await expect(page.locator('.status-bar')).toContainText(
+    'Mannequin을 카메라 타겟·초점으로 설정했습니다.',
+  );
+  expect(await commitCount()).toBe(1);
+
   await page.keyboard.press('Escape');
   const cameraBeforeNoSelection = await page.evaluate(() =>
     structuredClone(

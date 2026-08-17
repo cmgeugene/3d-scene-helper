@@ -30,7 +30,7 @@ export function EditorShortcuts({ store }: EditorShortcutsProps) {
         !event.ctrlKey &&
         !event.altKey &&
         !event.shiftKey &&
-        key === 't'
+        (key === 't' || event.code === 'KeyT')
       ) {
         state.targetSelected();
         event.preventDefault();
