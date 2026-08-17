@@ -42,6 +42,7 @@ import {
   ASSISTANT_PANEL_MIN_WIDTH,
   ASSISTANT_PANEL_WIDTH_STORAGE_KEY,
   REFERENCE_TRAY_COLLAPSED_STORAGE_KEY,
+  RIGHT_PANEL_TAB_STORAGE_KEY,
 } from '../constants';
 import { EditorShortcuts } from './EditorShortcuts';
 import { Inspector } from './Inspector';
@@ -130,6 +131,18 @@ function readReferenceTrayCollapsed(storage: Storage) {
   }
 }
 
+type RightPanelTab = 'inspector' | 'assistant';
+
+function readRightPanelTab(storage: Storage): RightPanelTab {
+  try {
+    return storage.getItem(RIGHT_PANEL_TAB_STORAGE_KEY) === 'assistant'
+      ? 'assistant'
+      : 'inspector';
+  } catch {
+    return 'inspector';
+  }
+}
+
 const WORKSPACE_MODE_STORAGE_KEY = 'i2v.workspace.mode.v1';
 
 function readWorkspaceMode(storage: Storage): 'scene' | 'keyframe' {
@@ -199,6 +212,9 @@ export function EditorShell({
   );
   const [referenceTrayCollapsed, setReferenceTrayCollapsed] = useState(() =>
     readReferenceTrayCollapsed(storage),
+  );
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>(() =>
+    readRightPanelTab(storage),
   );
   const [assistantPanelExpanded, setAssistantPanelExpanded] = useState(false);
   const [resizingAssistantPanel, setResizingAssistantPanel] = useState(false);
@@ -287,6 +303,14 @@ export function EditorShell({
       // UI preferences should not make the editor unusable when storage fails.
     }
   }, [referenceTrayCollapsed, storage]);
+
+  useEffect(() => {
+    try {
+      storage.setItem(RIGHT_PANEL_TAB_STORAGE_KEY, rightPanelTab);
+    } catch {
+      // UI preferences should not make the editor unusable when storage fails.
+    }
+  }, [rightPanelTab, storage]);
 
   useEffect(() => {
     try {
@@ -540,26 +564,70 @@ export function EditorShell({
                       </button>
                     </div>
                   </div>
-                  <Inspector store={store} />
-                  <SceneAssistantPanel
-                    connection={companionConnection}
-                    connectionError={companionConnectionError}
-                    onDisconnect={onDisconnectCompanion}
-                    getSceneContext={() => store.getState().document}
-                    getSelectedReferences={getSelectedReferences}
-                    captureLayout={
-                      frameExporter === null ? null : captureAssistantLayout
-                    }
-                    onRefinementModeChange={setRefinementModeActive}
-                    refinementSource={refinementSource}
-                    onRefinementSourceChange={setRefinementSource}
-                    onApplySpecPatchProposal={(proposal) =>
-                      store.getState().applySpecPatchProposal(proposal)
-                    }
-                    clientFactory={assistantClientFactory}
-                    createObjectUrl={createAssistantObjectUrl}
-                    revokeObjectUrl={revokeAssistantObjectUrl}
-                  />
+                  <div
+                    className="right-panel-tabs"
+                    role="tablist"
+                    aria-label="우측 패널"
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      id="right-panel-tab-inspector"
+                      aria-selected={rightPanelTab === 'inspector'}
+                      aria-controls="right-panel-inspector"
+                      onClick={() => setRightPanelTab('inspector')}
+                    >
+                      속성
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      id="right-panel-tab-assistant"
+                      aria-selected={rightPanelTab === 'assistant'}
+                      aria-controls="right-panel-assistant"
+                      onClick={() => setRightPanelTab('assistant')}
+                    >
+                      Assistant
+                    </button>
+                  </div>
+                  <div
+                    id="right-panel-inspector"
+                    role="tabpanel"
+                    aria-labelledby="right-panel-tab-inspector"
+                    hidden={rightPanelTab !== 'inspector'}
+                  >
+                    <Inspector store={store} />
+                  </div>
+                  <div
+                    id="right-panel-assistant"
+                    className="right-panel-assistant"
+                    role="tabpanel"
+                    aria-labelledby="right-panel-tab-assistant"
+                    hidden={rightPanelTab !== 'assistant'}
+                  >
+                    <SceneAssistantPanel
+                      connection={companionConnection}
+                      connectionError={companionConnectionError}
+                      onDisconnect={onDisconnectCompanion}
+                      getSceneContext={() => store.getState().document}
+                      getSelectedReferences={getSelectedReferences}
+                      captureLayout={
+                        frameExporter === null ? null : captureAssistantLayout
+                      }
+                      onRefinementModeChange={(active) => {
+                        setRefinementModeActive(active);
+                        if (active) setRightPanelTab('assistant');
+                      }}
+                      refinementSource={refinementSource}
+                      onRefinementSourceChange={setRefinementSource}
+                      onApplySpecPatchProposal={(proposal) =>
+                        store.getState().applySpecPatchProposal(proposal)
+                      }
+                      clientFactory={assistantClientFactory}
+                      createObjectUrl={createAssistantObjectUrl}
+                      revokeObjectUrl={revokeAssistantObjectUrl}
+                    />
+                  </div>
                 </>
               )}
             </aside>

@@ -33,6 +33,7 @@ test('configured Chromium에서 앱 셸과 WebGL available 상태를 표시한�
   }
 
   await expect(status).toHaveText('WebGL을 사용할 수 있습니다.');
+  await page.getByRole('tab', { name: 'Assistant' }).click();
   await expect(
     page.getByRole('heading', { name: 'Scene Assistant' }),
   ).toBeVisible();
@@ -89,6 +90,7 @@ test('우측 패널을 드래그해 넓히고 접기 상태를 복원한다', as
   ).toBeVisible();
 
   await page.getByRole('button', { name: '우측 패널 펼치기' }).click();
+  await page.getByRole('tab', { name: 'Assistant' }).click();
   await expect(
     page.getByRole('heading', { name: 'Scene Assistant' }),
   ).toBeVisible();

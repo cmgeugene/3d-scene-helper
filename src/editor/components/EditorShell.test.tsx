@@ -12,6 +12,7 @@ import {
   ASSISTANT_PANEL_COLLAPSED_STORAGE_KEY,
   ASSISTANT_PANEL_WIDTH_STORAGE_KEY,
   REFERENCE_TRAY_COLLAPSED_STORAGE_KEY,
+  RIGHT_PANEL_TAB_STORAGE_KEY,
   SCENE_STORAGE_KEY,
 } from '../constants';
 import { encodeSceneDocument } from '../persistence/sceneCodec';
@@ -538,6 +539,7 @@ describe('EditorShell', () => {
     );
 
     await user.click(screen.getByRole('button', { name: '우측 패널 펼치기' }));
+    await user.click(screen.getByRole('tab', { name: 'Assistant' }));
     expect(
       screen.getByRole('heading', { name: 'Scene Assistant' }),
     ).toBeVisible();
@@ -553,6 +555,45 @@ describe('EditorShell', () => {
     expect(
       screen.getByRole('separator', { name: '우측 패널 너비 조절' }),
     ).toHaveAttribute('aria-valuenow', '416');
+  });
+
+  it('우측 패널의 속성과 Assistant를 탭으로 전환하고 상태를 저장한다', async () => {
+    const user = userEvent.setup();
+    const storage = createMemoryStorage();
+    const view = render(
+      <EditorShell
+        store={createTestStore()}
+        webGLState="available"
+        storage={storage}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: '속성' })).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: 'Scene Assistant' }),
+    ).toBeNull();
+
+    await user.click(screen.getByRole('tab', { name: 'Assistant' }));
+    expect(screen.queryByRole('heading', { name: '속성' })).toBeNull();
+    expect(
+      screen.getByRole('heading', { name: 'Scene Assistant' }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(storage.getItem(RIGHT_PANEL_TAB_STORAGE_KEY)).toBe('assistant'),
+    );
+    view.unmount();
+
+    render(
+      <EditorShell
+        store={createTestStore()}
+        webGLState="available"
+        storage={storage}
+      />,
+    );
+    expect(
+      screen.getByRole('heading', { name: 'Scene Assistant' }),
+    ).toBeVisible();
+    expect(screen.queryByRole('heading', { name: '속성' })).toBeNull();
   });
 
   it('하단 레퍼런스 트레이를 접고 펼치며 상태를 저장한다', async () => {
