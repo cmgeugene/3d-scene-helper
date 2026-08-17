@@ -5,6 +5,7 @@ import {
   SCENE_STORAGE_KEY,
 } from '../constants';
 import { createMannequinPose } from '../mannequin/mannequinRig';
+import { createLensDepthOfFieldSettings } from '../scene/lensDepthOfField';
 import { sceneDocumentSchema, type SceneDocument } from './sceneSchema';
 
 export class SceneCodecError extends Error {
@@ -37,28 +38,39 @@ function migrateSceneDocument(value: unknown): unknown {
 
   if (value.version === SCENE_DOCUMENT_VERSION) return value;
 
-  if (value.version === 1) {
+  if (value.version === 1 || value.version === 2) {
     const legacy = value as Record<string, unknown>;
-    const objects = Array.isArray(legacy.objects)
-      ? legacy.objects.map((object) => {
-          if (
-            typeof object !== 'object' ||
-            object === null ||
-            !('kind' in object) ||
-            object.kind !== 'mannequin'
-          ) {
-            return object;
+    const objects =
+      value.version === 1 && Array.isArray(legacy.objects)
+        ? legacy.objects.map((object) => {
+            if (
+              typeof object !== 'object' ||
+              object === null ||
+              !('kind' in object) ||
+              object.kind !== 'mannequin'
+            ) {
+              return object;
+            }
+            return {
+              ...object,
+              mannequinPose: createMannequinPose('default'),
+            };
+          })
+        : legacy.objects;
+    const outputCamera =
+      typeof legacy.outputCamera === 'object' &&
+      legacy.outputCamera !== null &&
+      !Array.isArray(legacy.outputCamera)
+        ? {
+            ...legacy.outputCamera,
+            depthOfField: createLensDepthOfFieldSettings(false),
           }
-          return {
-            ...object,
-            mannequinPose: createMannequinPose('default'),
-          };
-        })
-      : legacy.objects;
+        : legacy.outputCamera;
     return {
       ...legacy,
       version: SCENE_DOCUMENT_VERSION,
       objects,
+      outputCamera,
     };
   }
 

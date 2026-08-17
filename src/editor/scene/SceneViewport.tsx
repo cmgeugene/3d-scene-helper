@@ -26,6 +26,7 @@ import type { EditorStore } from '../state/editorStore';
 import { CompositionGuides } from './CompositionGuides';
 import { EditorNavigation } from './EditorNavigation';
 import { LightingRig, SHADOW_BOUNDS_M } from './LightingRig';
+import { CinematicDepthOfField } from './CinematicDepthOfField';
 import { MotionGuides } from './MotionGuides';
 import { computeLetterbox, type LetterboxRectangle } from './cameraMath';
 import { OutputCamera } from './OutputCamera';
@@ -264,6 +265,7 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
       ) : null}
       {motionGuidesVisible ? <MotionGuides document={document} /> : null}
       <EditorHelpers />
+      <CinematicDepthOfField store={store} />
     </>
   );
 }

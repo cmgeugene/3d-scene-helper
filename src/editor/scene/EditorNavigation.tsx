@@ -163,6 +163,7 @@ export function EditorNavigation({ store, enabled }: EditorNavigationProps) {
         },
         focalLengthMm: documentCamera.focalLengthMm,
         rollDeg: documentCamera.rollDeg,
+        depthOfField: documentCamera.depthOfField,
       });
     };
 

@@ -6,6 +6,7 @@ import {
   SAFE_AREA_INSETS,
 } from '../constants';
 import {
+  LinearSRGBColorSpace,
   MathUtils,
   PerspectiveCamera,
   RGBAFormat,
@@ -21,6 +22,11 @@ import {
   type SceneDocument,
 } from '../persistence/sceneSchema';
 import type { GuideVisibility } from '../types';
+import {
+  createLensDepthOfFieldPipeline,
+  type LensDepthOfFieldPipeline,
+} from '../scene/depthOfFieldPipeline';
+import { getDepthOfFieldRuntimeParameters } from '../scene/lensDepthOfField';
 
 export type OutputPresetId =
   '1280x720' | '1920x1080' | '1080x1920' | 'square' | 'cinematic';
@@ -62,6 +68,7 @@ interface ExportFrameDependencies {
     samples: number,
   ) => WebGLRenderTarget;
   createCanvas: () => HTMLCanvasElement;
+  createDepthOfFieldPipeline: typeof createLensDepthOfFieldPipeline;
 }
 
 const EXPORT_SUPERSAMPLE_SCALE = 2;
@@ -364,12 +371,17 @@ const DEFAULT_EXPORT_DEPENDENCIES: ExportFrameDependencies = {
       samples,
     }),
   createCanvas: () => document.createElement('canvas'),
+  createDepthOfFieldPipeline: createLensDepthOfFieldPipeline,
 };
 
 export async function exportFrame(
   request: FrameExportRuntimeRequest,
-  dependencies: ExportFrameDependencies = DEFAULT_EXPORT_DEPENDENCIES,
+  dependencyOverrides: Partial<ExportFrameDependencies> = {},
 ): Promise<Blob> {
+  const dependencies = {
+    ...DEFAULT_EXPORT_DEPENDENCIES,
+    ...dependencyOverrides,
+  };
   const { renderer, scene, document, guideVisibility } = request;
   const { width, height } = validateOutputDimensions(
     document.output.aspectRatioId,
@@ -395,13 +407,16 @@ export async function exportFrame(
   const camera = createExportCamera(document, policy.layerMask);
   const pixels = (() => {
     let target: WebGLRenderTarget | null = null;
+    let depthOfFieldPipeline: LensDepthOfFieldPipeline | null = null;
     try {
       target = dependencies.createRenderTarget(
         renderWidth,
         renderHeight,
         sampleCount,
       );
-      target.texture.colorSpace = SRGBColorSpace;
+      target.texture.colorSpace = document.outputCamera.depthOfField.enabled
+        ? LinearSRGBColorSpace
+        : SRGBColorSpace;
       const targetPixels = new Uint8Array(renderWidth * renderHeight * 4);
       const previousTarget = renderer.getRenderTarget();
       const previousPixelRatio = renderer.getPixelRatio();
@@ -415,14 +430,32 @@ export async function exportFrame(
         renderer.setPixelRatio(1);
         renderer.outputColorSpace = SRGBColorSpace;
         renderer.toneMappingExposure = document.lighting.exposure;
-        renderer.setRenderTarget(target);
         renderer.setViewport(new Vector4(0, 0, renderWidth, renderHeight));
         renderer.setScissor(new Vector4(0, 0, renderWidth, renderHeight));
         renderer.setScissorTest(false);
-        renderer.render(scene, camera);
+        let readbackTarget = target;
+        if (document.outputCamera.depthOfField.enabled) {
+          depthOfFieldPipeline = dependencies.createDepthOfFieldPipeline({
+            renderer,
+            scene,
+            camera,
+            target,
+            width: renderWidth,
+            height: renderHeight,
+            pixelRatio: 1,
+            renderToScreen: false,
+            parameters: getDepthOfFieldRuntimeParameters(document.outputCamera),
+            baseLayerMask: 1 << RENDER_LAYERS.scene,
+            overlayLayerMask: policy.layerMask & ~(1 << RENDER_LAYERS.scene),
+          });
+          readbackTarget = depthOfFieldPipeline.render();
+        } else {
+          renderer.setRenderTarget(target);
+          renderer.render(scene, camera);
+        }
         renderer.setRenderTarget(previousTarget);
         renderer.readRenderTargetPixels(
-          target,
+          readbackTarget,
           0,
           0,
           renderWidth,
@@ -446,7 +479,8 @@ export async function exportFrame(
 
       return targetPixels;
     } finally {
-      target?.dispose();
+      if (depthOfFieldPipeline !== null) depthOfFieldPipeline.dispose();
+      else target?.dispose();
     }
   })();
 

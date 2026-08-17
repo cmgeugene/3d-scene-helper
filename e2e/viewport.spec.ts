@@ -393,6 +393,7 @@ test('viewport OutputCamera runtime mirror가 controls 동기화 뒤에도 docum
     const state = globalThis.__I2V_EDITOR_STORE__?.getState();
     if (state === undefined) throw new Error('E2E editor store가 없습니다.');
     state.commitCamera({
+      ...state.document.outputCamera,
       position: { x: 0, y: 1.6, z: 5 },
       target: { x: 0, y: 1.6, z: 0 },
       focalLengthMm: 35,

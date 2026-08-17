@@ -265,6 +265,47 @@ describe('EditorShell', () => {
     expect(store.getState().document.objects).toHaveLength(2);
   });
 
+  it('T shortcut은 camera button과 같은 target action을 쓰고 focus/modifier guard를 지킨다', async () => {
+    const user = userEvent.setup();
+    const store = createTestStore();
+    render(<EditorShell store={store} webGLState="available" />);
+    await user.click(screen.getByRole('button', { name: 'Mannequin' }));
+    await user.click(screen.getByRole('button', { name: '카메라' }));
+
+    const original = structuredClone(store.getState().document.outputCamera);
+    await user.click(
+      screen.getByRole('button', { name: '선택을 타겟·초점으로 (T)' }),
+    );
+    const buttonCamera = structuredClone(
+      store.getState().document.outputCamera,
+    );
+    expect(store.getState().history.past).toHaveLength(1);
+    store.getState().undo();
+    expect(store.getState().document.outputCamera).toEqual(original);
+
+    await user.keyboard('t');
+    expect(store.getState().document.outputCamera).toEqual(buttonCamera);
+    expect(store.getState().history.past).toHaveLength(1);
+
+    store.getState().undo();
+    const lens = screen.getByLabelText('렌즈');
+    await user.click(lens);
+    await user.keyboard('t');
+    expect(store.getState().document.outputCamera).toEqual(original);
+    await user.click(
+      screen.getByRole('heading', { name: 'I2V 3D Scene Helper' }),
+    );
+    await user.keyboard('{Control>}t{/Control}');
+    expect(store.getState().document.outputCamera).toEqual(original);
+
+    store.getState().selectObject(null);
+    await user.keyboard('t');
+    expect(store.getState().document.outputCamera).toEqual(original);
+    expect(store.getState().statusMessage).toBe(
+      '카메라 타겟·초점으로 설정할 오브젝트를 먼저 선택하세요.',
+    );
+  });
+
   it('undo/redo 버튼과 Cmd/Ctrl+Z shortcut을 focus guard와 함께 연결한다', async () => {
     const user = userEvent.setup();
     const store = createTestStore();

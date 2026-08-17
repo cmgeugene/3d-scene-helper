@@ -130,9 +130,10 @@ async function verifySurfaceGridCleanExport(
     });
     const target = owner.transform.position;
     state.commitCamera({
+      ...state.document.outputCamera,
       position: { x: target.x + 3, y: target.y + 3, z: target.z + 3 },
       target,
-      focalLengthMm: 55,
+      focalLengthMm: 50,
       rollDeg: 0,
     });
   }, kind);
@@ -318,10 +319,18 @@ test('front/rear asymmetric mannequin cues remain pixel-readable in both PNG mod
   await openExportEditor(page);
   await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
   await page.evaluate(() => {
-    const state = globalThis.__I2V_EDITOR_STORE__?.getState();
+    const store = globalThis.__I2V_EDITOR_STORE__;
+    const state = store?.getState();
     if (state === undefined) throw new Error('E2E editor store가 없습니다.');
-    state.commitCamera({
-      ...state.document.outputCamera,
+    (
+      state as unknown as {
+        setCameraDepthOfFieldEnabled: (enabled: boolean) => void;
+      }
+    ).setCameraDepthOfFieldEnabled(false);
+    const latest = store?.getState();
+    if (latest === undefined) throw new Error('E2E editor store가 없습니다.');
+    latest.commitCamera({
+      ...latest.document.outputCamera,
       position: { x: 0, y: 1.6, z: -5 },
       target: { x: 0, y: 1.6, z: 0 },
       rollDeg: 0,
@@ -471,13 +480,26 @@ test('export dialog traps destructive editor shortcuts until it closes', async (
     exact: true,
   });
   await mannequin.click();
+  const cameraBeforeModal = await page.evaluate(() =>
+    structuredClone(
+      globalThis.__I2V_EDITOR_STORE__?.getState().document.outputCamera,
+    ),
+  );
   await page.getByRole('button', { name: 'PNG 내보내기' }).click();
   const dialog = page.getByRole('dialog', { name: 'PNG 내보내기' });
   await dialog.getByRole('button', { name: '취소' }).focus();
 
   await page.keyboard.press('Delete');
+  await page.keyboard.press('t');
 
   await expect(mannequin).toBeVisible();
   await expect(dialog).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      structuredClone(
+        globalThis.__I2V_EDITOR_STORE__?.getState().document.outputCamera,
+      ),
+    ),
+  ).toEqual(cameraBeforeModal);
   await dialog.getByRole('button', { name: '취소' }).click();
 });

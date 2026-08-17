@@ -29,6 +29,18 @@ export function EditorShortcuts({ store }: EditorShortcutsProps) {
         !event.metaKey &&
         !event.ctrlKey &&
         !event.altKey &&
+        !event.shiftKey &&
+        key === 't'
+      ) {
+        state.targetSelected();
+        event.preventDefault();
+        return;
+      }
+
+      if (
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
         (key === 'w' || key === 'e' || key === 'r')
       ) {
         state.setTransformMode(

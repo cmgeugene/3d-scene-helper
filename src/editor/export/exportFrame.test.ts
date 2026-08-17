@@ -247,10 +247,16 @@ function createExportDocument(mode: 'clean' | 'reference' = 'clean') {
     mode,
   };
   document.outputCamera = {
+    ...document.outputCamera,
     position: { x: 1, y: 2, z: 6 },
     target: { x: -0.25, y: 1.25, z: 0.5 },
     focalLengthMm: 35,
     rollDeg: 12,
+    depthOfField: {
+      enabled: false,
+      apertureMode: 'auto',
+      fStop: 4,
+    },
   };
   return document;
 }
@@ -372,6 +378,131 @@ function createCanvasDouble(blob = new Blob(['png'], { type: 'image/png' })) {
 }
 
 describe('exportFrame offscreen runtime', () => {
+  it('enabled DOF는 shared composer optics로 render/readback하고 pipeline을 dispose한다', async () => {
+    const runtime = createRendererDouble();
+    const baseTarget = {
+      texture: { colorSpace: LinearSRGBColorSpace },
+      dispose: vi.fn(),
+    } as unknown as WebGLRenderTarget;
+    const outputTarget = {
+      texture: { colorSpace: LinearSRGBColorSpace },
+      dispose: vi.fn(),
+    } as unknown as WebGLRenderTarget;
+    const render = vi.fn(() => outputTarget);
+    const dispose = vi.fn();
+    const createDepthOfFieldPipeline = vi.fn(() => ({
+      render,
+      setSize: vi.fn(),
+      update: vi.fn(),
+      dispose,
+    }));
+    const source = createCanvasDouble();
+    const output = createCanvasDouble();
+    const document = createExportDocument();
+    document.outputCamera.depthOfField.enabled = true;
+    const createCanvas = vi
+      .fn<() => HTMLCanvasElement>()
+      .mockReturnValueOnce(source.canvas)
+      .mockReturnValueOnce(output.canvas);
+
+    await exportFrame(
+      {
+        renderer: runtime.renderer,
+        scene: new Scene(),
+        document,
+        guideVisibility: {
+          thirds: false,
+          center: false,
+          actionSafe: false,
+          titleSafe: false,
+          motion: false,
+        },
+      },
+      {
+        createRenderTarget: () => baseTarget,
+        createCanvas,
+        createDepthOfFieldPipeline,
+      },
+    );
+
+    expect(createDepthOfFieldPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: baseTarget,
+        renderToScreen: false,
+        parameters: expect.objectContaining({
+          enabled: true,
+          focusDistanceM: expect.any(Number),
+          focalLengthMm: 35,
+          fStop: 4,
+        }),
+      }),
+    );
+    expect(baseTarget.texture.colorSpace).toBe(LinearSRGBColorSpace);
+    expect(render).toHaveBeenCalledOnce();
+    expect(runtime.readRenderTargetPixels).toHaveBeenCalledWith(
+      outputTarget,
+      0,
+      0,
+      128,
+      128,
+      expect.any(Uint8Array),
+    );
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(runtime.readState().target).toBe(runtime.originalTarget);
+  });
+
+  it('DOF composer render failure에서도 pipeline과 renderer state를 복구한다', async () => {
+    const runtime = createRendererDouble();
+    const target = {
+      texture: { colorSpace: LinearSRGBColorSpace },
+      dispose: vi.fn(),
+    } as unknown as WebGLRenderTarget;
+    const dispose = vi.fn();
+    const createCanvas = vi.fn(() => createCanvasDouble().canvas);
+    const document = createExportDocument();
+    document.outputCamera.depthOfField.enabled = true;
+
+    await expect(
+      exportFrame(
+        {
+          renderer: runtime.renderer,
+          scene: new Scene(),
+          document,
+          guideVisibility: {
+            thirds: false,
+            center: false,
+            actionSafe: false,
+            titleSafe: false,
+            motion: false,
+          },
+        },
+        {
+          createRenderTarget: () => target,
+          createCanvas,
+          createDepthOfFieldPipeline: () => ({
+            render: () => {
+              throw new Error('DOF render failed');
+            },
+            setSize: vi.fn(),
+            update: vi.fn(),
+            dispose,
+          }),
+        },
+      ),
+    ).rejects.toThrow('DOF render failed');
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(createCanvas).not.toHaveBeenCalled();
+    expect(runtime.readState()).toEqual({
+      target: runtime.originalTarget,
+      pixelRatio: 2,
+      viewport: [3, 4, 320, 180],
+      scissor: [5, 6, 300, 160],
+      scissorTest: true,
+      outputColorSpace: LinearSRGBColorSpace,
+      toneMappingExposure: 0.75,
+    });
+  });
+
   it('saved OutputCamera와 output aspect로 layer-isolated export camera를 재구성한다', () => {
     const document = createExportDocument('reference');
     const camera = createExportCamera(document, 5);

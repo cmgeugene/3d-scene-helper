@@ -33,6 +33,11 @@ import {
   computeFrameSelectedCamera,
   computeLookAtSelectedCamera,
 } from '../scene/cameraMath';
+import {
+  getAutoApertureForLens,
+  MAX_F_STOP,
+  MIN_F_STOP,
+} from '../scene/lensDepthOfField';
 import { getSceneObjectBounds } from '../scene/sceneObjectModel';
 import type {
   EditorNavigation,
@@ -113,9 +118,14 @@ export interface EditorStore {
   resetScene: () => void;
   commitCamera: (camera: SceneDocument['outputCamera']) => void;
   setCameraLens: (focalLengthMm: LensPreset['focalLengthMm']) => void;
+  setCameraDepthOfFieldEnabled: (enabled: boolean) => void;
+  setCameraApertureMode: (
+    apertureMode: SceneDocument['outputCamera']['depthOfField']['apertureMode'],
+  ) => void;
+  setCameraFStop: (fStop: number) => void;
   applyCameraShot: (presetId: CameraShotPreset['id']) => void;
   frameSelected: () => void;
-  lookAtSelected: () => void;
+  targetSelected: () => void;
   applyLightingPreset: (presetId: LightingPresetId) => void;
   resetLightingPreset: () => void;
   setLighting: (lighting: SceneDocument['lighting']) => void;
@@ -558,8 +568,64 @@ export function createEditorStore(options: EditorStoreOptions) {
         throw new RangeError('지원하지 않는 렌즈 프리셋입니다.');
       }
       const camera = get().document.outputCamera;
-      get().commitCamera({ ...camera, focalLengthMm });
+      get().commitCamera({
+        ...camera,
+        focalLengthMm,
+        depthOfField:
+          camera.depthOfField.apertureMode === 'auto'
+            ? {
+                ...camera.depthOfField,
+                fStop: getAutoApertureForLens(focalLengthMm),
+              }
+            : camera.depthOfField,
+      });
       set({ statusMessage: `${focalLengthMm}mm 렌즈를 적용했습니다.` });
+    },
+    setCameraDepthOfFieldEnabled: (enabled) => {
+      const camera = get().document.outputCamera;
+      get().commitCamera({
+        ...camera,
+        depthOfField: { ...camera.depthOfField, enabled },
+      });
+      set({
+        statusMessage: enabled
+          ? '시네마틱 심도를 사용합니다.'
+          : '시네마틱 심도를 끕니다.',
+      });
+    },
+    setCameraApertureMode: (apertureMode) => {
+      const camera = get().document.outputCamera;
+      get().commitCamera({
+        ...camera,
+        depthOfField: {
+          ...camera.depthOfField,
+          apertureMode,
+          fStop:
+            apertureMode === 'auto'
+              ? getAutoApertureForLens(camera.focalLengthMm)
+              : camera.depthOfField.fStop,
+        },
+      });
+      set({
+        statusMessage:
+          apertureMode === 'auto'
+            ? '렌즈 자동 조리개를 사용합니다.'
+            : '수동 조리개를 사용합니다.',
+      });
+    },
+    setCameraFStop: (fStop) => {
+      if (!Number.isFinite(fStop) || fStop < MIN_F_STOP || fStop > MAX_F_STOP) {
+        throw new RangeError(
+          `f-stop은 ${MIN_F_STOP}..${MAX_F_STOP} 범위여야 합니다.`,
+        );
+      }
+      const camera = get().document.outputCamera;
+      if (camera.depthOfField.apertureMode !== 'manual') return;
+      get().commitCamera({
+        ...camera,
+        depthOfField: { ...camera.depthOfField, fStop },
+      });
+      set({ statusMessage: `수동 조리개 f/${fStop}을 적용했습니다.` });
     },
     applyCameraShot: (presetId) => {
       const preset = CAMERA_SHOT_PRESETS.find(({ id }) => id === presetId);
@@ -599,13 +665,16 @@ export function createEditorStore(options: EditorStoreOptions) {
       );
       set({ statusMessage: `${selected.name}을 프레임에 맞췄습니다.` });
     },
-    lookAtSelected: () => {
+    targetSelected: () => {
       const state = get();
       const selected = state.document.objects.find(
         ({ id }) => id === state.selectedObjectId,
       );
       if (selected === undefined) {
-        set({ statusMessage: '바라볼 오브젝트를 먼저 선택하세요.' });
+        set({
+          statusMessage:
+            '카메라 타겟·초점으로 설정할 오브젝트를 먼저 선택하세요.',
+        });
         return;
       }
       get().commitCamera(
@@ -614,7 +683,9 @@ export function createEditorStore(options: EditorStoreOptions) {
           state.document.outputCamera,
         ),
       );
-      set({ statusMessage: `${selected.name}을 바라봅니다.` });
+      set({
+        statusMessage: `${selected.name}을 카메라 타겟·초점으로 설정했습니다.`,
+      });
     },
     applyLightingPreset: (presetId) => {
       set((state) => {

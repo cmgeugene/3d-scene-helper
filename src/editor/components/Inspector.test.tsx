@@ -212,7 +212,25 @@ describe('Inspector', () => {
       LENS_PRESETS.length,
     );
     await user.selectOptions(lens, '35');
-    expect(store.getState().document.outputCamera.focalLengthMm).toBe(35);
+    expect(store.getState().document.outputCamera).toMatchObject({
+      focalLengthMm: 35,
+      depthOfField: { apertureMode: 'auto', fStop: 4 },
+    });
+
+    expect(screen.getByRole('group', { name: '시네마틱 심도' })).toBeVisible();
+    await user.click(screen.getByRole('checkbox', { name: '심도 사용' }));
+    expect(store.getState().document.outputCamera.depthOfField.enabled).toBe(
+      false,
+    );
+    await user.click(screen.getByRole('radio', { name: '수동 조리개' }));
+    const fStop = screen.getByLabelText('조리개 F값');
+    await user.clear(fStop);
+    await user.type(fStop, '1.8');
+    fireEvent.blur(fStop);
+    expect(store.getState().document.outputCamera.depthOfField).toMatchObject({
+      apertureMode: 'manual',
+      fStop: 1.8,
+    });
 
     const shotGroup = screen.getByRole('group', { name: '샷 프리셋' });
     for (const preset of CAMERA_SHOT_PRESETS) {
@@ -241,8 +259,12 @@ describe('Inspector', () => {
       y: 0.85,
       z: -0.047,
     });
-    await user.click(screen.getByRole('button', { name: '선택 바라보기' }));
-    expect(store.getState().statusMessage).toBe('Mannequin을 바라봅니다.');
+    await user.click(
+      screen.getByRole('button', { name: '선택을 타겟·초점으로 (T)' }),
+    );
+    expect(store.getState().statusMessage).toBe(
+      'Mannequin을 카메라 타겟·초점으로 설정했습니다.',
+    );
   });
 
   it('camera selected action은 selection이 없을 때 camera를 보존하고 status를 설정한다', async () => {
@@ -257,10 +279,12 @@ describe('Inspector', () => {
     expect(store.getState().statusMessage).toBe(
       '프레임에 맞출 오브젝트를 먼저 선택하세요.',
     );
-    await user.click(screen.getByRole('button', { name: '선택 바라보기' }));
+    await user.click(
+      screen.getByRole('button', { name: '선택을 타겟·초점으로 (T)' }),
+    );
     expect(store.getState().document.outputCamera).toBe(camera);
     expect(store.getState().statusMessage).toBe(
-      '바라볼 오브젝트를 먼저 선택하세요.',
+      '카메라 타겟·초점으로 설정할 오브젝트를 먼저 선택하세요.',
     );
   });
 

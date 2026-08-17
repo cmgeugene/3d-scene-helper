@@ -262,9 +262,9 @@ export function computeCameraShot(
   );
 
   return {
+    ...camera,
     position: positionFromBackward(target, backward, distance),
     target,
-    focalLengthMm: camera.focalLengthMm,
     rollDeg: preset.framing.rollDeg,
   };
 }

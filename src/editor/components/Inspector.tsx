@@ -5,6 +5,7 @@ import type { SceneObject } from '../persistence/sceneSchema';
 import { MANNEQUIN_BODY_TYPE_PRESETS } from '../mannequin/mannequinBodyType';
 import { CAMERA_SHOT_PRESETS, LENS_PRESETS } from '../presets/cameras';
 import { LIGHTING_PRESETS } from '../presets/lighting';
+import { MAX_F_STOP, MIN_F_STOP } from '../scene/lensDepthOfField';
 import type { EditorStore } from '../state/editorStore';
 import type { EditorPanel } from '../types';
 
@@ -167,6 +168,56 @@ function CameraControls({ store }: InspectorProps) {
         </select>
       </label>
       <fieldset>
+        <legend>시네마틱 심도</legend>
+        <label className="camera-field">
+          <input
+            aria-label="심도 사용"
+            type="checkbox"
+            checked={camera.depthOfField.enabled}
+            onChange={(event) => {
+              store
+                .getState()
+                .setCameraDepthOfFieldEnabled(event.currentTarget.checked);
+            }}
+          />
+          <span>시네마틱 심도 사용</span>
+        </label>
+        <div role="radiogroup" aria-label="조리개 모드">
+          <label>
+            <input
+              type="radio"
+              name="camera-aperture-mode"
+              aria-label="자동 조리개"
+              checked={camera.depthOfField.apertureMode === 'auto'}
+              onChange={() => store.getState().setCameraApertureMode('auto')}
+            />
+            <span>자동</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="camera-aperture-mode"
+              aria-label="수동 조리개"
+              checked={camera.depthOfField.apertureMode === 'manual'}
+              onChange={() => store.getState().setCameraApertureMode('manual')}
+            />
+            <span>수동</span>
+          </label>
+        </div>
+        <label className="camera-field">
+          <span>조리개 F값</span>
+          <LightingNumberInput
+            ariaLabel="조리개 F값"
+            value={camera.depthOfField.fStop}
+            min={MIN_F_STOP}
+            max={MAX_F_STOP}
+            disabled={camera.depthOfField.apertureMode !== 'manual'}
+            onCommit={(fStop) => store.getState().setCameraFStop(fStop)}
+          />
+        </label>
+        <p>타겟 평면을 선명하게 유지하는 시네마틱 심도 근사입니다.</p>
+      </fieldset>
+      <fieldset>
         <legend>샷 프리셋</legend>
         <div className="shot-grid">
           {CAMERA_SHOT_PRESETS.map((preset) => (
@@ -194,10 +245,10 @@ function CameraControls({ store }: InspectorProps) {
         <button
           type="button"
           onClick={() => {
-            store.getState().lookAtSelected();
+            store.getState().targetSelected();
           }}
         >
-          선택 바라보기
+          선택을 타겟·초점으로 (T)
         </button>
       </div>
       <fieldset>
@@ -243,6 +294,7 @@ interface LightingNumberInputProps {
   value: number;
   min: number;
   max: number;
+  disabled?: boolean;
   onCommit: (value: number) => void;
 }
 
@@ -251,6 +303,7 @@ function LightingNumberInput({
   value,
   min,
   max,
+  disabled = false,
   onCommit,
 }: LightingNumberInputProps) {
   const [draft, setDraft] = useState<string | null>(null);
@@ -275,6 +328,7 @@ function LightingNumberInput({
       aria-label={ariaLabel}
       type="text"
       inputMode="decimal"
+      disabled={disabled}
       value={draft ?? String(value)}
       onFocus={() => {
         setDraft(String(value));

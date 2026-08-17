@@ -18,6 +18,7 @@ const forbiddenMarkers = [
   'orbitEnabled',
   'facingHelper',
   'runtimeLighting',
+  'runtimeDof',
   'motionGuides',
   'mannequinRig',
   'mannequinPivots',

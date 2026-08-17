@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 
-const STORAGE_KEY = 'i2v-3d-scene-helper:scene:v2';
+const STORAGE_KEY = 'i2v-3d-scene-helper:scene:v3';
 
 interface BrowserStorageGlobal {
   localStorage: {
@@ -236,6 +236,6 @@ test('persistence exports validated scene JSON and undo shortcuts respect input 
     version: number;
     objects: Array<{ kind: string }>;
   };
-  expect(exported.version).toBe(2);
+  expect(exported.version).toBe(3);
   expect(exported.objects.some(({ kind }) => kind === 'cube')).toBe(true);
 });

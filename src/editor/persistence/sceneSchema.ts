@@ -9,6 +9,11 @@ import {
 } from '../constants';
 import { MANNEQUIN_BODY_TYPE_IDS } from '../mannequin/mannequinBodyType';
 import { createMannequinPose } from '../mannequin/mannequinRig';
+import {
+  createLensDepthOfFieldSettings,
+  MAX_F_STOP,
+  MIN_F_STOP,
+} from '../scene/lensDepthOfField';
 
 const stableIdSchema = z.string().trim().min(1);
 
@@ -137,12 +142,35 @@ const sceneObjectSchema = z.preprocess((value) => {
   return value;
 }, validatedSceneObjectSchema);
 
-const outputCameraSchema = z.strictObject({
-  position: vector3Schema,
-  target: vector3Schema,
-  focalLengthMm: z.number().positive(),
-  rollDeg: z.number(),
+const depthOfFieldSchema = z.strictObject({
+  enabled: z.boolean(),
+  apertureMode: z.enum(['auto', 'manual']),
+  fStop: z.number().min(MIN_F_STOP).max(MAX_F_STOP),
 });
+
+const outputCameraSchema = z
+  .strictObject({
+    position: vector3Schema,
+    target: vector3Schema,
+    focalLengthMm: z.number().positive(),
+    rollDeg: z.number(),
+    depthOfField: depthOfFieldSchema,
+  })
+  .superRefine((camera, context) => {
+    const distance = Math.hypot(
+      camera.position.x - camera.target.x,
+      camera.position.y - camera.target.y,
+      camera.position.z - camera.target.z,
+    );
+    if (!Number.isFinite(distance) || distance <= 1e-6) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'Output camera position and target must define a focus distance',
+        path: ['target'],
+      });
+    }
+  });
 
 const lightSchema = z.strictObject({
   color: z.string().regex(/^#[0-9a-f]{6}$/i),
@@ -400,6 +428,7 @@ export function createStarterSceneDocument(
       target: { x: 0, y: 1.6, z: 0 },
       focalLengthMm: 50,
       rollDeg: 0,
+      depthOfField: createLensDepthOfFieldSettings(true),
     },
     lighting: {
       presetId: 'neutral-studio',
