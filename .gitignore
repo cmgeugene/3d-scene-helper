@@ -15,6 +15,17 @@ coverage/
 playwright-report/
 test-results/
 blob-report/
+.artifacts/
+
+# Local Scene Assistant project data and generated images
+/assets/generations/
+/assets/references/
+/assets/scene-renders/
+/generations.json
+/references.json
+/conversations.json
+/runtime-requests.json
+/.i2v-companion.lock
 
 # Local environment and editor files
 .env

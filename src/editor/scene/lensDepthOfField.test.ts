@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   PHOTOGRAPHIC_F_STOPS,
+  createDepthOfFieldSettingsForLens,
   createLensDepthOfFieldSettings,
   getAutoApertureForLens,
   getDepthOfFieldRuntimeParameters,
@@ -59,6 +60,27 @@ describe('lens-aware depth of field optics', () => {
       fStop: 2.8,
       aperture: 0.002,
     });
+  });
+
+  it('keeps exact lens presets automatic and gives arbitrary solver lenses a valid manual fallback', () => {
+    expect(createDepthOfFieldSettingsForLens(24, true)).toEqual({
+      enabled: true,
+      apertureMode: 'auto',
+      fStop: 5.6,
+    });
+    expect(createDepthOfFieldSettingsForLens(65, true)).toEqual({
+      enabled: true,
+      apertureMode: 'manual',
+      fStop: 2.8,
+    });
+    expect(
+      getDepthOfFieldRuntimeParameters({
+        position: { x: 0, y: 1, z: -5 },
+        target: { x: 0, y: 1, z: 0 },
+        focalLengthMm: 65,
+        depthOfField: createDepthOfFieldSettingsForLens(65, true),
+      }),
+    ).toMatchObject({ enabled: true, focalLengthMm: 65, fStop: 2.8 });
   });
 
   it('rejects unsupported lenses, invalid f-stops, and degenerate/non-finite camera vectors', () => {

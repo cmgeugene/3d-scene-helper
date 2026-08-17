@@ -8,6 +8,11 @@ import type { SceneDocument } from '../persistence/sceneSchema';
 import { applyOutputCameraProjection } from '../scene/cameraMath';
 import type { CinematicSubjectProfile } from './cinematicSubjectProfile';
 
+type ProjectionCamera = Pick<
+  SceneDocument['outputCamera'],
+  'position' | 'target' | 'focalLengthMm' | 'rollDeg'
+>;
+
 export interface ProjectedPoint {
   ndc: { x: number; y: number; z: number };
   inFront: boolean;
@@ -49,7 +54,7 @@ function requireFinite(value: number, name: string) {
 }
 
 function createOutputCamera(
-  cameraData: SceneDocument['outputCamera'],
+  cameraData: ProjectionCamera,
   outputAspect: number,
 ) {
   requirePositiveFinite(outputAspect, 'outputAspect');
@@ -124,7 +129,7 @@ function projectPoint(
 
 export function computeCinematicProjectionMetrics(
   profile: CinematicSubjectProfile,
-  cameraData: SceneDocument['outputCamera'],
+  cameraData: ProjectionCamera,
   outputAspect: number,
 ): CinematicProjectionMetrics {
   const camera = createOutputCamera(cameraData, outputAspect);

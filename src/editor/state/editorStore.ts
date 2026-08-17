@@ -9,6 +9,12 @@ import {
   type SceneDocument,
   type SceneObject,
 } from '../persistence/sceneSchema';
+import type { SemanticSceneSpec } from '../persistence/semanticSceneSpec';
+import {
+  evaluateSpecPatchProposal,
+  type SpecPatchEvaluation,
+  type SpecPatchProposal,
+} from '../persistence/specPatchProposal';
 import {
   createMannequinPose,
   type MannequinPosePresetId,
@@ -65,8 +71,11 @@ export const DOCUMENT_MUTATION_KINDS = [
   'update-lighting-background',
   'update-output',
   'update-motion-metadata',
+  'update-semantic-scene-spec',
+  'apply-scene-change-proposal',
   'commit-mannequin-pose',
   'update-mannequin-appearance',
+  'apply-generation-snapshot',
 ] as const;
 
 export type DocumentMutationKind = (typeof DOCUMENT_MUTATION_KINDS)[number];
@@ -103,6 +112,7 @@ export interface EditorStore {
   selectObject: (id: string | null) => void;
   setHoveredObject: (id: string | null) => void;
   renameObject: (id: string, name: string) => void;
+  setObjectSemantic: (id: string, semantic: SceneObject['semantic']) => void;
   setObjectColor: (id: string, color: string) => void;
   setObjectVisibility: (id: string, visible: boolean) => void;
   applyMannequinBodyTypePreset: (bodyType: MannequinBodyTypeId) => void;
@@ -140,6 +150,8 @@ export interface EditorStore {
     guide: NonNullable<SceneDocument['cameraMotionGuide']> | null,
   ) => void;
   setSceneNotes: (notes: string) => void;
+  setSemanticSceneSpec: (spec: SemanticSceneSpec) => void;
+  applySpecPatchProposal: (proposal: SpecPatchProposal) => SpecPatchEvaluation;
   setTransformMode: (mode: TransformMode) => void;
   setMannequinTool: (tool: MannequinTool) => void;
   setGuideVisibility: (visibility: Partial<GuideVisibility>) => void;
@@ -149,6 +161,10 @@ export interface EditorStore {
   setStatusMessage: (statusMessage: string | null) => void;
   replaceDocument: (document: SceneDocument, persisted: boolean) => void;
   markDocumentPersisted: (document: SceneDocument) => void;
+  applyGenerationSnapshot: (
+    document: SceneDocument,
+    source: NonNullable<SceneDocument['generationSource']>,
+  ) => void;
   undo: () => void;
   redo: () => void;
 }
@@ -159,23 +175,47 @@ export function createEditorStore(options: EditorStoreOptions) {
   let persistedDocument = structuredClone(document);
   const documentsEqual = (left: SceneDocument, right: SceneDocument) =>
     JSON.stringify(left) === JSON.stringify(right);
-  const createResetState = (nextDocument: SceneDocument) => ({
-    document: nextDocument,
-    history: createDocumentHistory<SceneDocument, DocumentMutationKind>(),
-    canUndo: false,
-    canRedo: false,
-    selectedObjectId: null,
-    hoveredObjectId: null,
-    inProgressTransform: null,
-    inProgressMannequinPose: null,
-    navigation: {
-      position: structuredClone(nextDocument.outputCamera.position),
-      target: structuredClone(nextDocument.outputCamera.target),
-      isInteracting: false,
-    },
-    isDirty: !documentsEqual(nextDocument, persistedDocument),
-    statusMessage: null,
-  });
+  const documentContentsEqual = (left: SceneDocument, right: SceneDocument) =>
+    JSON.stringify({ ...left, sceneRevision: 0, specRevision: 0 }) ===
+    JSON.stringify({ ...right, sceneRevision: 0, specRevision: 0 });
+  const semanticSpecsEqual = (left: SceneDocument, right: SceneDocument) =>
+    JSON.stringify(left.semanticSceneSpec) ===
+    JSON.stringify(right.semanticSceneSpec);
+  const withNextRevision = (
+    currentDocument: SceneDocument,
+    nextDocument: SceneDocument,
+  ) =>
+    sceneDocumentSchema.parse({
+      ...nextDocument,
+      sceneRevision:
+        Math.max(currentDocument.sceneRevision, nextDocument.sceneRevision) + 1,
+      specRevision:
+        Math.max(currentDocument.specRevision, nextDocument.specRevision) +
+        (semanticSpecsEqual(currentDocument, nextDocument) ? 0 : 1),
+    });
+  const createResetState = (
+    currentDocument: SceneDocument,
+    replacement: SceneDocument,
+  ) => {
+    const nextDocument = withNextRevision(currentDocument, replacement);
+    return {
+      document: nextDocument,
+      history: createDocumentHistory<SceneDocument, DocumentMutationKind>(),
+      canUndo: false,
+      canRedo: false,
+      selectedObjectId: null,
+      hoveredObjectId: null,
+      inProgressTransform: null,
+      inProgressMannequinPose: null,
+      navigation: {
+        position: structuredClone(nextDocument.outputCamera.position),
+        target: structuredClone(nextDocument.outputCamera.target),
+        isInteracting: false,
+      },
+      isDirty: !documentContentsEqual(nextDocument, persistedDocument),
+      statusMessage: null,
+    };
+  };
 
   const recordMutation = (
     state: EditorStore,
@@ -192,6 +232,7 @@ export function createEditorStore(options: EditorStoreOptions) {
         isDirty: state.isDirty,
       };
     }
+    const revisionedDocument = withNextRevision(state.document, nextDocument);
     const history = recordDocumentHistory(
       state.history,
       state.document,
@@ -200,11 +241,11 @@ export function createEditorStore(options: EditorStoreOptions) {
     );
 
     return {
-      document: nextDocument,
+      document: revisionedDocument,
       history,
       canUndo: history.past.length > 0,
       canRedo: false,
-      isDirty: !documentsEqual(nextDocument, persistedDocument),
+      isDirty: !documentContentsEqual(revisionedDocument, persistedDocument),
     };
   };
 
@@ -304,6 +345,9 @@ export function createEditorStore(options: EditorStoreOptions) {
     },
     renameObject: (id, name) => {
       updateObject(set, id, { name });
+    },
+    setObjectSemantic: (id, semantic) => {
+      updateObject(set, id, { semantic });
     },
     setObjectColor: (id, color) => {
       updateObject(set, id, { color });
@@ -510,6 +554,14 @@ export function createEditorStore(options: EditorStoreOptions) {
         const documentWithoutObject = {
           ...state.document,
           objects: state.document.objects.filter((object) => object.id !== id),
+          semanticSceneSpec: {
+            ...state.document.semanticSceneSpec,
+            relationships:
+              state.document.semanticSceneSpec.relationships.filter(
+                ({ subjectObjectId, targetObjectId }) =>
+                  subjectObjectId !== id && targetObjectId !== id,
+              ),
+          },
         };
         const document = { ...documentWithoutObject };
         if (state.document.subjectMotionGuide?.subjectId === id) {
@@ -539,13 +591,13 @@ export function createEditorStore(options: EditorStoreOptions) {
       const nextDocument = sceneDocumentSchema.parse(
         options.createNewDocument?.() ?? structuredClone(initialDocument),
       );
-      set(createResetState(nextDocument));
+      set((state) => createResetState(state.document, nextDocument));
     },
     resetScene: () => {
       const nextDocument = sceneDocumentSchema.parse(
         options.createStarterDocument?.() ?? structuredClone(initialDocument),
       );
-      set(createResetState(nextDocument));
+      set((state) => createResetState(state.document, nextDocument));
     },
     commitCamera: (camera) => {
       set((state) => {
@@ -824,6 +876,44 @@ export function createEditorStore(options: EditorStoreOptions) {
         return recordMutation(state, nextDocument, 'update-motion-metadata');
       });
     },
+    setSemanticSceneSpec: (semanticSceneSpec) => {
+      set((state) => {
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          semanticSceneSpec,
+        });
+        return recordMutation(
+          state,
+          nextDocument,
+          'update-semantic-scene-spec',
+        );
+      });
+    },
+    applySpecPatchProposal: (proposal) => {
+      let applied: SpecPatchEvaluation | null = null;
+      set((state) => {
+        const evaluation = evaluateSpecPatchProposal(state.document, proposal);
+        if (
+          evaluation.changes.length === 0 &&
+          evaluation.sceneCommandChanges.length === 0
+        ) {
+          throw new Error('scene change proposal has no effective changes');
+        }
+        applied = evaluation;
+        return {
+          ...recordMutation(
+            state,
+            evaluation.afterDocument,
+            'apply-scene-change-proposal',
+          ),
+          statusMessage: 'Scene Assistant 변경안을 적용했습니다.',
+        };
+      });
+      if (applied === null) {
+        throw new Error('scene change proposal was not applied');
+      }
+      return applied;
+    },
     setTransformMode: (transformMode) => {
       set({ transformMode, statusMessage: null });
     },
@@ -848,24 +938,11 @@ export function createEditorStore(options: EditorStoreOptions) {
       set({ statusMessage });
     },
     replaceDocument: (replacement, persisted) => {
-      const nextDocument = sceneDocumentSchema.parse(replacement);
-      if (persisted) persistedDocument = structuredClone(nextDocument);
-      set({
-        document: nextDocument,
-        history: createDocumentHistory(),
-        canUndo: false,
-        canRedo: false,
-        selectedObjectId: null,
-        hoveredObjectId: null,
-        inProgressTransform: null,
-        inProgressMannequinPose: null,
-        navigation: {
-          position: structuredClone(nextDocument.outputCamera.position),
-          target: structuredClone(nextDocument.outputCamera.target),
-          isInteracting: false,
-        },
-        isDirty: !documentsEqual(nextDocument, persistedDocument),
-        statusMessage: null,
+      const parsedReplacement = sceneDocumentSchema.parse(replacement);
+      set((state) => {
+        const nextState = createResetState(state.document, parsedReplacement);
+        if (persisted) persistedDocument = structuredClone(nextState.document);
+        return nextState;
       });
     },
     markDocumentPersisted: (savedDocument) => {
@@ -874,19 +951,62 @@ export function createEditorStore(options: EditorStoreOptions) {
       persistedDocument = structuredClone(state.document);
       set({ isDirty: false });
     },
+    applyGenerationSnapshot: (snapshot, source) => {
+      const snapshotDocument = sceneDocumentSchema.parse({
+        ...structuredClone(snapshot),
+        generationSource: source,
+      });
+      set((state) => {
+        const nextDocument = withNextRevision(state.document, snapshotDocument);
+        const history = recordDocumentHistory(
+          state.history,
+          state.document,
+          'apply-generation-snapshot',
+          DOCUMENT_MUTATION_KINDS,
+          state.selectedObjectId,
+        );
+        return {
+          document: nextDocument,
+          history,
+          canUndo: true,
+          canRedo: false,
+          selectedObjectId: null,
+          hoveredObjectId: null,
+          inProgressTransform: null,
+          inProgressMannequinPose: null,
+          navigation: {
+            position: structuredClone(nextDocument.outputCamera.position),
+            target: structuredClone(nextDocument.outputCamera.target),
+            isInteracting: false,
+          },
+          isDirty: !documentContentsEqual(nextDocument, persistedDocument),
+          statusMessage: `generation v${source.versionNumber}의 3D 씬을 적용했습니다.`,
+        };
+      });
+    },
     undo: () => {
       set((state) => {
-        const result = undoDocumentHistory(state.history, state.document);
+        const result = undoDocumentHistory(
+          state.history,
+          state.document,
+          state.selectedObjectId,
+        );
         if (result === null) return state;
-        const nextDocument = sceneDocumentSchema.parse(result.document);
+        const restoredDocument = sceneDocumentSchema.parse(result.document);
+        const nextDocument = withNextRevision(state.document, restoredDocument);
         const navigation =
-          result.mutationKind === 'commit-camera'
+          result.mutationKind === 'commit-camera' ||
+          result.mutationKind === 'apply-generation-snapshot'
             ? {
                 position: structuredClone(nextDocument.outputCamera.position),
                 target: structuredClone(nextDocument.outputCamera.target),
                 isInteracting: false,
               }
             : state.navigation;
+        const selectedObjectId =
+          result.mutationKind === 'apply-generation-snapshot'
+            ? (result.selectedObjectId ?? null)
+            : state.selectedObjectId;
 
         return {
           document: nextDocument,
@@ -895,9 +1015,9 @@ export function createEditorStore(options: EditorStoreOptions) {
           canUndo: result.history.past.length > 0,
           canRedo: result.history.future.length > 0,
           selectedObjectId: nextDocument.objects.some(
-            ({ id }) => id === state.selectedObjectId,
+            ({ id }) => id === selectedObjectId,
           )
-            ? state.selectedObjectId
+            ? selectedObjectId
             : null,
           hoveredObjectId: nextDocument.objects.some(
             ({ id }) => id === state.hoveredObjectId,
@@ -906,18 +1026,24 @@ export function createEditorStore(options: EditorStoreOptions) {
             : null,
           inProgressTransform: null,
           inProgressMannequinPose: null,
-          isDirty: !documentsEqual(nextDocument, persistedDocument),
+          isDirty: !documentContentsEqual(nextDocument, persistedDocument),
           statusMessage: '실행을 취소했습니다.',
         };
       });
     },
     redo: () => {
       set((state) => {
-        const result = redoDocumentHistory(state.history, state.document);
+        const result = redoDocumentHistory(
+          state.history,
+          state.document,
+          state.selectedObjectId,
+        );
         if (result === null) return state;
-        const nextDocument = sceneDocumentSchema.parse(result.document);
+        const restoredDocument = sceneDocumentSchema.parse(result.document);
+        const nextDocument = withNextRevision(state.document, restoredDocument);
         const navigation =
-          result.mutationKind === 'commit-camera'
+          result.mutationKind === 'commit-camera' ||
+          result.mutationKind === 'apply-generation-snapshot'
             ? {
                 position: structuredClone(nextDocument.outputCamera.position),
                 target: structuredClone(nextDocument.outputCamera.target),
@@ -943,7 +1069,7 @@ export function createEditorStore(options: EditorStoreOptions) {
             : null,
           inProgressTransform: null,
           inProgressMannequinPose: null,
-          isDirty: !documentsEqual(nextDocument, persistedDocument),
+          isDirty: !documentContentsEqual(nextDocument, persistedDocument),
           statusMessage: '다시 실행했습니다.',
         };
       });

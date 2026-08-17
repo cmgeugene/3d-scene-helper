@@ -37,6 +37,7 @@ interface SceneViewportProps {
   store: StoreApi<EditorStore>;
   onExportReady?: (exportFrame: FrameExportHandler | null) => void;
   onRuntimeFailure?: (message: string) => void;
+  readOnly?: boolean;
 }
 
 function WebGLContextMonitor({
@@ -147,7 +148,48 @@ function SelectedSubjectFacingHelper({
   return null;
 }
 
-function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
+function publishPreviewObjectsDiagnostic(
+  canvas: HTMLCanvasElement,
+  objects: SceneDocument['objects'],
+) {
+  canvas.dataset.previewObjects = JSON.stringify(
+    objects.map(({ id, kind, transform }) => ({
+      id,
+      kind,
+      position: transform.position,
+      rotationDeg: transform.rotationDeg,
+      scale: transform.scale,
+    })),
+  );
+}
+
+function clearPreviewObjectsDiagnostic(canvas: HTMLCanvasElement) {
+  delete canvas.dataset.previewObjects;
+}
+
+function SceneObjectsDiagnostic({
+  objects,
+}: {
+  objects: SceneDocument['objects'];
+}) {
+  const canvas = useThree((state) => state.gl.domElement);
+
+  useLayoutEffect(() => {
+    if (!IS_EDITOR_TEST_BRIDGE_ENABLED) return;
+    publishPreviewObjectsDiagnostic(canvas, objects);
+    return () => clearPreviewObjectsDiagnostic(canvas);
+  }, [canvas, objects]);
+
+  return null;
+}
+
+function RuntimeScene({
+  store,
+  readOnly,
+}: {
+  store: StoreApi<EditorStore>;
+  readOnly: boolean;
+}) {
   const document = useStore(store, (state) => state.document);
   const objects = useStore(store, (state) => state.document.objects);
   const selectedObjectId = useStore(store, (state) => state.selectedObjectId);
@@ -217,24 +259,28 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
     selectedRoot.userData.sceneObjectId === selectedObject?.id
       ? selectedRoot
       : undefined;
+  const effectiveSelectedObjectId = readOnly ? null : selectedObjectId;
 
   return (
     <>
       <color attach="background" args={[background.color]} />
       <OutputCamera store={store} />
-      <EditorNavigation store={store} enabled={!transformDragging} />
+      {readOnly ? null : (
+        <EditorNavigation store={store} enabled={!transformDragging} />
+      )}
       <LightingRig lighting={lighting} />
       <group name="SceneContent.layer0">
         {objects.map((object) => (
           <SceneObject
             key={object.id}
             object={object}
-            selected={selectedObjectId === object.id}
-            onSelect={selectObject}
+            selected={effectiveSelectedObjectId === object.id}
+            onSelect={readOnly ? () => undefined : selectObject}
             onRootReady={handleRootReady}
             runtimeMannequinPose={runtimeMannequinPoses.get(object.id)}
             focusContoursEnabled={focusContoursEnabled}
             mannequinIK={
+              !readOnly &&
               selectedObjectId === object.id &&
               object.kind === 'mannequin' &&
               mannequinTool === 'ik'
@@ -251,7 +297,9 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
           />
         ))}
       </group>
-      {selectedObject !== undefined && validSelectedRoot !== undefined ? (
+      {!readOnly &&
+      selectedObject !== undefined &&
+      validSelectedRoot !== undefined ? (
         <>
           {selectedObject.kind !== 'mannequin' || mannequinTool !== 'ik' ? (
             <SelectionTransformControls
@@ -269,7 +317,8 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
         </>
       ) : null}
       {motionGuidesVisible ? <MotionGuides document={document} /> : null}
-      <EditorHelpers />
+      <SceneObjectsDiagnostic objects={objects} />
+      {readOnly ? null : <EditorHelpers />}
       <CinematicDepthOfField store={store} />
     </>
   );
@@ -297,6 +346,7 @@ export function SceneViewport({
   store,
   onExportReady,
   onRuntimeFailure,
+  readOnly = false,
 }: SceneViewportProps) {
   const outputAspectId = useStore(
     store,
@@ -311,18 +361,16 @@ export function SceneViewport({
     const surface = surfaceRef.current;
     if (surface === null) return;
 
-    const updateFrame = () => {
-      if (surface.clientWidth <= 0 || surface.clientHeight <= 0) return;
-      setFrame(
-        computeLetterbox(
-          surface.clientWidth,
-          surface.clientHeight,
-          outputAspect,
-        ),
-      );
+    const updateFrame = (width: number, height: number) => {
+      if (width <= 0 || height <= 0) return;
+      setFrame(computeLetterbox(width, height, outputAspect));
     };
-    updateFrame();
-    const observer = new ResizeObserver(updateFrame);
+    const bounds = surface.getBoundingClientRect();
+    updateFrame(bounds.width, bounds.height);
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry === undefined) return;
+      updateFrame(entry.contentRect.width, entry.contentRect.height);
+    });
     observer.observe(surface);
     return () => {
       observer.disconnect();
@@ -336,6 +384,7 @@ export function SceneViewport({
         role="img"
         aria-label="3D 장면 캔버스"
         data-color-space="srgb"
+        data-scene-preview={readOnly ? 'true' : undefined}
         data-shadow-bounds={`${SHADOW_BOUNDS_M}m`}
         data-axes-origin="0,0.025,0"
         shadows="percentage"
@@ -353,11 +402,11 @@ export function SceneViewport({
           camera.layers.enable(RENDER_LAYERS.reference);
         }}
         onPointerMissed={() => {
-          store.getState().selectObject(null);
+          if (!readOnly) store.getState().selectObject(null);
         }}
       >
         <WebGLContextMonitor onRuntimeFailure={onRuntimeFailure} />
-        <RuntimeScene store={store} />
+        <RuntimeScene store={store} readOnly={readOnly} />
         {onExportReady === undefined ? null : (
           <ExportFrameBridge onExportReady={onExportReady} />
         )}
@@ -377,10 +426,12 @@ export function SceneViewport({
           <CompositionGuides visibility={guideVisibility} />
         </div>
       )}
-      <div className="viewport-guidance" aria-hidden="true">
-        <span className="eyebrow">기본 장면 준비 완료</span>
-        <span>기본 마네킹을 선택하고 화면비와 가이드를 정해 보세요.</span>
-      </div>
+      {readOnly ? null : (
+        <div className="viewport-guidance" aria-hidden="true">
+          <span className="eyebrow">기본 장면 준비 완료</span>
+          <span>기본 마네킹을 선택하고 화면비와 가이드를 정해 보세요.</span>
+        </div>
+      )}
     </div>
   );
 }

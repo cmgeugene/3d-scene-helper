@@ -66,6 +66,10 @@ function createLegacyV2Scene() {
 describe('sceneCodec', () => {
   it('versioned Zod SceneDocument를 JSON으로 round-trip한다', () => {
     const document = createStarterSceneDocument(SCENE_IDS);
+    document.semanticSceneSpec.intent.location = '한국 노포 야외 치킨집';
+    document.semanticSceneSpec.generatedProps = [
+      { name: '치킨', placement: '테이블 중앙', importance: '핵심' },
+    ];
     const mannequin = document.objects.find(({ kind }) => kind === 'mannequin');
     if (mannequin?.mannequinPose === undefined) {
       throw new Error('starter mannequin pose가 필요합니다.');
@@ -80,6 +84,7 @@ describe('sceneCodec', () => {
     expect(JSON.parse(encoded)).toEqual(document);
     expect(decoded).toEqual(document);
     expect(decoded).not.toBe(document);
+    expect(decoded.semanticSceneSpec).toEqual(document.semanticSceneSpec);
     expect(
       decoded.objects.find(({ kind }) => kind === 'mannequin'),
     ).toHaveProperty('mannequinPose.arms.left.elbowBendDeg', 74);
@@ -98,6 +103,31 @@ describe('sceneCodec', () => {
     expect(migrated.mannequinAppearance).toEqual({
       focusContoursEnabled: false,
     });
+  });
+
+  it('spec 없는 구형 v2는 기본값으로 복원하고 malformed/unknown spec import는 부분 적용하지 않는다', () => {
+    const legacy = structuredClone(
+      createStarterSceneDocument(SCENE_IDS),
+    ) as Partial<ReturnType<typeof createStarterSceneDocument>>;
+    delete legacy.semanticSceneSpec;
+    const restored = parseSceneDocument(JSON.stringify(legacy));
+    expect(restored.semanticSceneSpec).toMatchObject({
+      version: 1,
+      generatedProps: [],
+      relationships: [],
+    });
+
+    const replaceDocument = vi.fn();
+    expect(() =>
+      importSceneDocument(
+        JSON.stringify({
+          ...legacy,
+          semanticSceneSpec: { version: 99 },
+        }),
+        replaceDocument,
+      ),
+    ).toThrow(SceneCodecError);
+    expect(replaceDocument).not.toHaveBeenCalled();
   });
 
   it('기존 v2 팔다리 포즈의 누락된 joint deviation을 0도로 보정한다', () => {

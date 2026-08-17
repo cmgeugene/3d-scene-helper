@@ -402,6 +402,11 @@ describe('solveStaticWormEyeApproach', () => {
         focalLengthMm: 24,
         position: { y: 0.08 },
         rollDeg: 0,
+        depthOfField: {
+          enabled: true,
+          apertureMode: 'auto',
+          fStop: 5.6,
+        },
       },
       cameraMotion: 'none',
       actionPhase: 'support-contact',

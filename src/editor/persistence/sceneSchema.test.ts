@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   FILM_GAUGE_MM,
   MANNEQUIN_REFERENCE_HEIGHT_M,
+  MAX_GENERATION_NOTES_LENGTH,
+  MAX_OBJECT_NAME_LENGTH,
   RENDER_LAYERS,
+  MAX_SEMANTIC_MEANING_LENGTH,
   SAFE_AREA_INSETS,
   SCENE_STORAGE_KEY,
 } from '../constants';
@@ -22,6 +25,52 @@ const STARTER_IDS = {
 } as const;
 
 describe('sceneDocumentSchema', () => {
+  it('장면 전체 SemanticSceneSpec 기본값과 object ID 관계 무결성을 보존한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    expect(document.semanticSceneSpec).toMatchObject({
+      version: 1,
+      generatedProps: [],
+      extras: { enabled: false, minCount: 0, maxCount: 0 },
+      relationships: [],
+      constraints: { preserve: [], allowChanges: [] },
+    });
+
+    document.semanticSceneSpec.relationships = [
+      {
+        subjectObjectId: STARTER_IDS.mannequinId,
+        targetObjectId: STARTER_IDS.floorId,
+        relationship: '바닥 위에 서 있음',
+        gaze: '',
+        action: '서 있음',
+      },
+    ];
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(true);
+
+    document.semanticSceneSpec.relationships[0]!.targetObjectId = 'missing';
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+  });
+
+  it('구형 current-version 문서의 누락 spec은 기본값으로 복원하고 unknown spec version은 거부한다', () => {
+    const withoutSpec = structuredClone(
+      createStarterSceneDocument(STARTER_IDS),
+    ) as Partial<ReturnType<typeof createStarterSceneDocument>>;
+    delete withoutSpec.semanticSceneSpec;
+
+    expect(
+      sceneDocumentSchema.parse(withoutSpec).semanticSceneSpec,
+    ).toMatchObject({
+      version: 1,
+      generatedProps: [],
+      relationships: [],
+    });
+    expect(
+      sceneDocumentSchema.safeParse({
+        ...withoutSpec,
+        semanticSceneSpec: { version: 99 },
+      }).success,
+    ).toBe(false);
+  });
+
   it('결정적 starter 문서를 직렬화 왕복하며 핵심 불변식을 보존한다', () => {
     const document = createStarterSceneDocument(STARTER_IDS);
     const parsed = sceneDocumentSchema.parse(
@@ -123,6 +172,40 @@ describe('sceneDocumentSchema', () => {
     expect(sceneDocumentSchema.safeParse(document).success).toBe(true);
 
     document.sceneNotes += 'a';
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+  });
+
+  it('오브젝트 이름과 생성 의미 데이터를 직렬화하고 길이를 검증한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    document.objects[1] = {
+      ...document.objects[1]!,
+      name: '정민',
+      semantic: {
+        meaning: '화면 왼쪽에 앉은 정민',
+        generationNotes: '외형은 연결된 캐릭터 레퍼런스를 사용한다.',
+      },
+    };
+
+    expect(sceneDocumentSchema.parse(document).objects[1]).toMatchObject({
+      name: '정민',
+      semantic: {
+        meaning: '화면 왼쪽에 앉은 정민',
+        generationNotes: '외형은 연결된 캐릭터 레퍼런스를 사용한다.',
+      },
+    });
+
+    document.objects[1]!.name = 'a'.repeat(MAX_OBJECT_NAME_LENGTH + 1);
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+    document.objects[1]!.name = '정민';
+    document.objects[1]!.semantic = {
+      meaning: 'a'.repeat(MAX_SEMANTIC_MEANING_LENGTH + 1),
+      generationNotes: '',
+    };
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+    document.objects[1]!.semantic = {
+      meaning: '',
+      generationNotes: 'a'.repeat(MAX_GENERATION_NOTES_LENGTH + 1),
+    };
     expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
   });
 

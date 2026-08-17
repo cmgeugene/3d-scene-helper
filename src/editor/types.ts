@@ -13,7 +13,8 @@ export interface GuideVisibility {
   motion: boolean;
 }
 
-export type EditorPanel = 'scene' | 'camera' | 'lighting' | 'output';
+export type EditorPanel =
+  'scene' | 'semantic' | 'camera' | 'lighting' | 'output';
 
 export interface EditorNavigation {
   position: Vector3;

@@ -2,7 +2,10 @@ import { z } from 'zod';
 import {
   ASPECT_RATIO_VALUES,
   MANNEQUIN_REFERENCE_HEIGHT_M,
+  MAX_GENERATION_NOTES_LENGTH,
+  MAX_OBJECT_NAME_LENGTH,
   MAX_SCENE_NOTES_LENGTH,
+  MAX_SEMANTIC_MEANING_LENGTH,
   MAX_SHADOW_MAP_SIZE,
   OUTPUT_DIMENSION_RANGE,
   SCENE_DOCUMENT_VERSION,
@@ -14,6 +17,10 @@ import {
   MAX_F_STOP,
   MIN_F_STOP,
 } from '../scene/lensDepthOfField';
+import {
+  createDefaultSemanticSceneSpec,
+  semanticSceneSpecSchema,
+} from './semanticSceneSpec';
 
 const stableIdSchema = z.string().trim().min(1);
 
@@ -46,7 +53,7 @@ const positiveVector3Schema = z.strictObject({
   z: z.number().positive(),
 });
 
-const transformSchema = z.strictObject({
+export const transformSchema = z.strictObject({
   position: vector3Schema,
   rotationDeg: vector3Schema,
   scale: positiveVector3Schema,
@@ -86,6 +93,11 @@ export const mannequinPoseSchema = z.strictObject({
   }),
 });
 
+const semanticObjectSchema = z.strictObject({
+  meaning: z.string().trim().max(MAX_SEMANTIC_MEANING_LENGTH),
+  generationNotes: z.string().trim().max(MAX_GENERATION_NOTES_LENGTH),
+});
+
 const validatedSceneObjectSchema = z
   .strictObject({
     id: stableIdSchema,
@@ -98,12 +110,13 @@ const validatedSceneObjectSchema = z
       'mannequin',
       'room',
     ]),
-    name: z.string().trim().min(1),
+    name: z.string().trim().min(1).max(MAX_OBJECT_NAME_LENGTH),
     transform: transformSchema,
     dimensions: positiveVector3Schema,
     color: z.string().regex(/^#[0-9a-f]{6}$/i),
     visible: z.boolean(),
     exportable: z.boolean(),
+    semantic: semanticObjectSchema.optional(),
     mannequinPose: mannequinPoseSchema.optional(),
     mannequinBodyType: z.enum(MANNEQUIN_BODY_TYPE_IDS).optional(),
   })
@@ -262,6 +275,11 @@ const mannequinAppearanceSchema = z
   })
   .default({ focusContoursEnabled: false });
 
+const generationSourceSchema = z.strictObject({
+  generationId: stableIdSchema,
+  versionNumber: z.number().int().positive(),
+});
+
 export const sceneDocumentSchema = z
   .strictObject({
     version: z.literal(SCENE_DOCUMENT_VERSION),
@@ -274,6 +292,12 @@ export const sceneDocumentSchema = z
     output: outputSchema,
     sceneNotes: z.string().max(MAX_SCENE_NOTES_LENGTH),
     mannequinAppearance: mannequinAppearanceSchema,
+    sceneRevision: z.number().int().nonnegative().safe().default(0),
+    specRevision: z.number().int().nonnegative().safe().default(0),
+    semanticSceneSpec: semanticSceneSpecSchema.default(
+      createDefaultSemanticSceneSpec(),
+    ),
+    generationSource: generationSourceSchema.optional(),
     subjectMotionGuide: subjectMotionGuideSchema.optional(),
     cameraMotionGuide: cameraMotionGuideSchema.optional(),
   })
@@ -301,6 +325,18 @@ export const sceneDocumentSchema = z
         path: ['subjectMotionGuide', 'subjectId'],
       });
     }
+
+    document.semanticSceneSpec.relationships.forEach((relationship, index) => {
+      for (const key of ['subjectObjectId', 'targetObjectId'] as const) {
+        if (!objectIds.has(relationship[key])) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Semantic relationships must reference existing objects',
+            path: ['semanticSceneSpec', 'relationships', index, key],
+          });
+        }
+      }
+    });
   });
 
 export type SceneDocument = z.infer<typeof sceneDocumentSchema>;
@@ -471,5 +507,6 @@ export function createStarterSceneDocument(
     },
     sceneNotes: '',
     mannequinAppearance: { focusContoursEnabled: false },
+    semanticSceneSpec: createDefaultSemanticSceneSpec(),
   });
 }

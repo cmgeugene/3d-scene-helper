@@ -83,6 +83,22 @@ export function createLensDepthOfFieldSettings(
   };
 }
 
+export function createDepthOfFieldSettingsForLens(
+  focalLengthMm: number,
+  enabled: boolean,
+): DepthOfFieldSettings {
+  if (!Number.isFinite(focalLengthMm) || focalLengthMm <= 0) {
+    throw new RangeError('Lens focal length must be a positive finite number.');
+  }
+  const presetFStop =
+    LENS_AUTO_APERTURE_MAP[
+      focalLengthMm as keyof typeof LENS_AUTO_APERTURE_MAP
+    ];
+  return presetFStop === undefined
+    ? { enabled, apertureMode: 'manual', fStop: LENS_AUTO_APERTURE_MAP[50] }
+    : { enabled, apertureMode: 'auto', fStop: presetFStop };
+}
+
 export function getFocusDistanceM(camera: {
   position: Vector3Data;
   target: Vector3Data;
@@ -104,10 +120,9 @@ export function getFocusDistanceM(camera: {
 
 export function getDepthOfFieldRuntimeParameters(camera: LensCameraData) {
   const focusDistanceM = getFocusDistanceM(camera);
-  const presetFStop = getAutoApertureForLens(camera.focalLengthMm);
   const fStop =
     camera.depthOfField.apertureMode === 'auto'
-      ? presetFStop
+      ? getAutoApertureForLens(camera.focalLengthMm)
       : camera.depthOfField.fStop;
   if (!Number.isFinite(fStop) || fStop < MIN_F_STOP || fStop > MAX_F_STOP) {
     throw new RangeError(`f-stop must be ${MIN_F_STOP}..${MAX_F_STOP}.`);

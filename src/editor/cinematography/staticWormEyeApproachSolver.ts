@@ -1,5 +1,6 @@
 import type { MannequinCinematicLandmarks } from '../mannequin/mannequinRig';
 import type { SceneDocument } from '../persistence/sceneSchema';
+import { createDepthOfFieldSettingsForLens } from '../scene/lensDepthOfField';
 import type { CinematicSubjectProfile, Vec3 } from './cinematicSubjectProfile';
 import {
   computeCinematicProjectionMetrics,
@@ -360,6 +361,7 @@ function candidateCamera(
     },
     focalLengthMm: intent.lensMm,
     rollDeg: 0,
+    depthOfField: createDepthOfFieldSettingsForLens(intent.lensMm, true),
   };
 }
 

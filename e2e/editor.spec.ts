@@ -27,7 +27,7 @@ interface GoldenPathGlobal {
 async function openEditor(page: Page) {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
-  await expect(page.getByRole('status')).toHaveAttribute(
+  await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
     'data-webgl-state',
     'available',
   );
@@ -114,7 +114,7 @@ test('golden path completes starter scene to saved 1080×1920 clean PNG without 
     .not.toBeNull();
 
   await page.reload();
-  await expect(page.getByRole('status')).toHaveAttribute(
+  await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
     'data-webgl-state',
     'available',
   );
@@ -318,7 +318,7 @@ test('WebGL context loss shows a fallback while preserving the serialized scene'
   await expect(page.getByRole('alert')).toContainText(
     'WebGL context가 손실되었습니다. 직렬화된 장면 데이터는 보존되었습니다.',
   );
-  await expect(page.getByRole('status')).toHaveAttribute(
+  await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
     'data-webgl-state',
     'fallback',
   );

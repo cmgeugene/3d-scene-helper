@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { StoreApi } from 'zustand/vanilla';
+import {
+  clearCompanionConnection,
+  consumeCompanionConnection,
+} from '../assistant/companionConnection';
 import { EditorShell, type WebGLState } from '../editor/components/EditorShell';
 import { AUTOSAVE_DEBOUNCE_MS, SCENE_STORAGE_KEY } from '../editor/constants';
 import {
   encodeSceneDocument,
+  parseSceneDocument,
   saveSceneDocument,
 } from '../editor/persistence/sceneCodec';
 import type { EditorStore } from '../editor/state/editorStore';
@@ -49,12 +54,48 @@ interface AppProps {
   storage?: Storage;
 }
 
+function sceneContentFingerprint(document: EditorStore['document']) {
+  return encodeSceneDocument({
+    ...document,
+    sceneRevision: 0,
+    specRevision: 0,
+  });
+}
+
+function storedSceneHasSameContent(
+  serialized: string | null,
+  document: EditorStore['document'],
+) {
+  if (serialized === null) return false;
+  try {
+    return (
+      sceneContentFingerprint(parseSceneDocument(serialized)) ===
+      sceneContentFingerprint(document)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function App({
   canvasEnabled = true,
   store = editorStore,
   storage = window.localStorage,
 }: AppProps) {
   const [webGLState, setWebGLState] = useState<WebGLState>('checking');
+  const [companionState, setCompanionState] = useState(() =>
+    consumeCompanionConnection({
+      hash: window.location.hash,
+      pathname: window.location.pathname,
+      search: window.location.search,
+      storage: window.sessionStorage,
+      replaceUrl: (url) => window.history.replaceState(null, '', url),
+    }),
+  );
+  const disconnectCompanion = useCallback(() => {
+    clearCompanionConnection(window.sessionStorage);
+    setCompanionState({ connection: null, error: null });
+  }, []);
 
   useEffect(() => {
     const nextState = canUseWebGL() ? 'available' : 'fallback';
@@ -101,9 +142,14 @@ export function App({
 
       clearAutosaveTimer();
       if (!state.isDirty) {
-        persistedBaseline = readStoredScene();
+        const storedScene = readStoredScene();
+        const shouldPersistRevision =
+          encodeSceneDocument(state.document) !== storedScene &&
+          (storedSceneHasSameContent(storedScene, state.document) ||
+            (storedScene === null && previousState.isDirty));
+        persistedBaseline = storedScene;
         hasExternalConflict = false;
-        return;
+        if (!shouldPersistRevision) return;
       }
 
       const documentToPersist = state.document;
@@ -162,6 +208,9 @@ export function App({
       storage={storage}
       webGLState={webGLState}
       canvasEnabled={canvasEnabled}
+      companionConnection={companionState.connection}
+      companionConnectionError={companionState.error}
+      onDisconnectCompanion={disconnectCompanion}
     />
   );
 }

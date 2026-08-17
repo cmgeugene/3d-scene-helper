@@ -133,6 +133,15 @@ describe('solveDialogueOts', () => {
       const best = first.candidates[0];
 
       expect(best.camera.focalLengthMm).toBe(lensMm);
+      expect(best.camera.depthOfField).toEqual(
+        lensMm === 65
+          ? { enabled: true, apertureMode: 'manual', fStop: 2.8 }
+          : {
+              enabled: true,
+              apertureMode: 'auto',
+              fStop: lensMm === 50 ? 2.8 : 2,
+            },
+      );
       expect(best.kind).toBe('canonical-shoulder-over');
       expect(best.diagnostics.canonicalShoulderWindow).toBe(true);
       expect(
@@ -217,7 +226,14 @@ describe('solveDialogueOts', () => {
 
     expect(result.candidates[0]).toMatchObject({
       shoulderSide: 'right',
-      camera: { focalLengthMm: 65 },
+      camera: {
+        focalLengthMm: 65,
+        depthOfField: {
+          enabled: true,
+          apertureMode: 'manual',
+          fStop: 2.8,
+        },
+      },
     });
   });
 

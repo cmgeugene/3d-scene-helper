@@ -1,5 +1,6 @@
 import { FILM_GAUGE_MM } from '../constants';
 import type { SceneDocument } from '../persistence/sceneSchema';
+import { createDepthOfFieldSettingsForLens } from '../scene/lensDepthOfField';
 import type { CinematicSubjectProfile, Vec3 } from './cinematicSubjectProfile';
 import {
   computeCinematicProjectionMetrics,
@@ -647,6 +648,7 @@ function buildCandidateCamera(
     target,
     focalLengthMm: intent.lensMm,
     rollDeg: 0,
+    depthOfField: createDepthOfFieldSettingsForLens(intent.lensMm, true),
   };
 }
 

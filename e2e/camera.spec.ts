@@ -39,7 +39,7 @@ interface CameraBridge {
 async function openCameraEditor(page: Page) {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
-  await expect(page.getByRole('status')).toHaveAttribute(
+  await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
     'data-webgl-state',
     'available',
   );
@@ -53,6 +53,29 @@ async function readRuntimeCamera(canvas: Locator) {
   const value = await canvas.getAttribute('data-runtime-camera');
   return value === null ? null : (JSON.parse(value) as RuntimeCameraDiagnostic);
 }
+
+test('minimum viewport keeps inspector tabs above the assistant hit area', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await openCameraEditor(page);
+  const cameraTab = page.getByRole('button', { name: '카메라' });
+
+  await expect
+    .poll(() =>
+      cameraTab.evaluate((button) => {
+        const bounds = button.getBoundingClientRect();
+        const hit = button.ownerDocument.elementFromPoint(
+          bounds.x + bounds.width / 2,
+          bounds.y + bounds.height / 2,
+        );
+        return hit === button || button.contains(hit);
+      }),
+    )
+    .toBe(true);
+  await cameraTab.click();
+  await expect(cameraTab).toHaveAttribute('aria-pressed', 'true');
+});
 
 test('camera panel은 방향 뷰 선택 기능을 제공하지 않는다', async ({ page }) => {
   await openCameraEditor(page);

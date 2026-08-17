@@ -19,7 +19,7 @@ test('configured Chromium에서 앱 셸과 WebGL available 상태를 표시한�
     }),
   ).toBeVisible();
 
-  const status = page.getByRole('status');
+  const status = page.locator('[data-webgl-state]');
   await expect(status).toBeVisible();
 
   try {
@@ -33,6 +33,10 @@ test('configured Chromium에서 앱 셸과 WebGL available 상태를 표시한�
   }
 
   await expect(status).toHaveText('WebGL을 사용할 수 있습니다.');
+  await expect(
+    page.getByRole('heading', { name: 'Scene Assistant' }),
+  ).toBeVisible();
+  await expect(page.locator('.assistant-connection')).toHaveText('연결 안 됨');
 });
 
 test('지원 최소 높이 미만에서는 데스크톱 안내만 표시한다', async ({ page }) => {
@@ -45,6 +49,50 @@ test('지원 최소 높이 미만에서는 데스크톱 안내만 표시한다',
   await expect(
     page.getByRole('complementary', { name: '에셋과 장면' }),
   ).toBeHidden();
+});
+
+test('우측 패널을 드래그해 넓히고 접기 상태를 복원한다', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+
+  const panel = page.getByRole('complementary', { name: '속성' });
+  const separator = page.getByRole('separator', {
+    name: '우측 패널 너비 조절',
+  });
+  const initialPanel = await panel.boundingBox();
+  const handle = await separator.boundingBox();
+  expect(initialPanel).not.toBeNull();
+  expect(handle).not.toBeNull();
+  if (initialPanel === null || handle === null) return;
+
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 120);
+  await page.mouse.down();
+  await page.mouse.move(handle.x - 96, handle.y + 120, { steps: 4 });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => (await panel.boundingBox())?.width ?? 0)
+    .toBeGreaterThan(initialPanel.width + 80);
+  const resizedWidth = await separator.getAttribute('aria-valuenow');
+  expect(Number(resizedWidth)).toBeGreaterThan(500);
+
+  await page.reload();
+  await expect(separator).toHaveAttribute('aria-valuenow', resizedWidth!);
+
+  await page.getByRole('button', { name: '접기' }).click();
+  await expect(
+    page.getByRole('button', { name: '우측 패널 펼치기' }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: '우측 패널 펼치기' }),
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: '우측 패널 펼치기' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Scene Assistant' }),
+  ).toBeVisible();
+  await expect(separator).toHaveAttribute('aria-valuenow', resizedWidth!);
 });
 
 test('지원 최소 너비 경계와 가로 overflow를 유지한다', async ({ page }) => {
