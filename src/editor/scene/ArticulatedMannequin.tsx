@@ -7,7 +7,7 @@ import {
   type BufferGeometry,
   type Group,
 } from 'three';
-import { useThree } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
 import {
   getSharedStudioMannequinGeometries,
@@ -295,6 +295,7 @@ function publishMannequinDiagnostics(
   canvas: HTMLCanvasElement,
   poseId: MannequinPose['id'],
   bodyType: MannequinBodyTypeId,
+  content: Group,
   bounds: Box3,
   size: Vector3,
   center: Vector3,
@@ -318,6 +319,25 @@ function publishMannequinDiagnostics(
     size,
     center,
   });
+  const nodeNames = {
+    faceCenter: 'Mannequin.face-plane',
+    leftShoulder: 'Mannequin.left-shoulder-pivot',
+    rightShoulder: 'Mannequin.right-shoulder-pivot',
+    leftFoot: 'Mannequin.left-ankle-pivot',
+    rightFoot: 'Mannequin.right-ankle-pivot',
+  } as const;
+  const cinematicLandmarks = Object.fromEntries(
+    Object.entries(nodeNames).map(([name, nodeName]) => {
+      const node = content.getObjectByName(nodeName);
+      if (node === undefined) {
+        throw new Error(`Missing runtime mannequin landmark node: ${nodeName}`);
+      }
+      const point = node.getWorldPosition(new Vector3());
+      return [name, { x: point.x, y: point.y, z: point.z }];
+    }),
+  );
+  canvas.dataset.mannequinCinematicLandmarks =
+    JSON.stringify(cinematicLandmarks);
 }
 
 function clearMannequinDiagnostics(canvas: HTMLCanvasElement) {
@@ -326,6 +346,7 @@ function clearMannequinDiagnostics(canvas: HTMLCanvasElement) {
   delete canvas.dataset.mannequinBodyType;
   delete canvas.dataset.mannequinPivots;
   delete canvas.dataset.mannequinBounds;
+  delete canvas.dataset.mannequinCinematicLandmarks;
 }
 
 export function ArticulatedMannequin({
@@ -348,26 +369,33 @@ export function ArticulatedMannequin({
   const common = { color, castShadow, receiveShadow };
   const articulatedCommon = { ...common, jointColor, geometries };
 
+  useFrame(
+    IS_EDITOR_TEST_BRIDGE_ENABLED
+      ? () => {
+          if (!selected || contentRef.current === null) return;
+          contentRef.current.updateWorldMatrix(true, true);
+          const bounds = new Box3().setFromObject(contentRef.current);
+          const size = bounds.getSize(new Vector3());
+          const center = bounds.getCenter(new Vector3());
+          publishMannequinDiagnostics(
+            canvas,
+            pose.id,
+            bodyType,
+            contentRef.current,
+            bounds,
+            size,
+            center,
+          );
+        }
+      : () => undefined,
+  );
+
   useLayoutEffect(() => {
-    if (
-      !IS_EDITOR_TEST_BRIDGE_ENABLED ||
-      !selected ||
-      contentRef.current === null
-    ) {
+    if (!IS_EDITOR_TEST_BRIDGE_ENABLED) return;
+    if (!selected) {
+      clearMannequinDiagnostics(canvas);
       return;
     }
-    contentRef.current.updateWorldMatrix(true, true);
-    const bounds = new Box3().setFromObject(contentRef.current);
-    const size = bounds.getSize(new Vector3());
-    const center = bounds.getCenter(new Vector3());
-    publishMannequinDiagnostics(
-      canvas,
-      pose.id,
-      bodyType,
-      bounds,
-      size,
-      center,
-    );
     return () => {
       clearMannequinDiagnostics(canvas);
     };

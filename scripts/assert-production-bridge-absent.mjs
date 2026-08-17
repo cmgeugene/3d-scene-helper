@@ -22,6 +22,7 @@ const forbiddenMarkers = [
   'mannequinRig',
   'mannequinPivots',
   'mannequinBounds',
+  'mannequinCinematicLandmarks',
   'ikDragging',
   'ikHandleProjections',
   'ikHandPositions',

@@ -44,6 +44,30 @@ export interface MannequinPose {
   legs: Record<MannequinSide, MannequinLegPose>;
 }
 
+export interface MannequinCinematicLandmarks {
+  eyeCenter: MannequinVector3;
+  faceCenter: MannequinVector3;
+  faceForward: MannequinVector3;
+  headTop: MannequinVector3;
+  headLeft: MannequinVector3;
+  headRight: MannequinVector3;
+  neck: MannequinVector3;
+  chest: MannequinVector3;
+  pelvis: MannequinVector3;
+  leftShoulder: MannequinVector3;
+  rightShoulder: MannequinVector3;
+  leftElbow: MannequinVector3;
+  rightElbow: MannequinVector3;
+  leftHand: MannequinVector3;
+  rightHand: MannequinVector3;
+  leftHip: MannequinVector3;
+  rightHip: MannequinVector3;
+  leftKnee: MannequinVector3;
+  rightKnee: MannequinVector3;
+  leftFoot: MannequinVector3;
+  rightFoot: MannequinVector3;
+}
+
 /**
  * Mannequin-local coordinates are right-handed: +X is right, +Y is up,
  * and the mannequin looks forward along -Z.
@@ -710,6 +734,76 @@ export function getMannequinNeckPosition(
       .applyQuaternion(quaternionFromDegrees(pose.torsoRotationDeg))
       .add(PELVIS_ORIGIN),
   );
+}
+
+export function computeMannequinCinematicLandmarks(
+  pose: MannequinPose,
+  bodyType: MannequinBodyTypeId = 'standard',
+): MannequinCinematicLandmarks {
+  const body = MANNEQUIN_BODY_PROPORTIONS[bodyType];
+  const torsoQuaternion = quaternionFromDegrees(pose.torsoRotationDeg);
+  const headOrigin = new Vector3(0, 0.66, 0)
+    .applyQuaternion(torsoQuaternion)
+    .add(PELVIS_ORIGIN);
+  const headQuaternion = torsoQuaternion
+    .clone()
+    .multiply(quaternionFromDegrees({ x: 0, y: pose.headRotationDeg.y, z: 0 }));
+  const transformTorsoPoint = (point: Vector3) =>
+    point.applyQuaternion(torsoQuaternion).add(PELVIS_ORIGIN);
+  const transformHeadPoint = (point: Vector3) =>
+    point.applyQuaternion(headQuaternion).add(headOrigin);
+  const leftArm = getMannequinArmKinematics(pose, 'left');
+  const rightArm = getMannequinArmKinematics(pose, 'right');
+  const leftLeg = getMannequinLegKinematics(pose, 'left');
+  const rightLeg = getMannequinLegKinematics(pose, 'right');
+
+  return {
+    eyeCenter: plainVector(
+      transformHeadPoint(new Vector3(0, 0.025, -0.094 * body.head.z)),
+    ),
+    faceCenter: plainVector(
+      transformHeadPoint(new Vector3(0, -0.02, -0.084 * body.head.z)),
+    ),
+    faceForward: plainVector(
+      new Vector3(
+        MANNEQUIN_FORWARD_AXIS.x,
+        MANNEQUIN_FORWARD_AXIS.y,
+        MANNEQUIN_FORWARD_AXIS.z,
+      )
+        .applyQuaternion(headQuaternion)
+        .normalize(),
+    ),
+    headTop: plainVector(
+      transformHeadPoint(new Vector3(0, 0.13, 0.008 * body.head.z)),
+    ),
+    headLeft: plainVector(
+      transformHeadPoint(
+        new Vector3(-0.119 * body.head.x, 0, 0.008 * body.head.z),
+      ),
+    ),
+    headRight: plainVector(
+      transformHeadPoint(
+        new Vector3(0.119 * body.head.x, 0, 0.008 * body.head.z),
+      ),
+    ),
+    neck: getMannequinNeckPosition(pose),
+    chest: plainVector(
+      transformTorsoPoint(new Vector3(0, 0.36, -0.16 * body.torsoCue.z)),
+    ),
+    pelvis: plainVector(PELVIS_ORIGIN),
+    leftShoulder: plainVector(leftArm.shoulder),
+    rightShoulder: plainVector(rightArm.shoulder),
+    leftElbow: plainVector(leftArm.elbow),
+    rightElbow: plainVector(rightArm.elbow),
+    leftHand: plainVector(leftArm.wrist),
+    rightHand: plainVector(rightArm.wrist),
+    leftHip: plainVector(leftLeg.hip),
+    rightHip: plainVector(rightLeg.hip),
+    leftKnee: plainVector(leftLeg.knee),
+    rightKnee: plainVector(rightLeg.knee),
+    leftFoot: plainVector(leftLeg.ankle),
+    rightFoot: plainVector(rightLeg.ankle),
+  };
 }
 
 export function getMannequinIkRotationFrame(

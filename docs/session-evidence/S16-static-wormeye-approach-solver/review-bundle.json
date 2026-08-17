@@ -1,0 +1,77 @@
+{
+  "bundleVersion": 1,
+  "bundleSha256": "b2a3f1253697607082441075775475f7e063cc3782866c79ac37983e60acb1d0",
+  "hashDefinition": "SHA-256 of UTF-8 canonical JSON for the ordered files array (sort_keys=true, separators=(comma,colon))",
+  "files": [
+    {
+      "path": ".hermes/plans/S16-static-wormeye-approach-solver.md",
+      "bytes": 12533,
+      "sha256": "de12a68cdcf704ee44a0d88e313e205e8ec501603d04bbdae863e235aa9899b6"
+    },
+    {
+      "path": "docs/session-handoffs/S15-canonical-ots-coverage-pair.md",
+      "bytes": 16784,
+      "sha256": "bec8abf2b40e2ee926308f085a5ba376b78b78496d594eec77d77f6e829b8a10"
+    },
+    {
+      "path": "src/editor/cinematography/staticWormEyeApproachSolver.ts",
+      "bytes": 24972,
+      "sha256": "083a029a4a7a66ce1e94df7b8c3d7fdcde9db96f54978e08a818ebfcd5649e2b"
+    },
+    {
+      "path": "src/editor/cinematography/staticWormEyeApproachSolver.test.ts",
+      "bytes": 14216,
+      "sha256": "409f57b3057bd6f25bd92c3dda033f990fe9b28d84a0fabb1273d8acbffc12c5"
+    },
+    {
+      "path": "e2e/staticWormEyeApproach.spec.ts",
+      "bytes": 16816,
+      "sha256": "88779046745f0966e24b4604acfbb655d21af6434bb5ec8b7536af406a39ec4f"
+    },
+    {
+      "path": "src/editor/cinematography/cinematicSubjectProfile.ts",
+      "bytes": 3209,
+      "sha256": "274ff75802e62373ee239b8ee1a1436710446fb5515ffe1b31b5ca378890c1ca"
+    },
+    {
+      "path": "src/editor/cinematography/projectionMetrics.ts",
+      "bytes": 5567,
+      "sha256": "291327f1809e0370bf8b1eb399a702f5453b87d14790d5b222a580e43f69dc88"
+    },
+    {
+      "path": "src/editor/mannequin/mannequinRig.ts",
+      "bytes": 38736,
+      "sha256": "a7f9b8b0a4ef71d3b51582650b79db536a57cafc7b4b32ce15c010e4acf53455"
+    },
+    {
+      "path": "package.json",
+      "bytes": 2234,
+      "sha256": "6f81ec89fbfdeab4c53650ec3b79d9a8c835e713328ab2186b0412856ea4e152"
+    },
+    {
+      "path": "docs/session-evidence/S16-static-wormeye-approach-solver/manifest.json",
+      "bytes": 2696,
+      "sha256": "87f057ed3ba77edc786076d127199b095e33998d1079a08eac7e626e815044c2"
+    },
+    {
+      "path": "docs/session-evidence/S16-static-wormeye-approach-solver/visual-inspection.md",
+      "bytes": 2282,
+      "sha256": "8a85d26e3f7f123aafa4666d07c143f20efe831c06b09f1f01e7dcb4d1b65807"
+    },
+    {
+      "path": "docs/session-evidence/S16-static-wormeye-approach-solver/S16-static-wormeye-approach-accepted-clean-1280x720.png",
+      "bytes": 109120,
+      "sha256": "a1e121365b480ec3a32d4bc75354c1002afa69c0bf1da02b90cdc41ad21cc5a2"
+    },
+    {
+      "path": "docs/session-evidence/S16-static-wormeye-approach-solver/S16-static-wormeye-approach-accepted-output-camera-1280x720.png",
+      "bytes": 126353,
+      "sha256": "84453f93c2940c159847968a4cc5d69289355eb23ecf8b3414eba19e7502fdb7"
+    },
+    {
+      "path": "docs/session-evidence/S16-static-wormeye-approach-solver/S16-static-wormeye-approach-rejected-standing-output-camera-1280x720.png",
+      "bytes": 106581,
+      "sha256": "a7c35f52542eb630b93147daf452afcf6e7ce44248a360a98e289938f1894a62"
+    }
+  ]
+}
