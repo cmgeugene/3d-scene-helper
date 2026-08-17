@@ -15,6 +15,7 @@ import {
 import { RoomSet } from './RoomSet';
 import { SurfaceGrid } from './SurfaceGrid';
 import { getSceneObjectModel } from './sceneObjectModel';
+import { consumeObjectSelectionSuppression } from './objectSelectionGuard';
 
 interface SceneObjectProps {
   object: SceneObjectData;
@@ -260,6 +261,7 @@ export function SceneObject({
       visible={object.visible}
       onClick={(event) => {
         event.stopPropagation();
+        if (consumeObjectSelectionSuppression()) return;
         onSelect(object.id);
       }}
     >

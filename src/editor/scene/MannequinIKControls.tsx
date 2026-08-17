@@ -15,6 +15,7 @@ import {
 import type { StoreApi } from 'zustand/vanilla';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
 import { RENDER_LAYERS } from '../constants';
+import { suppressNextObjectSelection } from './objectSelectionGuard';
 import {
   applyMannequinIkRotation,
   getMannequinArmChain,
@@ -766,7 +767,9 @@ export function MannequinIKControls({
       event.preventDefault();
       event.stopImmediatePropagation();
       releaseCanvasPointer(canvas, event.pointerId);
+      const dragged = draggingHandleRef.current !== null;
       finishDrag(true);
+      if (dragged) suppressNextObjectSelection();
     };
     const cancel = (event: PointerEvent) => {
       if (pointerIdRef.current !== event.pointerId) return;

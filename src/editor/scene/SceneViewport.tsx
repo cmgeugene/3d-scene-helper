@@ -38,6 +38,7 @@ import {
   type ReadOnlyPreviewRenderer,
 } from './previewResourceLifecycle';
 import { SceneObject } from './SceneObject';
+import { consumeObjectSelectionSuppression } from './objectSelectionGuard';
 import { SelectionTransformControls } from './SelectionTransformControls';
 
 interface SceneViewportProps {
@@ -458,7 +459,8 @@ export function SceneViewport({
           }
         }}
         onPointerMissed={() => {
-          if (!readOnly) store.getState().selectObject(null);
+          if (readOnly || consumeObjectSelectionSuppression()) return;
+          store.getState().selectObject(null);
         }}
       >
         <WebGLContextMonitor onRuntimeFailure={onRuntimeFailure} />

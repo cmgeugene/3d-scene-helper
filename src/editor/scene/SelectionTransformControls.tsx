@@ -13,6 +13,8 @@ import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
 import { RENDER_LAYERS } from '../constants';
+import { suppressNextObjectSelection } from './objectSelectionGuard';
+import { constrainPlaneScale } from './planeScaleConstraint';
 import type { SceneObject } from '../persistence/sceneSchema';
 import type { EditorStore } from '../state/editorStore';
 
@@ -59,6 +61,19 @@ function applyTransform(object: Object3D, transform: SceneObject['transform']) {
   );
   object.scale.set(transform.scale.x, transform.scale.y, transform.scale.z);
   object.updateMatrixWorld(true);
+}
+
+function applyConstrainedPlaneScale(
+  object: Object3D,
+  axis: string | null | undefined,
+  initialScale: SceneObject['transform']['scale'],
+) {
+  const constrained = constrainPlaneScale(axis, initialScale, {
+    x: object.scale.x,
+    y: object.scale.y,
+    z: object.scale.z,
+  });
+  object.scale.set(constrained.x, constrained.y, constrained.z);
 }
 
 function publishDiagnostics(
@@ -192,6 +207,13 @@ export function SelectionTransformControls({
         );
       }}
       onObjectChange={() => {
+        const initialScale = initialRuntimeTransformRef.current?.scale;
+        const axis = (
+          controlsRef.current as unknown as TransformControlsInternals | null
+        )?.axis;
+        if (initialScale !== undefined) {
+          applyConstrainedPlaneScale(object, axis, initialScale);
+        }
         publishDiagnostics(
           object,
           mode,
@@ -205,6 +227,14 @@ export function SelectionTransformControls({
         if (!draggingRef.current) return;
         draggingRef.current = false;
         interactionLockedRef.current = false;
+        suppressNextObjectSelection();
+        const axis = (
+          controlsRef.current as unknown as TransformControlsInternals | null
+        )?.axis;
+        const initialScale = initialRuntimeTransformRef.current?.scale;
+        if (initialScale !== undefined) {
+          applyConstrainedPlaneScale(object, axis, initialScale);
+        }
         const inProgress = store.getState().inProgressTransform;
         if (inProgress?.objectId !== objectData.id) {
           const initialRuntimeTransform = initialRuntimeTransformRef.current;
