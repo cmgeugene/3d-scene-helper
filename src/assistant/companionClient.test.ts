@@ -456,7 +456,7 @@ describe('CompanionClient', () => {
       id: 'generation-1',
       threadId: 'thread-1',
       turnId: 'turn-1',
-      status: 'inProgress' as const,
+      status: 'completed' as const,
       prompt: '$imagegen test',
       layoutSpec: TEST_LAYOUT_SPEC,
       sceneSnapshot,
@@ -512,7 +512,24 @@ describe('CompanionClient', () => {
       },
       executionIntegrity: { status: 'valid' as const, issues: [] },
       revisedPrompt: null,
-      result: null,
+      result: {
+        artifactId: 'artifact-generation-1',
+        contentHash: `sha256:${'8'.repeat(64)}`,
+        mimeType: 'image/png' as const,
+        width: 1920,
+        height: 1080,
+        byteLength: 10_000,
+        thumbnail: {
+          policyVersion: 1 as const,
+          artifactId: 'artifact-generation-1-thumbnail',
+          sourceContentHash: `sha256:${'8'.repeat(64)}`,
+          contentHash: `sha256:${'9'.repeat(64)}`,
+          mimeType: 'image/webp' as const,
+          width: 320,
+          height: 180,
+          byteLength: 512,
+        },
+      },
       error: null,
       createdAt: '2026-08-03T00:00:00.000Z',
       updatedAt: '2026-08-03T00:00:00.000Z',
@@ -535,7 +552,11 @@ describe('CompanionClient', () => {
         );
       }
       return new Response(new Uint8Array([1, 2, 3]), {
-        headers: { 'Content-Type': 'image/png' },
+        headers: {
+          'Content-Type': url.endsWith('/thumbnail')
+            ? 'image/webp'
+            : 'image/png',
+        },
       });
     };
     const client = new CompanionClient(connection, fetchImpl);
@@ -561,6 +582,9 @@ describe('CompanionClient', () => {
     await expect(
       client.loadGenerationBlob('generation-1'),
     ).resolves.toMatchObject({ type: 'image/png', size: 3 });
+    await expect(
+      client.loadGenerationThumbnailBlob('generation-1'),
+    ).resolves.toMatchObject({ type: 'image/webp', size: 3 });
     await expect(client.loadSceneRenderBlob('render-1')).resolves.toMatchObject(
       {
         type: 'image/png',
@@ -594,6 +618,9 @@ describe('CompanionClient', () => {
         acknowledgedPreflightWarningIds: [],
       }),
     });
+    expect(fetchCalls.at(-2)?.input).toBe(
+      'http://127.0.0.1:61234/api/generations/generation-1/thumbnail',
+    );
     expect(fetchCalls.at(-1)?.input).toBe(
       'http://127.0.0.1:61234/api/scene-renders/render-1/content',
     );

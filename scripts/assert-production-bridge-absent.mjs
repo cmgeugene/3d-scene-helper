@@ -9,6 +9,7 @@ const projectRoot = path.resolve(
 const distDirectory = path.join(projectRoot, 'dist');
 const forbiddenMarkers = [
   '__I2V_EDITOR_STORE__',
+  '__I2V_PREVIEW_RESOURCE_DIAGNOSTICS__',
   'runtimeCamera',
   'runtimeTransform',
   'transformObject',

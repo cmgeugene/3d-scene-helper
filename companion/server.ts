@@ -988,6 +988,25 @@ export async function startCompanionServer(
         return;
       }
 
+      const generationThumbnailMatch = requestUrl.pathname.match(
+        /^\/api\/generations\/([^/]+)\/thumbnail$/,
+      );
+      if (request.method === 'GET' && generationThumbnailMatch !== null) {
+        const generationId = decodeURIComponent(
+          generationThumbnailMatch[1] ?? '',
+        );
+        const { data, mimeType } =
+          await generationStore.readGenerationThumbnailContent(generationId);
+        response.writeHead(200, {
+          'Content-Type': mimeType,
+          'Content-Length': String(data.byteLength),
+          'Cache-Control': 'private, max-age=31536000, immutable',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        response.end(data);
+        return;
+      }
+
       const generationContentMatch = requestUrl.pathname.match(
         /^\/api\/generations\/([^/]+)\/content$/,
       );

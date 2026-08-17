@@ -140,6 +140,80 @@ function directiveItems(
   return items.length === 0 ? '명시 항목 없음' : items.join(' · ');
 }
 
+function GenerationThumbnail({
+  client,
+  generation,
+  createObjectUrl,
+  revokeObjectUrl,
+}: {
+  client: CompanionBrowserClient | null;
+  generation: GenerationRecord;
+  createObjectUrl: (blob: Blob) => string;
+  revokeObjectUrl: (url: string) => void;
+}) {
+  const [thumbnail, setThumbnail] = useState<
+    | { hash: string; status: 'loaded'; url: string }
+    | { hash: string; status: 'error' }
+    | null
+  >(null);
+  const thumbnailHash = generation.result?.thumbnail?.contentHash ?? null;
+  const currentThumbnail = thumbnail?.hash === thumbnailHash ? thumbnail : null;
+
+  useEffect(() => {
+    let ownedUrl: string | null = null;
+    const controller = new AbortController();
+    if (
+      client === null ||
+      thumbnailHash === null ||
+      client.loadGenerationThumbnailBlob === undefined
+    ) {
+      return () => controller.abort();
+    }
+    void client
+      .loadGenerationThumbnailBlob(generation.id, controller.signal)
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        ownedUrl = createObjectUrl(blob);
+        setThumbnail({
+          hash: thumbnailHash,
+          status: 'loaded',
+          url: ownedUrl,
+        });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setThumbnail({ hash: thumbnailHash, status: 'error' });
+        }
+      });
+    return () => {
+      controller.abort();
+      if (ownedUrl !== null) revokeObjectUrl(ownedUrl);
+    };
+  }, [client, createObjectUrl, generation.id, revokeObjectUrl, thumbnailHash]);
+
+  if (currentThumbnail?.status === 'loaded') {
+    return (
+      <img
+        className="generation-history-thumbnail"
+        src={currentThumbnail.url}
+        alt={`${generation.id} generation thumbnail`}
+        width={generation.result?.thumbnail?.width}
+        height={generation.result?.thumbnail?.height}
+      />
+    );
+  }
+  return (
+    <span
+      className="generation-history-thumbnail-placeholder"
+      aria-hidden="true"
+    >
+      {currentThumbnail?.status === 'error' ? '!' : ''}
+    </span>
+  );
+}
+
+const HISTORY_PAGE_SIZE = 24;
+
 export function KeyframeWorkspace({
   connection,
   storage = window.localStorage,
@@ -162,6 +236,7 @@ export function KeyframeWorkspace({
   const [comparisonId, setComparisonId] = useState<string | null>(() =>
     readComparison(storage),
   );
+  const [historyPage, setHistoryPage] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(connection !== null);
   const [error, setError] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<ImageLoadState | null>(null);
@@ -231,6 +306,26 @@ export function KeyframeWorkspace({
 
   const selected =
     generations.find((generation) => generation.id === selectedId) ?? null;
+  const selectedIndex = generations.findIndex(({ id }) => id === selectedId);
+  const targetIndex =
+    selectedIndex < 0 ? Math.max(0, generations.length - 1) : selectedIndex;
+  const automaticHistoryPage = Math.floor(
+    Math.max(0, generations.length - 1 - targetIndex) / HISTORY_PAGE_SIZE,
+  );
+  const historyPageCount = Math.max(
+    1,
+    Math.ceil(generations.length / HISTORY_PAGE_SIZE),
+  );
+  const boundedHistoryPage = Math.min(
+    historyPage ?? automaticHistoryPage,
+    historyPageCount - 1,
+  );
+  const historyPageEnd =
+    generations.length - boundedHistoryPage * HISTORY_PAGE_SIZE;
+  const visibleGenerations = generations.slice(
+    Math.max(0, historyPageEnd - HISTORY_PAGE_SIZE),
+    historyPageEnd,
+  );
   const comparisonCandidates = useMemo(
     () =>
       selected === null
@@ -441,7 +536,7 @@ export function KeyframeWorkspace({
           <aside className="generation-history" aria-label="Generation 탐색">
             <h3>Generation 이력</h3>
             <ul aria-label="Generation 이력">
-              {generations.map((generation) => {
+              {visibleGenerations.map((generation) => {
                 const parent =
                   generation.parentGenerationId === null
                     ? null
@@ -460,9 +555,16 @@ export function KeyframeWorkspace({
                       aria-label={`${generation.id} · v${generation.versionNumber} · ${STATUS_LABELS[generation.status]}`}
                       onClick={() => {
                         setSelectedId(generation.id);
+                        setHistoryPage(null);
                         setPreviewGenerationId(null);
                       }}
                     >
+                      <GenerationThumbnail
+                        client={client}
+                        generation={generation}
+                        createObjectUrl={createObjectUrl}
+                        revokeObjectUrl={revokeObjectUrl}
+                      />
                       <span className="generation-history-primary">
                         <strong>v{generation.versionNumber}</strong>
                         <span>{STATUS_LABELS[generation.status]}</span>
@@ -491,6 +593,38 @@ export function KeyframeWorkspace({
                 );
               })}
             </ul>
+            {historyPageCount > 1 ? (
+              <nav
+                className="generation-history-pagination"
+                aria-label="Generation 페이지"
+              >
+                <button
+                  type="button"
+                  aria-label="이전 generation 페이지"
+                  disabled={boundedHistoryPage >= historyPageCount - 1}
+                  onClick={() =>
+                    setHistoryPage(
+                      Math.min(historyPageCount - 1, boundedHistoryPage + 1),
+                    )
+                  }
+                >
+                  이전
+                </button>
+                <span>
+                  {historyPageCount - boundedHistoryPage} / {historyPageCount}
+                </span>
+                <button
+                  type="button"
+                  aria-label="다음 generation 페이지"
+                  disabled={boundedHistoryPage === 0}
+                  onClick={() =>
+                    setHistoryPage(Math.max(0, boundedHistoryPage - 1))
+                  }
+                >
+                  다음
+                </button>
+              </nav>
+            ) : null}
           </aside>
 
           {selected === null ? null : (

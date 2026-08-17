@@ -2,7 +2,7 @@
 
 > 기준일: 2026-08-04
 >
-> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료; S36 수동 GPT 웹 fallback 완료
+> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료; S36 P6 완료; S37 P7 완료
 >
 > 이 문서는 앞으로의 구현 순서와 완료 기준을 관리하는 단일 로드맵이다. 세부 설계는
 > `ai-scene-assistant.md`, 완료된 작업의 검증 기록은 `session-handoffs/`를 따른다.
@@ -34,6 +34,7 @@
 | 실행 수명주기  | 프로젝트 lock, 포트 fallback, 브라우저 자동 실행, 제한된 무중복 재연결      | S34     |
 | 브라우저 배포  | 동일-origin 정적 편집기, platform Codex bundle, 크기 manifest와 배포 결정   | S35     |
 | 수동 웹 생성   | GPT 웹용 동일 의미 프롬프트, 첨부 순서 안내, 모달 복사와 무부작용 fallback  | S36     |
+| 생성 자원 수명 | 불변 원본·hash-bound thumbnail, bounded URL/Canvas와 restart 복구           | S37     |
 
 현재 기본 생성은 `3D 레이아웃 1장 + 레퍼런스 최대 4장`, 보정 생성은
 `원본 키프레임 1장 + 현재 3D 레이아웃 1장 + 레퍼런스 최대 3장`을 사용한다.
@@ -150,6 +151,27 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 - [x] 모달에서 레이아웃·보정 원본·역할별 레퍼런스의 첨부 순서와 preflight 경고 표시
 - [x] 클립보드 복사, Escape 닫기와 imagegen capability 비의존 동작
 - [x] 수동 결과가 프로젝트 generation 이력에 자동 등록되지 않음을 명시
+
+### P7. Generation asset 수명주기 — 완료 (S37)
+
+프로젝트에 생성 원본은 불변으로 보존하면서 장시간 사용하는 generation 이력의 브라우저·GPU
+자원 소유권을 제한한다.
+
+- [x] Companion이 원본 해시에 결합된 제한 크기 thumbnail을 원자적으로 생성·복구
+- [x] generation 목록은 thumbnail만 요청하고 선택·비교 항목만 전체 해상도 원본을 지연 로드
+- [x] 선택 해제·교체·unmount에서 blob URL과 decoded image 자원을 정확히 한 번 해제
+- [x] 읽기 전용 sceneSnapshot preview 종료 시 격리된 Canvas/WebGL 자원을 해제하고 live editor에 무부작용
+- [x] 원본/thumbnail 해시·실제 decode 크기·경로 무결성과 legacy/restart 복구를 fail-closed로 검증
+- [x] 많은 generation에서도 전체 해상도 URL, preview Canvas와 표시 행 수가 제한되는 Chromium/WebGL 증거
+
+완료 기준:
+
+1. 원본 bytes와 해시는 thumbnail 생성·복구 전후 동일하며 thumbnail은 320×320 경계 안의 WebP다.
+2. 목록 행은 원본 content route를 호출하지 않고 현재 표시 범위의 thumbnail만 decode한다.
+3. 선택/비교 교체와 preview 반복 open/close 뒤 전체 해상도 URL은 최대 3개, preview Canvas는 최대 1개다.
+4. reload/Companion 재시작에서 정상 legacy thumbnail은 안전하게 복구되고 malformed metadata, 경로 탈출,
+   원본/thumbnail 해시 불일치는 manifest와 원본을 변경하지 않은 채 차단된다.
+5. e2e 전용 자원 진단은 일반 production build에 존재하지 않는다.
 
 ## 3. 장기 보류
 

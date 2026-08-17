@@ -9,6 +9,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
+import sharp from 'sharp';
 import { z } from 'zod';
 import { layoutSpecSchema, type LayoutSpec } from '../shared/layoutSpecSchema';
 import {
@@ -57,6 +58,20 @@ const generationResultSchema = z.object({
   width: z.number().int().positive().nullable(),
   height: z.number().int().positive().nullable(),
   byteLength: z.number().int().positive(),
+  thumbnail: z
+    .object({
+      policyVersion: z.literal(1),
+      artifactId: z.string().min(1),
+      assetPath: z.string().min(1),
+      sourceContentHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+      contentHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+      mimeType: z.literal('image/webp'),
+      width: z.number().int().positive().max(320),
+      height: z.number().int().positive().max(320),
+      byteLength: z.number().int().positive(),
+    })
+    .nullable()
+    .default(null),
 });
 
 const attachmentSchema = z.object({
@@ -442,20 +457,52 @@ export function toPublicGeneration(
       generation.result === null
         ? null
         : (() => {
-            const { assetPath, ...publicResult } = generation.result;
+            const { assetPath, thumbnail, ...publicResult } = generation.result;
             void assetPath;
-            return publicResult;
+            return {
+              ...publicResult,
+              thumbnail:
+                thumbnail === null
+                  ? null
+                  : (() => {
+                      const { assetPath: thumbnailPath, ...publicThumbnail } =
+                        thumbnail;
+                      void thumbnailPath;
+                      return publicThumbnail;
+                    })(),
+            };
           })(),
   };
 }
 
+export interface GenerationStoreOptions {
+  writeThumbnailFile?: (filePath: string, data: Buffer) => Promise<unknown>;
+}
+
 export class GenerationStore {
   private mutationQueue: Promise<void> = Promise.resolve();
+  private readonly writeThumbnailFile: (
+    filePath: string,
+    data: Buffer,
+  ) => Promise<unknown>;
 
-  constructor(private readonly projectRoot: string) {}
+  constructor(
+    private readonly projectRoot: string,
+    options: GenerationStoreOptions = {},
+  ) {
+    this.writeThumbnailFile =
+      options.writeThumbnailFile ??
+      ((filePath, data) => writeFile(filePath, data, { flag: 'wx' }));
+  }
 
-  async listGenerations() {
-    const manifest = await this.readManifest();
+  listGenerations() {
+    return this.mutate(() => this.listGenerationsInternal());
+  }
+
+  private async listGenerationsInternal() {
+    const manifest = await this.restoreLegacyThumbnails(
+      await this.readManifest(),
+    );
     return manifest.generations.map((generation) =>
       toPublicGeneration(
         generation,
@@ -537,6 +584,42 @@ export class GenerationStore {
     return this.mutate(() => this.completeTurnInternal(turnId, status, error));
   }
 
+  readGenerationThumbnailContent(generationId: string) {
+    return this.mutate(async () => {
+      const manifest = await this.restoreLegacyThumbnails(
+        await this.readManifest(),
+      );
+      const generation = manifest.generations.find(
+        ({ id }) => id === generationId,
+      );
+      if (
+        generation === undefined ||
+        generation.status !== 'completed' ||
+        generation.result?.thumbnail === null ||
+        generation.result?.thumbnail === undefined
+      ) {
+        throw new ReferenceNotFoundError(
+          'generation thumbnail을 찾을 수 없습니다.',
+        );
+      }
+      const filePath = await resolveProjectArtifact(
+        this.projectRoot,
+        generation.result.thumbnail.assetPath,
+      );
+      return {
+        generation: toPublicGeneration(
+          generation,
+          manifest.sceneRenders.find(
+            ({ id }) => id === generation.layoutRenderId,
+          ),
+          manifest.generations,
+        ),
+        data: await readFile(filePath),
+        mimeType: generation.result.thumbnail.mimeType,
+      };
+    });
+  }
+
   async readGenerationContent(generationId: string) {
     const manifest = await this.readManifest();
     const generation = manifest.generations.find(
@@ -553,6 +636,19 @@ export class GenerationStore {
       this.projectRoot,
       generation.result.assetPath,
     );
+    const data = await readFile(filePath);
+    const metadata = inspectImage(data);
+    if (
+      sha256(data) !== generation.result.contentHash ||
+      metadata.mimeType !== generation.result.mimeType ||
+      metadata.width !== generation.result.width ||
+      metadata.height !== generation.result.height ||
+      data.byteLength !== generation.result.byteLength
+    ) {
+      throw new ReferenceInputError(
+        'generation 원본 해시 또는 이미지 metadata가 일치하지 않습니다.',
+      );
+    }
     return {
       generation: toPublicGeneration(
         generation,
@@ -561,7 +657,7 @@ export class GenerationStore {
         ),
         manifest.generations,
       ),
-      data: await readFile(filePath),
+      data,
       mimeType: generation.result.mimeType,
     };
   }
@@ -818,19 +914,47 @@ export class GenerationStore {
     const image = inspectImage(data);
     const artifactId = `artifact_${randomUUID()}`;
     const assetPath = `generations/${artifactId}.${image.extension}`;
+    const originalContentHash = sha256(data);
+    const thumbnailArtifactId = `artifact_${randomUUID()}`;
+    const thumbnailAssetPath = `generation-thumbnails/${thumbnailArtifactId}.webp`;
+    const thumbnailOutput = await sharp(data)
+      .rotate()
+      .resize(320, 320, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 78 })
+      .toBuffer({ resolveWithObject: true });
     const directory = path.join(this.projectRoot, 'assets', 'generations');
+    const thumbnailDirectory = path.join(
+      this.projectRoot,
+      'assets',
+      'generation-thumbnails',
+    );
     const destination = path.join(
       directory,
       `${artifactId}.${image.extension}`,
     );
+    const thumbnailDestination = path.join(
+      thumbnailDirectory,
+      `${thumbnailArtifactId}.webp`,
+    );
     const result: GenerationRecord['result'] = {
       artifactId,
       assetPath,
-      contentHash: sha256(data),
+      contentHash: originalContentHash,
       mimeType: image.mimeType,
       width: image.width,
       height: image.height,
       byteLength: data.byteLength,
+      thumbnail: {
+        policyVersion: 1,
+        artifactId: thumbnailArtifactId,
+        assetPath: thumbnailAssetPath,
+        sourceContentHash: originalContentHash,
+        contentHash: sha256(thumbnailOutput.data),
+        mimeType: 'image/webp',
+        width: thumbnailOutput.info.width,
+        height: thumbnailOutput.info.height,
+        byteLength: thumbnailOutput.data.byteLength,
+      },
     };
     const current = manifest.generations[index]!;
     const updated: GenerationRecord = {
@@ -839,14 +963,35 @@ export class GenerationStore {
       revisedPrompt,
       updatedAt: new Date().toISOString(),
     };
-    await mkdir(directory, { recursive: true });
-    await writeFile(destination, data, { flag: 'wx' });
+    await Promise.all([
+      mkdir(directory, { recursive: true }),
+      mkdir(thumbnailDirectory, { recursive: true }),
+    ]);
+    const originalTemporary = `${destination}.${randomUUID()}.tmp`;
+    const thumbnailTemporary = `${thumbnailDestination}.${randomUUID()}.tmp`;
+    let originalPublished = false;
+    let thumbnailPublished = false;
     const generations = [...manifest.generations];
     generations[index] = updated;
     try {
+      await writeFile(originalTemporary, data, { flag: 'wx' });
+      await this.writeThumbnailFile(thumbnailTemporary, thumbnailOutput.data);
+      await rename(originalTemporary, destination);
+      originalPublished = true;
+      await rename(thumbnailTemporary, thumbnailDestination);
+      thumbnailPublished = true;
       await this.writeManifest({ ...manifest, generations });
     } catch (error) {
-      await unlink(destination).catch(() => undefined);
+      await Promise.all([
+        unlink(originalTemporary).catch(() => undefined),
+        unlink(thumbnailTemporary).catch(() => undefined),
+        ...(originalPublished
+          ? [unlink(destination).catch(() => undefined)]
+          : []),
+        ...(thumbnailPublished
+          ? [unlink(thumbnailDestination).catch(() => undefined)]
+          : []),
+      ]);
       throw error;
     }
     return toPublicGeneration(
@@ -886,6 +1031,141 @@ export class GenerationStore {
     generations[index] = updated;
     await this.writeManifest({ ...manifest, generations });
     return toPublicGeneration(updated, layoutRender, generations);
+  }
+
+  private async restoreLegacyThumbnails(
+    manifest: z.infer<typeof generationManifestSchema>,
+  ) {
+    const thumbnailDirectory = path.join(
+      this.projectRoot,
+      'assets',
+      'generation-thumbnails',
+    );
+    await mkdir(thumbnailDirectory, { recursive: true });
+    const assetsRoot = await realpath(path.join(this.projectRoot, 'assets'));
+    const resolvedThumbnailDirectory = await realpath(thumbnailDirectory);
+    const thumbnailDirectoryRelative = path.relative(
+      assetsRoot,
+      resolvedThumbnailDirectory,
+    );
+    if (
+      thumbnailDirectoryRelative !== 'generation-thumbnails' ||
+      path.isAbsolute(thumbnailDirectoryRelative)
+    ) {
+      throw new ReferenceInputError(
+        'generation thumbnail 경로가 프로젝트 assets 내부가 아닙니다.',
+      );
+    }
+
+    const generations = [...manifest.generations];
+    const cleanupPaths: string[] = [];
+    let changed = false;
+    try {
+      for (const [index, generation] of generations.entries()) {
+        const result = generation.result;
+        if (result === null) continue;
+        const storedThumbnail = result.thumbnail;
+        if (storedThumbnail !== null) {
+          if (storedThumbnail.sourceContentHash !== result.contentHash) {
+            throw new ReferenceInputError(
+              'generation thumbnail source 해시가 원본과 일치하지 않습니다.',
+            );
+          }
+          if (
+            storedThumbnail.assetPath !==
+            `generation-thumbnails/${storedThumbnail.artifactId}.webp`
+          ) {
+            throw new ReferenceInputError(
+              'generation thumbnail 경로 또는 artifact ID가 올바르지 않습니다.',
+            );
+          }
+          try {
+            const existingPath = await resolveProjectArtifact(
+              this.projectRoot,
+              storedThumbnail.assetPath,
+            );
+            const existing = await readFile(existingPath);
+            if (sha256(existing) !== storedThumbnail.contentHash) {
+              throw new ReferenceInputError(
+                'generation thumbnail 해시가 저장 metadata와 일치하지 않습니다.',
+              );
+            }
+            const existingMetadata = await sharp(existing).metadata();
+            if (
+              existingMetadata.format !== 'webp' ||
+              existingMetadata.width !== storedThumbnail.width ||
+              existingMetadata.height !== storedThumbnail.height ||
+              existing.byteLength !== storedThumbnail.byteLength
+            ) {
+              throw new ReferenceInputError(
+                'generation thumbnail 이미지 metadata가 일치하지 않습니다.',
+              );
+            }
+            continue;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          }
+        }
+
+        const originalPath = await resolveProjectArtifact(
+          this.projectRoot,
+          result.assetPath,
+        );
+        const original = await readFile(originalPath);
+        const metadata = inspectImage(original);
+        if (
+          sha256(original) !== result.contentHash ||
+          metadata.mimeType !== result.mimeType ||
+          metadata.width !== result.width ||
+          metadata.height !== result.height ||
+          original.byteLength !== result.byteLength
+        ) {
+          throw new ReferenceInputError(
+            'legacy generation 원본의 해시 또는 이미지 metadata가 일치하지 않습니다.',
+          );
+        }
+        const thumbnailOutput = await sharp(original)
+          .rotate()
+          .resize(320, 320, { fit: 'inside', withoutEnlargement: true })
+          .webp({ quality: 78 })
+          .toBuffer({ resolveWithObject: true });
+        const artifactId =
+          storedThumbnail?.artifactId ?? `artifact_${randomUUID()}`;
+        const assetPath = `generation-thumbnails/${artifactId}.webp`;
+        const destination = path.join(thumbnailDirectory, `${artifactId}.webp`);
+        const temporary = `${destination}.${randomUUID()}.tmp`;
+        cleanupPaths.push(temporary, destination);
+        await this.writeThumbnailFile(temporary, thumbnailOutput.data);
+        await rename(temporary, destination);
+        generations[index] = generationSchema.parse({
+          ...generation,
+          result: {
+            ...result,
+            thumbnail: {
+              policyVersion: 1,
+              artifactId,
+              assetPath,
+              sourceContentHash: result.contentHash,
+              contentHash: sha256(thumbnailOutput.data),
+              mimeType: 'image/webp',
+              width: thumbnailOutput.info.width,
+              height: thumbnailOutput.info.height,
+              byteLength: thumbnailOutput.data.byteLength,
+            },
+          },
+        });
+        changed = true;
+      }
+      if (!changed) return manifest;
+      const repaired = { ...manifest, generations };
+      await this.writeManifest(repaired);
+      return repaired;
+    } catch (error) {
+      await Promise.all(
+        cleanupPaths.map((filePath) => unlink(filePath).catch(() => undefined)),
+      );
+      throw error;
+    }
   }
 
   private async readManifest() {

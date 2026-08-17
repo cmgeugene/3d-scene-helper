@@ -100,6 +100,17 @@ export const sceneRenderArtifactSchema = z.object({
   createdAt: z.string(),
 });
 
+const generationThumbnailSchema = z.object({
+  policyVersion: z.literal(1),
+  artifactId: z.string().min(1),
+  sourceContentHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  contentHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  mimeType: z.literal('image/webp'),
+  width: z.number().int().positive().max(320),
+  height: z.number().int().positive().max(320),
+  byteLength: z.number().int().positive(),
+});
+
 const generationResultSchema = z.object({
   artifactId: z.string().min(1),
   contentHash: z.string(),
@@ -107,6 +118,7 @@ const generationResultSchema = z.object({
   width: z.number().int().positive().nullable(),
   height: z.number().int().positive().nullable(),
   byteLength: z.number().int().positive(),
+  thumbnail: generationThumbnailSchema.nullable().optional(),
 });
 
 const generationSceneIntegritySchema = z.object({
@@ -280,6 +292,10 @@ export interface CompanionBrowserClient {
     reused?: boolean;
   }>;
   loadGenerationBlob(generationId: string, signal?: AbortSignal): Promise<Blob>;
+  loadGenerationThumbnailBlob?(
+    generationId: string,
+    signal?: AbortSignal,
+  ): Promise<Blob>;
   subscribe(
     listener: (event: CompanionEvent) => void,
     onError: (error: Error) => void,
@@ -607,6 +623,18 @@ export class CompanionClient implements CompanionBrowserClient {
   async loadGenerationBlob(generationId: string, signal?: AbortSignal) {
     const response = await this.fetchImpl(
       `${this.connection.url}/api/generations/${encodeURIComponent(generationId)}/content`,
+      { headers: this.headers(), signal },
+    );
+    if (!response.ok) throw await this.createHttpError(response);
+    return response.blob();
+  }
+
+  async loadGenerationThumbnailBlob(
+    generationId: string,
+    signal?: AbortSignal,
+  ) {
+    const response = await this.fetchImpl(
+      `${this.connection.url}/api/generations/${encodeURIComponent(generationId)}/thumbnail`,
       { headers: this.headers(), signal },
     );
     if (!response.ok) throw await this.createHttpError(response);

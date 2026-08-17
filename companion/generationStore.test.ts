@@ -1,8 +1,10 @@
 // @vitest-environment node
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { PNG } from 'pngjs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { GenerationStore } from './generationStore';
 import { TEST_LAYOUT_SPEC } from '../shared/layoutSpecTestFixture';
@@ -17,6 +19,21 @@ const onePixelPng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64',
 );
+
+function createLargePng(width = 640, height = 360) {
+  const image = new PNG({ width, height });
+  for (let index = 0; index < image.data.length; index += 4) {
+    image.data[index] = (index / 4) % 251;
+    image.data[index + 1] = 96;
+    image.data[index + 2] = 180;
+    image.data[index + 3] = 255;
+  }
+  return PNG.sync.write(image);
+}
+
+function sha256(data: Buffer) {
+  return `sha256:${createHash('sha256').update(data).digest('hex')}`;
+}
 
 async function createStore() {
   const root = await mkdtemp(path.join(tmpdir(), 'i2v-generation-store-'));
@@ -68,6 +85,304 @@ afterEach(async () => {
 });
 
 describe('GenerationStore', () => {
+  it('생성 원본을 바꾸지 않고 hash-bound 320px WebP thumbnail을 원자적으로 만들고 재사용한다', async () => {
+    const { root, store } = await createStore();
+    const render = await store.importSceneRender('scene-test', onePixelPng);
+    const generation = await store.createGeneration({
+      threadId: 'thread-thumbnail',
+      turnId: 'turn-thumbnail',
+      prompt: '$imagegen thumbnail lifecycle',
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: createSceneSnapshot(),
+      referenceSnapshots: [],
+      layoutRenderId: render.id,
+      referenceIds: [],
+      attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+    });
+    const original = createLargePng();
+    const source = path.join(root, 'large-generation.png');
+    await writeFile(source, original);
+
+    const imported = await store.importGenerationResult(
+      generation.turnId,
+      source,
+      null,
+    );
+    await store.completeTurn(generation.turnId, 'completed', null);
+
+    expect(imported?.result).toMatchObject({
+      contentHash: sha256(original),
+      width: 640,
+      height: 360,
+      thumbnail: {
+        policyVersion: 1,
+        sourceContentHash: sha256(original),
+        mimeType: 'image/webp',
+        width: 320,
+        height: 180,
+      },
+    });
+    const originalContent = await store.readGenerationContent(generation.id);
+    expect(originalContent.data).toEqual(original);
+    expect(sha256(originalContent.data)).toBe(sha256(original));
+
+    const thumbnailContent = await store.readGenerationThumbnailContent(
+      generation.id,
+    );
+    expect(thumbnailContent.mimeType).toBe('image/webp');
+    expect(thumbnailContent.data.byteLength).toBeGreaterThan(0);
+    expect(sha256(thumbnailContent.data)).toBe(
+      imported?.result?.thumbnail?.contentHash,
+    );
+
+    const beforeRestartManifest = await readFile(
+      path.join(root, 'generations.json'),
+      'utf8',
+    );
+    const restarted = new GenerationStore(root);
+    const restored = await restarted.listGenerations();
+    expect(restored[0]?.result?.thumbnail).toEqual(imported?.result?.thumbnail);
+    expect(await readFile(path.join(root, 'generations.json'), 'utf8')).toBe(
+      beforeRestartManifest,
+    );
+    expect((await restarted.readGenerationContent(generation.id)).data).toEqual(
+      original,
+    );
+  });
+
+  it('thumbnail write 실패는 manifest와 프로젝트 원본을 그대로 둔다', async () => {
+    const { root, store } = await createStore();
+    const render = await store.importSceneRender('scene-test', onePixelPng);
+    const generation = await store.createGeneration({
+      threadId: 'thread-thumbnail-write-failure',
+      turnId: 'turn-thumbnail-write-failure',
+      prompt: '$imagegen thumbnail write failure',
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: createSceneSnapshot(),
+      referenceSnapshots: [],
+      layoutRenderId: render.id,
+      referenceIds: [],
+      attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+    });
+    const source = path.join(root, 'write-failure-source.png');
+    const original = createLargePng();
+    await writeFile(source, original);
+    const manifestPath = path.join(root, 'generations.json');
+    const manifestBefore = await readFile(manifestPath, 'utf8');
+    const failingStore = new GenerationStore(root, {
+      writeThumbnailFile: async () => {
+        throw new Error('injected thumbnail write failure');
+      },
+    });
+
+    await expect(
+      failingStore.importGenerationResult(generation.turnId, source, null),
+    ).rejects.toThrow('injected thumbnail write failure');
+
+    expect(await readFile(manifestPath, 'utf8')).toBe(manifestBefore);
+    expect(await readFile(source)).toEqual(original);
+    await expect(
+      readdir(path.join(root, 'assets', 'generations')),
+    ).resolves.toEqual([]);
+    await expect(
+      readdir(path.join(root, 'assets', 'generation-thumbnails')),
+    ).resolves.toEqual([]);
+  });
+
+  it('restart/reload가 유효한 legacy 원본에서 누락 thumbnail을 안전하게 재생성한다', async () => {
+    const { root, store } = await createStore();
+    const render = await store.importSceneRender('scene-test', onePixelPng);
+    const generation = await store.createGeneration({
+      threadId: 'thread-legacy-thumbnail',
+      turnId: 'turn-legacy-thumbnail',
+      prompt: '$imagegen legacy thumbnail recovery',
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: createSceneSnapshot(),
+      referenceSnapshots: [],
+      layoutRenderId: render.id,
+      referenceIds: [],
+      attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+    });
+    const source = path.join(root, 'legacy-thumbnail-source.png');
+    const original = createLargePng(800, 600);
+    await writeFile(source, original);
+    await store.importGenerationResult(generation.turnId, source, null);
+    await store.completeTurn(generation.turnId, 'completed', null);
+
+    const manifestPath = path.join(root, 'generations.json');
+    const legacyManifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      generations: Array<{
+        result: {
+          assetPath: string;
+          contentHash: string;
+          thumbnail?: { assetPath: string };
+        };
+      }>;
+    };
+    const previousThumbnailPath =
+      legacyManifest.generations[0]!.result.thumbnail!.assetPath;
+    await rm(path.join(root, 'assets', previousThumbnailPath), { force: true });
+    delete legacyManifest.generations[0]!.result.thumbnail;
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(legacyManifest, null, 2)}\n`,
+    );
+
+    const restarted = new GenerationStore(root);
+    const restored = await restarted.listGenerations();
+    expect(restored[0]?.result?.thumbnail).toMatchObject({
+      policyVersion: 1,
+      sourceContentHash: sha256(original),
+      mimeType: 'image/webp',
+      width: 320,
+      height: 240,
+    });
+    expect((await restarted.readGenerationContent(generation.id)).data).toEqual(
+      original,
+    );
+    const thumbnail = await restarted.readGenerationThumbnailContent(
+      generation.id,
+    );
+    expect(sha256(thumbnail.data)).toBe(
+      restored[0]?.result?.thumbnail?.contentHash,
+    );
+    const persisted = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      generations: Array<{ result: { thumbnail?: unknown } }>;
+    };
+    expect(persisted.generations[0]?.result.thumbnail).toBeDefined();
+  });
+
+  it('누락 derived file은 복구하지만 thumbnail hash/path/source 불일치는 manifest와 원본 변경 없이 차단한다', async () => {
+    const { root, store } = await createStore();
+    const render = await store.importSceneRender('scene-test', onePixelPng);
+    const generation = await store.createGeneration({
+      threadId: 'thread-thumbnail-integrity',
+      turnId: 'turn-thumbnail-integrity',
+      prompt: '$imagegen thumbnail integrity',
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: createSceneSnapshot(),
+      referenceSnapshots: [],
+      layoutRenderId: render.id,
+      referenceIds: [],
+      attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+    });
+    const source = path.join(root, 'thumbnail-integrity-source.png');
+    const original = createLargePng(700, 500);
+    await writeFile(source, original);
+    await store.importGenerationResult(generation.turnId, source, null);
+    await store.completeTurn(generation.turnId, 'completed', null);
+
+    const manifestPath = path.join(root, 'generations.json');
+    const readInternalManifest = async () =>
+      JSON.parse(await readFile(manifestPath, 'utf8')) as {
+        generations: Array<{
+          result: {
+            assetPath: string;
+            contentHash: string;
+            thumbnail: {
+              assetPath: string;
+              sourceContentHash: string;
+              contentHash: string;
+            };
+          };
+        }>;
+      };
+    const importedManifest = await readInternalManifest();
+    const thumbnailPath = path.join(
+      root,
+      'assets',
+      importedManifest.generations[0]!.result.thumbnail.assetPath,
+    );
+    await rm(thumbnailPath, { force: true });
+
+    const restored = await new GenerationStore(root).listGenerations();
+    expect(restored[0]?.result?.thumbnail).not.toBeNull();
+    expect(
+      sha256(
+        (
+          await new GenerationStore(root).readGenerationThumbnailContent(
+            generation.id,
+          )
+        ).data,
+      ),
+    ).toBe(restored[0]?.result?.thumbnail?.contentHash);
+    expect(
+      (await new GenerationStore(root).readGenerationContent(generation.id))
+        .data,
+    ).toEqual(original);
+
+    await writeFile(thumbnailPath, Buffer.from('tampered-thumbnail'));
+    const hashMismatchManifest = await readFile(manifestPath, 'utf8');
+    await expect(new GenerationStore(root).listGenerations()).rejects.toThrow(
+      'thumbnail 해시',
+    );
+    expect(await readFile(manifestPath, 'utf8')).toBe(hashMismatchManifest);
+
+    const sourceMismatchManifest = await readInternalManifest();
+    sourceMismatchManifest.generations[0]!.result.thumbnail.sourceContentHash = `sha256:${'f'.repeat(64)}`;
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(sourceMismatchManifest, null, 2)}\n`,
+    );
+    const sourceMismatchBefore = await readFile(manifestPath, 'utf8');
+    await expect(new GenerationStore(root).listGenerations()).rejects.toThrow(
+      'thumbnail source 해시',
+    );
+    expect(await readFile(manifestPath, 'utf8')).toBe(sourceMismatchBefore);
+
+    const traversalManifest = await readInternalManifest();
+    traversalManifest.generations[0]!.result.thumbnail.sourceContentHash =
+      traversalManifest.generations[0]!.result.contentHash;
+    traversalManifest.generations[0]!.result.thumbnail.assetPath =
+      '../thumbnail-outside.webp';
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(traversalManifest, null, 2)}\n`,
+    );
+    const traversalBefore = await readFile(manifestPath, 'utf8');
+    await expect(new GenerationStore(root).listGenerations()).rejects.toThrow(
+      'thumbnail 경로',
+    );
+    expect(await readFile(manifestPath, 'utf8')).toBe(traversalBefore);
+    expect(await readFile(source)).toEqual(original);
+  });
+
+  it('전체 해상도 원본의 hash/metadata mismatch를 manifest 변경 없이 fail-closed한다', async () => {
+    const { root, store } = await createStore();
+    const render = await store.importSceneRender('scene-test', onePixelPng);
+    const generation = await store.createGeneration({
+      threadId: 'thread-original-integrity',
+      turnId: 'turn-original-integrity',
+      prompt: '$imagegen original integrity',
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: createSceneSnapshot(),
+      referenceSnapshots: [],
+      layoutRenderId: render.id,
+      referenceIds: [],
+      attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+    });
+    const source = path.join(root, 'original-integrity-source.png');
+    await writeFile(source, createLargePng());
+    await store.importGenerationResult(generation.turnId, source, null);
+    await store.completeTurn(generation.turnId, 'completed', null);
+    const manifestPath = path.join(root, 'generations.json');
+    const manifestBefore = await readFile(manifestPath, 'utf8');
+    const manifest = JSON.parse(manifestBefore) as {
+      generations: Array<{ result: { assetPath: string } }>;
+    };
+    const originalPath = path.join(
+      root,
+      'assets',
+      manifest.generations[0]!.result.assetPath,
+    );
+    await writeFile(originalPath, createLargePng(320, 180));
+
+    await expect(store.readGenerationContent(generation.id)).rejects.toThrow(
+      'generation 원본 해시',
+    );
+    expect(await readFile(manifestPath, 'utf8')).toBe(manifestBefore);
+  });
+
   it('request ID와 fingerprint를 보존하고 재시작 고아 작업을 interrupted로 복구한다', async () => {
     const { root, store } = await createStore();
     const render = await store.importSceneRender('scene-test', onePixelPng);

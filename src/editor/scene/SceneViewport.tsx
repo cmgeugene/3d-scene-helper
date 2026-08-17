@@ -17,7 +17,10 @@ import {
 } from 'three';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
-import { IS_EDITOR_TEST_BRIDGE_ENABLED } from '../../app/runtimeMode';
+import {
+  IS_EDITOR_TEST_BRIDGE_ENABLED,
+  IS_E2E_TEST_BUILD,
+} from '../../app/runtimeMode';
 import { ASPECT_RATIO_VALUES, RENDER_LAYERS } from '../constants';
 import { exportFrame, type FrameExportHandler } from '../export/exportFrame';
 import type { MannequinPose } from '../mannequin/mannequinRig';
@@ -30,6 +33,10 @@ import { CinematicDepthOfField } from './CinematicDepthOfField';
 import { MotionGuides } from './MotionGuides';
 import { computeLetterbox, type LetterboxRectangle } from './cameraMath';
 import { OutputCamera } from './OutputCamera';
+import {
+  releaseReadOnlyPreviewRenderer,
+  type ReadOnlyPreviewRenderer,
+} from './previewResourceLifecycle';
 import { SceneObject } from './SceneObject';
 import { SelectionTransformControls } from './SelectionTransformControls';
 
@@ -38,6 +45,31 @@ interface SceneViewportProps {
   onExportReady?: (exportFrame: FrameExportHandler | null) => void;
   onRuntimeFailure?: (message: string) => void;
   readOnly?: boolean;
+}
+
+interface PreviewResourceDiagnostics {
+  active: number;
+  created: number;
+  released: number;
+  peak: number;
+}
+
+function beginPreviewResourceDiagnostic(): PreviewResourceDiagnostics | null {
+  if (!IS_E2E_TEST_BUILD) return null;
+  const runtime = globalThis as typeof globalThis & {
+    __I2V_PREVIEW_RESOURCE_DIAGNOSTICS__?: PreviewResourceDiagnostics;
+  };
+  const diagnostics = runtime.__I2V_PREVIEW_RESOURCE_DIAGNOSTICS__ ?? {
+    active: 0,
+    created: 0,
+    released: 0,
+    peak: 0,
+  };
+  diagnostics.active += 1;
+  diagnostics.created += 1;
+  diagnostics.peak = Math.max(diagnostics.peak, diagnostics.active);
+  runtime.__I2V_PREVIEW_RESOURCE_DIAGNOSTICS__ = diagnostics;
+  return diagnostics;
 }
 
 function WebGLContextMonitor({
@@ -355,7 +387,24 @@ export function SceneViewport({
   const outputAspect = ASPECT_RATIO_VALUES[outputAspectId];
   const guideVisibility = useStore(store, (state) => state.guideVisibility);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const readOnlyRendererRef = useRef<ReadOnlyPreviewRenderer | null>(null);
+  const previewDiagnosticsRef = useRef<PreviewResourceDiagnostics | null>(null);
   const [frame, setFrame] = useState<LetterboxRectangle | null>(null);
+
+  useLayoutEffect(() => {
+    if (!readOnly) return;
+    return () => {
+      const renderer = readOnlyRendererRef.current;
+      readOnlyRendererRef.current = null;
+      if (renderer !== null) releaseReadOnlyPreviewRenderer(renderer);
+      const diagnostics = previewDiagnosticsRef.current;
+      previewDiagnosticsRef.current = null;
+      if (diagnostics !== null) {
+        diagnostics.active -= 1;
+        diagnostics.released += 1;
+      }
+    };
+  }, [readOnly]);
 
   useLayoutEffect(() => {
     const surface = surfaceRef.current;
@@ -400,6 +449,13 @@ export function SceneViewport({
           gl.shadowMap.type = PCFShadowMap;
           camera.layers.enable(RENDER_LAYERS.editor);
           camera.layers.enable(RENDER_LAYERS.reference);
+          if (readOnly && readOnlyRendererRef.current === null) {
+            readOnlyRendererRef.current = gl;
+            previewDiagnosticsRef.current = beginPreviewResourceDiagnostic();
+            if (previewDiagnosticsRef.current !== null) {
+              gl.domElement.dataset.previewResourceOwner = 'active';
+            }
+          }
         }}
         onPointerMissed={() => {
           if (!readOnly) store.getState().selectObject(null);

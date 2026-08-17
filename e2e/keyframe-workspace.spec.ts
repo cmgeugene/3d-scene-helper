@@ -1,6 +1,7 @@
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
+import sharp from 'sharp';
 import { TEST_LAYOUT_SPEC } from '../shared/layoutSpecTestFixture';
 import {
   createSceneObject,
@@ -138,6 +139,16 @@ function generation(
       width: 1,
       height: 1,
       byteLength: onePixelPng.byteLength,
+      thumbnail: {
+        policyVersion: 1,
+        artifactId: `artifact-${id}-thumbnail`,
+        sourceContentHash: `sha256:${'a'.repeat(64)}`,
+        contentHash: `sha256:${'b'.repeat(64)}`,
+        mimeType: 'image/webp',
+        width: 320,
+        height: 180,
+        byteLength: 1,
+      },
     },
     error: null,
     createdAt: '2026-08-03T00:00:00.000Z',
@@ -155,6 +166,10 @@ const generations = [
   generation('generation-legacy', 'legacy'),
   generation('generation-mismatch', 'mismatch'),
 ];
+let generationResponse: ReadonlyArray<ReturnType<typeof generation>> =
+  generations;
+let thumbnailWebp: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+const assetRequests: string[] = [];
 const eventResponses = new Set<ServerResponse>();
 let server: Server;
 let companionUrl: string;
@@ -209,7 +224,7 @@ function createMockCompanionServer() {
       return;
     }
     if (request.url === '/api/generations') {
-      sendJson(response, { version: 1, generations });
+      sendJson(response, { version: 1, generations: generationResponse });
       return;
     }
     if (request.url === '/api/conversation-session') {
@@ -240,11 +255,23 @@ function createMockCompanionServer() {
       request.on('close', () => eventResponses.delete(response));
       return;
     }
+    if (request.url?.match(/^\/api\/generations\/[^/]+\/thumbnail$/)) {
+      assetRequests.push(request.url);
+      response.writeHead(200, {
+        'Content-Type': 'image/webp',
+        'Content-Length': String(thumbnailWebp.byteLength),
+        'Cache-Control': 'private, max-age=31536000, immutable',
+        'Access-Control-Allow-Origin': 'http://127.0.0.1:4173',
+      });
+      response.end(thumbnailWebp);
+      return;
+    }
     if (
       request.url?.match(
         /^\/api\/(?:generations|scene-renders)\/[^/]+\/content$/,
       )
     ) {
+      assetRequests.push(request.url);
       response.writeHead(200, {
         'Content-Type': 'image/png',
         'Content-Length': String(onePixelPng.byteLength),
@@ -274,8 +301,23 @@ async function closeMockCompanion() {
 }
 
 test.beforeAll(async () => {
+  thumbnailWebp = await sharp({
+    create: {
+      width: 320,
+      height: 180,
+      channels: 4,
+      background: { r: 42, g: 86, b: 140, alpha: 1 },
+    },
+  })
+    .webp({ quality: 78 })
+    .toBuffer();
   const port = await listenMockCompanion();
   companionUrl = `http://127.0.0.1:${port}`;
+});
+
+test.beforeEach(() => {
+  generationResponse = generations;
+  assetRequests.length = 0;
 });
 
 test.afterAll(async () => {
@@ -401,6 +443,23 @@ test('sceneSnapshot preview가 과거 구도를 재현하고 live scene 상태�
   const previewCanvas = previewSurface.locator('canvas');
   await expect(previewCanvas).toBeVisible();
   await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const diagnostics = (
+          globalThis as unknown as {
+            __I2V_PREVIEW_RESOURCE_DIAGNOSTICS__?: {
+              active: number;
+              created: number;
+              released: number;
+              peak: number;
+            };
+          }
+        ).__I2V_PREVIEW_RESOURCE_DIAGNOSTICS__;
+        return diagnostics?.active ?? -1;
+      }),
+    )
+    .toBe(1);
+  await expect
     .poll(() => previewCanvas.getAttribute('data-runtime-camera'))
     .not.toBeNull();
   const runtimeCamera = JSON.parse(
@@ -425,6 +484,24 @@ test('sceneSnapshot preview가 과거 구도를 재현하고 live scene 상태�
   await expect(
     page.getByRole('alert', { name: '장면 ID 무결성 오류' }),
   ).toContainText('scene-other');
+  await expect(preview).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            globalThis as unknown as {
+              __I2V_PREVIEW_RESOURCE_DIAGNOSTICS__?: {
+                active: number;
+                created: number;
+                released: number;
+                peak: number;
+              };
+            }
+          ).__I2V_PREVIEW_RESOURCE_DIAGNOSTICS__,
+      ),
+    )
+    .toEqual({ active: 0, created: 1, released: 1, peak: 1 });
   await expect(previewButton).toBeDisabled();
 
   const legacy = page.getByRole('button', { name: /generation-legacy/ });
@@ -475,6 +552,219 @@ test('sceneSnapshot preview가 과거 구도를 재현하고 live scene 상태�
   await expect(page.getByText('키프레임 보정 모드')).toBeVisible();
   expect(await readEditorEvidence()).toEqual(afterRefreshBaseline);
   expect(browserProblems).toEqual([]);
+});
+
+test('many generations에서 full-res/thumbnail/preview URL과 Canvas가 실제 Chromium/WebGL에서 bounded된다', async ({
+  page,
+}) => {
+  generationResponse = Array.from({ length: 72 }, (_, index) =>
+    generation(`generation-many-${String(index + 1).padStart(3, '0')}`),
+  );
+  await page.addInitScript(() => {
+    const createObjectUrl = URL.createObjectURL.bind(URL);
+    const revokeObjectUrl = URL.revokeObjectURL.bind(URL);
+    const diagnostics = {
+      active: 0,
+      created: 0,
+      released: 0,
+      duplicateRevokes: 0,
+      peak: 0,
+      types: {} as Record<string, string>,
+    };
+    Object.defineProperty(globalThis, '__I2V_TEST_OBJECT_URL_DIAGNOSTICS__', {
+      configurable: false,
+      value: diagnostics,
+    });
+    URL.createObjectURL = (blob: Blob) => {
+      const url = createObjectUrl(blob);
+      diagnostics.types[url] = blob.type;
+      diagnostics.active += 1;
+      diagnostics.created += 1;
+      diagnostics.peak = Math.max(diagnostics.peak, diagnostics.active);
+      return url;
+    };
+    URL.revokeObjectURL = (url: string) => {
+      if (Object.hasOwn(diagnostics.types, url)) {
+        delete diagnostics.types[url];
+        diagnostics.active -= 1;
+        diagnostics.released += 1;
+      } else {
+        diagnostics.duplicateRevokes += 1;
+      }
+      revokeObjectUrl(url);
+    };
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const encoded = Buffer.from(
+    JSON.stringify({ version: 1, url: companionUrl, token }),
+  ).toString('base64url');
+  await page.goto(`/#companion=${encoded}`);
+  await expect
+    .poll(
+      () =>
+        assetRequests.filter((url) =>
+          /^\/api\/generations\/[^/]+\/content$/.test(url),
+        ).length,
+    )
+    .toBe(1);
+  assetRequests.length = 0;
+  await page.getByRole('button', { name: '키프레임' }).click();
+
+  const history = page.getByRole('list', { name: 'Generation 이력' });
+  await expect(history.getByRole('button')).toHaveCount(24);
+  const thumbnails = history.getByRole('img', { name: /generation thumbnail/ });
+  await expect(thumbnails).toHaveCount(24);
+  await expect
+    .poll(() =>
+      thumbnails.evaluateAll((images) =>
+        images.every(
+          (image) =>
+            (image as unknown as { naturalWidth: number }).naturalWidth ===
+              320 &&
+            (image as unknown as { naturalHeight: number }).naturalHeight ===
+              180,
+        ),
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(
+      () => assetRequests.filter((url) => url.endsWith('/thumbnail')).length,
+    )
+    .toBe(24);
+  const fullResolutionRequests = assetRequests.filter((url) =>
+    /^\/api\/generations\/[^/]+\/content$/.test(url),
+  );
+  expect([...new Set(fullResolutionRequests)]).toEqual([
+    '/api/generations/generation-many-072/content',
+  ]);
+  expect(fullResolutionRequests.length).toBeLessThanOrEqual(2);
+
+  const readUrlDiagnostics = () =>
+    page.evaluate(() => {
+      const diagnostics = (
+        globalThis as unknown as {
+          __I2V_TEST_OBJECT_URL_DIAGNOSTICS__?: {
+            active: number;
+            created: number;
+            released: number;
+            duplicateRevokes: number;
+            peak: number;
+            types: Record<string, string>;
+          };
+        }
+      ).__I2V_TEST_OBJECT_URL_DIAGNOSTICS__;
+      if (diagnostics === undefined) throw new Error('URL diagnostics missing');
+      return {
+        ...diagnostics,
+        fullResolutionActive: Object.values(diagnostics.types).filter(
+          (type) => type !== 'image/webp',
+        ).length,
+      };
+    });
+  await expect.poll(async () => (await readUrlDiagnostics()).active).toBe(26);
+  expect((await readUrlDiagnostics()).fullResolutionActive).toBe(2);
+
+  for (let pageIndex = 0; pageIndex < 2; pageIndex += 1) {
+    await page.getByRole('button', { name: '이전 generation 페이지' }).click();
+    await expect(history.getByRole('button')).toHaveCount(24);
+    await expect(
+      history.getByRole('img', { name: /generation thumbnail/ }),
+    ).toHaveCount(24);
+    await expect.poll(async () => (await readUrlDiagnostics()).active).toBe(26);
+  }
+  await expect
+    .poll(
+      () => assetRequests.filter((url) => url.endsWith('/thumbnail')).length,
+    )
+    .toBe(72);
+
+  const previewButton = page.getByRole('button', {
+    name: '생성 당시 3D 씬 미리보기',
+  });
+  for (let cycle = 1; cycle <= 3; cycle += 1) {
+    await previewButton.click();
+    const preview = page.getByRole('img', {
+      name: '생성 당시 3D 씬 읽기 전용 미리보기',
+    });
+    await expect(preview.locator('canvas')).toBeVisible();
+    await expect(preview.locator('canvas')).toHaveAttribute(
+      'data-preview-resource-owner',
+      'active',
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              globalThis as unknown as {
+                __I2V_PREVIEW_RESOURCE_DIAGNOSTICS__?: { active: number };
+              }
+            ).__I2V_PREVIEW_RESOURCE_DIAGNOSTICS__?.active,
+        ),
+      )
+      .toBe(1);
+    await expect(page.locator('canvas')).toHaveCount(1);
+    await previewButton.click();
+    await expect(preview).toHaveCount(0);
+    await expect(page.locator('canvas')).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              globalThis as unknown as {
+                __I2V_PREVIEW_RESOURCE_DIAGNOSTICS__?: {
+                  active: number;
+                  created: number;
+                  released: number;
+                  peak: number;
+                };
+              }
+            ).__I2V_PREVIEW_RESOURCE_DIAGNOSTICS__,
+        ),
+      )
+      .toEqual({ active: 0, created: cycle, released: cycle, peak: 1 });
+  }
+
+  const urlDiagnostics = await readUrlDiagnostics();
+  expect(urlDiagnostics.active).toBe(26);
+  expect(urlDiagnostics.fullResolutionActive).toBe(2);
+  expect(urlDiagnostics.duplicateRevokes).toBe(0);
+  expect(urlDiagnostics.peak).toBeLessThanOrEqual(26);
+  const previewDiagnostics = await page.evaluate(
+    () =>
+      (
+        globalThis as unknown as {
+          __I2V_PREVIEW_RESOURCE_DIAGNOSTICS__?: {
+            active: number;
+            created: number;
+            released: number;
+            peak: number;
+          };
+        }
+      ).__I2V_PREVIEW_RESOURCE_DIAGNOSTICS__,
+  );
+  console.log(
+    `S37_RESOURCE_METRICS ${JSON.stringify({
+      generations: generationResponse.length,
+      thumbnailDom: await thumbnails.count(),
+      thumbnailRequests: assetRequests.filter((url) =>
+        url.endsWith('/thumbnail'),
+      ).length,
+      fullResolutionRequestCount: fullResolutionRequests.length,
+      urlDiagnostics: {
+        active: urlDiagnostics.active,
+        created: urlDiagnostics.created,
+        released: urlDiagnostics.released,
+        duplicateRevokes: urlDiagnostics.duplicateRevokes,
+        peak: urlDiagnostics.peak,
+        fullResolutionActive: urlDiagnostics.fullResolutionActive,
+      },
+      previewDiagnostics,
+      canvasAfterClose: await page.locator('canvas').count(),
+    })}`,
+  );
 });
 
 test('sceneSnapshot apply는 cancel/save 실패/race를 닫고 undo와 durable recovery를 실제 Chromium에서 보존한다', async ({

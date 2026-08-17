@@ -93,6 +93,16 @@ function generation(
       width: 1920,
       height: 1080,
       byteLength: 2048,
+      thumbnail: {
+        policyVersion: 1,
+        artifactId: `artifact-${overrides.id}-thumbnail`,
+        sourceContentHash: `sha256:${'b'.repeat(64)}`,
+        contentHash: `sha256:${'c'.repeat(64)}`,
+        mimeType: 'image/webp',
+        width: 320,
+        height: 180,
+        byteLength: 512,
+      },
     },
     error: null,
     createdAt: '2026-08-03T00:00:00.000Z',
@@ -133,11 +143,141 @@ function clientWith(generations: GenerationRecord[]): CompanionBrowserClient {
     },
     loadGenerationBlob: async (id) =>
       new Blob([`result:${id}`], { type: 'image/png' }),
+    loadGenerationThumbnailBlob: async (id) =>
+      new Blob([`thumbnail:${id}`], { type: 'image/webp' }),
     subscribe: () => () => undefined,
   };
 }
 
 describe('KeyframeWorkspace', () => {
+  it('목록은 bounded thumbnail만 요청하고 선택 full-res URL을 replacement/unmount마다 정확히 한 번 해제한다', async () => {
+    const user = userEvent.setup();
+    const first = generation({ id: 'generation-lifecycle-first' });
+    const second = generation({ id: 'generation-lifecycle-second' });
+    const third = generation({ id: 'generation-lifecycle-third' });
+    const loadFull = vi.fn(
+      async (id: string) => new Blob([`full:${id}`], { type: 'image/png' }),
+    );
+    const loadThumbnail = vi.fn(
+      async (id: string) =>
+        new Blob([`thumbnail:${id}`], { type: 'image/webp' }),
+    );
+    const client: CompanionBrowserClient = {
+      ...clientWith([first, second, third]),
+      loadSceneRenderBlob: async (id) =>
+        new Blob([`layout:${id}`], { type: 'image/jpeg' }),
+      loadGenerationBlob: loadFull,
+      loadGenerationThumbnailBlob: loadThumbnail,
+    };
+    const created: Array<{ type: string; url: string }> = [];
+    const revoke = vi.fn<(url: string) => void>();
+    const view = render(
+      <KeyframeWorkspace
+        connection={connection}
+        storage={createMemoryStorage({
+          [KEYFRAME_SELECTION_STORAGE_KEY]: first.id,
+        })}
+        clientFactory={() => client}
+        createObjectUrl={(blob) => {
+          const url = `blob:${blob.type}:${created.length + 1}`;
+          created.push({ type: blob.type, url });
+          return url;
+        }}
+        revokeObjectUrl={revoke}
+        onRefine={() => undefined}
+      />,
+    );
+
+    expect(
+      await screen.findAllByRole('img', { name: /generation thumbnail/ }),
+    ).toHaveLength(3);
+    expect(loadThumbnail.mock.calls.map(([id]) => id)).toEqual([
+      first.id,
+      second.id,
+      third.id,
+    ]);
+    await waitFor(() => expect(loadFull).toHaveBeenCalledTimes(1));
+    expect(loadFull).toHaveBeenLastCalledWith(
+      first.id,
+      expect.any(AbortSignal),
+    );
+    const firstFullUrl = created.find(({ type }) => type === 'image/png')!.url;
+
+    await user.click(screen.getByRole('button', { name: /lifecycle-second/ }));
+    await waitFor(() => expect(loadFull).toHaveBeenCalledTimes(2));
+    expect(loadFull).toHaveBeenLastCalledWith(
+      second.id,
+      expect.any(AbortSignal),
+    );
+    await waitFor(() =>
+      expect(
+        revoke.mock.calls.filter(([url]) => url === firstFullUrl),
+      ).toHaveLength(1),
+    );
+
+    view.unmount();
+    await waitFor(() => {
+      for (const { url } of created) {
+        expect(
+          revoke.mock.calls.filter(([revoked]) => revoked === url),
+        ).toHaveLength(1);
+      }
+    });
+  });
+
+  it('many-generation history는 한 페이지의 thumbnail DOM만 유지한다', async () => {
+    const user = userEvent.setup();
+    const generations = Array.from({ length: 80 }, (_, index) =>
+      generation({
+        id: `generation-many-${String(index + 1).padStart(3, '0')}`,
+      }),
+    );
+    let urlSequence = 0;
+    render(
+      <KeyframeWorkspace
+        connection={connection}
+        storage={createMemoryStorage({
+          [KEYFRAME_SELECTION_STORAGE_KEY]: generations.at(-1)!.id,
+        })}
+        clientFactory={() => clientWith(generations)}
+        createObjectUrl={() => `blob:thumbnail-${++urlSequence}`}
+        revokeObjectUrl={() => undefined}
+        onRefine={() => undefined}
+      />,
+    );
+
+    const history = await screen.findByRole('list', {
+      name: 'Generation 이력',
+    });
+    await waitFor(() =>
+      expect(within(history).getAllByRole('button')).toHaveLength(24),
+    );
+    expect(
+      within(history).getByRole('button', { name: /generation-many-080/ }),
+    ).toBeVisible();
+    expect(
+      within(history).queryByRole('button', { name: /generation-many-056/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      await within(history).findAllByRole('img', {
+        name: /generation thumbnail/,
+      }),
+    ).toHaveLength(24);
+
+    await user.click(
+      screen.getByRole('button', { name: '이전 generation 페이지' }),
+    );
+    await waitFor(() =>
+      expect(
+        within(history).getByRole('button', { name: /generation-many-056/ }),
+      ).toBeVisible(),
+    );
+    expect(within(history).getAllByRole('button')).toHaveLength(24);
+    expect(
+      within(history).getAllByRole('img', { name: /generation thumbnail/ }),
+    ).toHaveLength(24);
+  });
+
   it('부모·형제 결과와 계약 차이를 비교하고 비교 선택을 reload 뒤 복원한다', async () => {
     const user = userEvent.setup();
     const parent = generation({ id: 'generation-parent' });

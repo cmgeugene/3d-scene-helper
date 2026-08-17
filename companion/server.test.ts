@@ -783,10 +783,18 @@ describe('Companion loopback API', () => {
 
     const content = await fetch(
       `${server.url}/api/generations/${started.generation.id}/content`,
-      { headers: { Authorization: 'Bearer test-token' } },
+      { headers: { Authorization: ['Bearer', 'test-token'].join(' ') } },
     );
     expect(content.status).toBe(200);
     expect(Buffer.from(await content.arrayBuffer())).toEqual(onePixelPng);
+
+    const thumbnail = await fetch(
+      `${server.url}/api/generations/${started.generation.id}/thumbnail`,
+      { headers: { Authorization: ['Bearer', 'test-token'].join(' ') } },
+    );
+    expect(thumbnail.status).toBe(200);
+    expect(thumbnail.headers.get('content-type')).toBe('image/webp');
+    expect((await thumbnail.arrayBuffer()).byteLength).toBeGreaterThan(0);
 
     const unauthorizedLayout = await fetch(
       `${server.url}/api/scene-renders/${render.render.id}/content`,
