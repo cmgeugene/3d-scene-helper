@@ -23,6 +23,7 @@ interface SceneObjectProps {
   onRootReady: (id: string, root: Group | null) => void;
   runtimeMannequinPose?: MannequinPose;
   mannequinIK?: MannequinIKBinding;
+  focusContoursEnabled: boolean;
 }
 
 interface PrimitiveProps {
@@ -31,6 +32,7 @@ interface PrimitiveProps {
   runtimeMannequinPose?: MannequinPose;
   castShadow: boolean;
   receiveShadow: boolean;
+  focusContoursEnabled: boolean;
 }
 
 function Primitive({
@@ -39,6 +41,7 @@ function Primitive({
   runtimeMannequinPose,
   castShadow,
   receiveShadow,
+  focusContoursEnabled,
 }: PrimitiveProps) {
   const { dimensions, kind } = object;
   const material = (
@@ -52,10 +55,20 @@ function Primitive({
   switch (kind) {
     case 'cube':
       return (
-        <mesh castShadow={castShadow} receiveShadow={receiveShadow}>
-          <boxGeometry args={[dimensions.x, dimensions.y, dimensions.z]} />
-          {material}
-        </mesh>
+        <>
+          <mesh castShadow={castShadow} receiveShadow={receiveShadow}>
+            <boxGeometry args={[dimensions.x, dimensions.y, dimensions.z]} />
+            {material}
+          </mesh>
+          <SurfaceGrid
+            color={object.color}
+            depth={dimensions.z}
+            kind="cube"
+            parentScale={object.transform.scale}
+            positionY={dimensions.y / 2 + 0.002}
+            width={dimensions.x}
+          />
+        </>
       );
     case 'floor':
       return (
@@ -100,23 +113,34 @@ function Primitive({
       );
     case 'plane':
       return (
-        <mesh
-          castShadow={castShadow}
-          receiveShadow={receiveShadow}
-          rotation={[-Math.PI / 2, 0, 0]}
-        >
-          <planeGeometry args={[dimensions.x, dimensions.z]} />
-          <meshStandardMaterial
+        <>
+          <mesh
+            castShadow={castShadow}
+            receiveShadow={receiveShadow}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            <planeGeometry args={[dimensions.x, dimensions.z]} />
+            <meshStandardMaterial
+              color={object.color}
+              roughness={0.82}
+              metalness={0}
+              side={DoubleSide}
+            />
+          </mesh>
+          <SurfaceGrid
             color={object.color}
-            roughness={0.82}
-            metalness={0}
-            side={DoubleSide}
+            depth={dimensions.z}
+            kind="plane"
+            parentScale={object.transform.scale}
+            positionY={0.002}
+            width={dimensions.x}
           />
-        </mesh>
+        </>
       );
     case 'mannequin':
       return (
         <ArticulatedMannequin
+          objectId={object.id}
           color={object.color}
           dimensions={dimensions}
           bodyType={object.mannequinBodyType ?? 'standard'}
@@ -128,6 +152,7 @@ function Primitive({
           selected={selected}
           castShadow={castShadow}
           receiveShadow={receiveShadow}
+          focusContoursEnabled={focusContoursEnabled}
         />
       );
     case 'room':
@@ -209,6 +234,7 @@ export function SceneObject({
   onRootReady,
   runtimeMannequinPose,
   mannequinIK,
+  focusContoursEnabled,
 }: SceneObjectProps) {
   const model = getSceneObjectModel(object);
   const { position, rotationDeg, scale } = object.transform;
@@ -243,6 +269,7 @@ export function SceneObject({
         runtimeMannequinPose={runtimeMannequinPose}
         castShadow={model.castShadow}
         receiveShadow={model.receiveShadow}
+        focusContoursEnabled={focusContoursEnabled}
       />
       {object.kind === 'mannequin' && mannequinIK !== undefined ? (
         <MannequinIKControls object={object} {...mannequinIK} />

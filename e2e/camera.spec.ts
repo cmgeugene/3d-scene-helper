@@ -383,9 +383,48 @@ test('camera lens, shot actions, selected helper, and no-selection status use ex
   );
   expect(await commitCount()).toBe(1);
   await resetCommitCount();
-  await page.getByRole('button', { name: '선택 바라보기' }).click();
+  await page.getByRole('button', { name: '선택을 타겟·초점으로 (T)' }).click();
   await expect(page.locator('.status-bar')).toContainText(
-    'Mannequin을 바라봅니다.',
+    'Mannequin을 카메라 타겟·초점으로 설정했습니다.',
+  );
+  expect(await commitCount()).toBe(1);
+  const cameraAfterButton = await page.evaluate(() =>
+    structuredClone(
+      (globalThis as unknown as CameraBridge).__I2V_EDITOR_STORE__?.getState()
+        .document.outputCamera,
+    ),
+  );
+  await resetCommitCount();
+  await page.keyboard.press('t');
+  expect(
+    await page.evaluate(() =>
+      structuredClone(
+        (globalThis as unknown as CameraBridge).__I2V_EDITOR_STORE__?.getState()
+          .document.outputCamera,
+      ),
+    ),
+  ).toEqual(cameraAfterButton);
+  expect(await commitCount()).toBe(1);
+
+  await resetCommitCount();
+  await page.evaluate(() => {
+    const browserGlobal = globalThis as unknown as {
+      KeyboardEvent: new (
+        type: string,
+        init: Record<string, unknown>,
+      ) => unknown;
+      dispatchEvent: (event: unknown) => boolean;
+    };
+    browserGlobal.dispatchEvent(
+      new browserGlobal.KeyboardEvent('keydown', {
+        key: 'ㅅ',
+        code: 'KeyT',
+        bubbles: true,
+      }),
+    );
+  });
+  await expect(page.locator('.status-bar')).toContainText(
+    'Mannequin을 카메라 타겟·초점으로 설정했습니다.',
   );
   expect(await commitCount()).toBe(1);
 
@@ -409,9 +448,15 @@ test('camera lens, shot actions, selected helper, and no-selection status use ex
       ),
     ),
   ).toEqual(cameraBeforeNoSelection);
-  await page.getByRole('button', { name: '선택 바라보기' }).click();
+  await page.getByRole('button', { name: '선택을 타겟·초점으로 (T)' }).click();
   await expect(page.locator('.status-bar')).toContainText(
-    '바라볼 오브젝트를 먼저 선택하세요.',
+    '카메라 타겟·초점으로 설정할 오브젝트를 먼저 선택하세요.',
+  );
+  expect(await commitCount()).toBe(0);
+  await resetCommitCount();
+  await page.keyboard.press('t');
+  await expect(page.locator('.status-bar')).toContainText(
+    '카메라 타겟·초점으로 설정할 오브젝트를 먼저 선택하세요.',
   );
   expect(await commitCount()).toBe(0);
 });

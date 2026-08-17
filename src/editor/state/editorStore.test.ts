@@ -532,6 +532,11 @@ describe('editorStore', () => {
       target: { x: 1, y: 1, z: 0 },
       focalLengthMm: 35,
       rollDeg: 0,
+      depthOfField: {
+        enabled: true,
+        apertureMode: 'auto',
+        fStop: 4,
+      },
     });
     store.getState().setSubjectMotionGuide({
       subjectId: STARTER_IDS.mannequinId,
@@ -570,6 +575,7 @@ describe('editorStore', () => {
       'update-output',
       'update-motion-metadata',
       'commit-mannequin-pose',
+      'update-mannequin-appearance',
     ]);
   });
 
@@ -624,7 +630,7 @@ describe('editorStore', () => {
     expect(store.getState().isDirty).toBe(true);
   });
 
-  it('lens preset을 explicit camera commit 한 번으로 적용한다', () => {
+  it('lens preset은 auto에서 focal/f-stop을 한 commit으로 바꾸고 manual f-stop은 보존한다', () => {
     let documentChanges = 0;
     const unsubscribe = store.subscribe((state, previousState) => {
       if (state.document !== previousState.document) documentChanges += 1;
@@ -632,14 +638,83 @@ describe('editorStore', () => {
 
     store.getState().setCameraLens(35);
 
-    expect(store.getState().document.outputCamera.focalLengthMm).toBe(35);
+    expect(store.getState().document.outputCamera).toMatchObject({
+      focalLengthMm: 35,
+      depthOfField: { apertureMode: 'auto', fStop: 4 },
+    });
     expect(store.getState().navigation).toMatchObject({
       position: store.getState().document.outputCamera.position,
       target: store.getState().document.outputCamera.target,
       isInteracting: false,
     });
     expect(documentChanges).toBe(1);
+
+    store.getState().setCameraApertureMode('manual');
+    store.getState().setCameraFStop(1.8);
+    const beforeManualLens = documentChanges;
+    store.getState().setCameraLens(85);
+    expect(store.getState().document.outputCamera).toMatchObject({
+      focalLengthMm: 85,
+      depthOfField: { apertureMode: 'manual', fStop: 1.8 },
+    });
+    expect(documentChanges).toBe(beforeManualLens + 1);
     unsubscribe();
+  });
+
+  it('DOF toggle/mode/manual f-stop을 검증된 camera history로 undo/redo한다', () => {
+    store.getState().setCameraDepthOfFieldEnabled(false);
+    store.getState().setCameraApertureMode('manual');
+    store.getState().setCameraFStop(11);
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'commit-camera',
+    );
+    expect(store.getState().document.outputCamera.depthOfField).toEqual({
+      enabled: false,
+      apertureMode: 'manual',
+      fStop: 11,
+    });
+    store.getState().undo();
+    expect(store.getState().document.outputCamera.depthOfField.fStop).toBe(2.8);
+    store.getState().redo();
+    expect(store.getState().document.outputCamera.depthOfField.fStop).toBe(11);
+  });
+
+  it('전역 마네킹 초점 등고선을 한 번 commit하고 no-op/undo/redo로 보존한다', () => {
+    const cameraBefore = structuredClone(
+      store.getState().document.outputCamera,
+    );
+    const objectsBefore = structuredClone(store.getState().document.objects);
+    const historyBefore = store.getState().history.past.length;
+
+    store.getState().setMannequinFocusContoursEnabled(true);
+
+    expect(store.getState().document.mannequinAppearance).toEqual({
+      focusContoursEnabled: true,
+    });
+    expect(store.getState().document.outputCamera).toEqual(cameraBefore);
+    expect(store.getState().document.objects).toEqual(objectsBefore);
+    expect(store.getState().history.past).toHaveLength(historyBefore + 1);
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'update-mannequin-appearance',
+    );
+    expect(store.getState().statusMessage).toBe(
+      '모든 마네킹의 초점 확인 등고선을 표시합니다.',
+    );
+
+    const documentAfterEnable = store.getState().document;
+    const historyAfterEnable = store.getState().history;
+    store.getState().setMannequinFocusContoursEnabled(true);
+    expect(store.getState().document).toBe(documentAfterEnable);
+    expect(store.getState().history).toBe(historyAfterEnable);
+
+    store.getState().undo();
+    expect(
+      store.getState().document.mannequinAppearance.focusContoursEnabled,
+    ).toBe(false);
+    store.getState().redo();
+    expect(
+      store.getState().document.mannequinAppearance.focusContoursEnabled,
+    ).toBe(true);
   });
 
   it('lighting preset과 reset을 한 번씩 commit하고 camera와 objects를 보존한다', () => {
@@ -718,7 +793,7 @@ describe('editorStore', () => {
     }
   });
 
-  it('frame/look at selected는 bounds를 사용하고 selection이 없으면 camera를 보존해 status를 알린다', () => {
+  it('frame/target selected는 bounds를 사용하고 selection이 없으면 camera/history를 보존한다', () => {
     const initialCamera = store.getState().document.outputCamera;
 
     store.getState().frameSelected();
@@ -727,11 +802,13 @@ describe('editorStore', () => {
       '프레임에 맞출 오브젝트를 먼저 선택하세요.',
     );
 
-    store.getState().lookAtSelected();
+    const historyBeforeNoSelection = store.getState().history;
+    store.getState().targetSelected();
     expect(store.getState().document.outputCamera).toBe(initialCamera);
     expect(store.getState().statusMessage).toBe(
-      '바라볼 오브젝트를 먼저 선택하세요.',
+      '카메라 타겟·초점으로 설정할 오브젝트를 먼저 선택하세요.',
     );
+    expect(store.getState().history).toBe(historyBeforeNoSelection);
 
     store.getState().selectObject(STARTER_IDS.mannequinId);
     store.getState().frameSelected();
@@ -749,12 +826,22 @@ describe('editorStore', () => {
       position: { x: 4, y: 3, z: 6 },
       target: { x: 1, y: 1, z: 1 },
     });
-    store.getState().lookAtSelected();
+    const beforeTarget = structuredClone(
+      store.getState().document.outputCamera,
+    );
+    const pastCount = store.getState().history.past.length;
+    store.getState().targetSelected();
     expect(store.getState().document.outputCamera).toMatchObject({
       position: { x: 4, y: 3, z: 6 },
       target: { x: 0, y: 0.85, z: -0.047 },
+      focalLengthMm: beforeTarget.focalLengthMm,
+      rollDeg: beforeTarget.rollDeg,
+      depthOfField: beforeTarget.depthOfField,
     });
-    expect(store.getState().statusMessage).toBe('Mannequin을 바라봅니다.');
+    expect(store.getState().history.past).toHaveLength(pastCount + 1);
+    expect(store.getState().statusMessage).toBe(
+      'Mannequin을 카메라 타겟·초점으로 설정했습니다.',
+    );
   });
 
   it('transient setter는 document와 dirty 상태를 변경하지 않는다', () => {

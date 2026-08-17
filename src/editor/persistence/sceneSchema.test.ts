@@ -30,7 +30,7 @@ describe('sceneDocumentSchema', () => {
 
     expect(parsed).toEqual(document);
     expect(parsed.id).toBe('scene-starter');
-    expect(parsed.version).toBe(2);
+    expect(parsed.version).toBe(3);
     expect(parsed.objects).toHaveLength(2);
     expect(parsed.objects.find(({ kind }) => kind === 'floor')).toMatchObject({
       id: 'object-floor',
@@ -59,7 +59,28 @@ describe('sceneDocumentSchema', () => {
       target: { x: 0, y: 1.6, z: 0 },
       focalLengthMm: 50,
       rollDeg: 0,
+      depthOfField: {
+        enabled: true,
+        apertureMode: 'auto',
+        fStop: 2.8,
+      },
     });
+    expect(parsed.mannequinAppearance.focusContoursEnabled).toBe(false);
+  });
+
+  it('기존 current-version JSON의 누락된 마네킹 초점 등고선을 OFF로 보정한다', () => {
+    const legacyCurrent = createStarterSceneDocument(
+      STARTER_IDS,
+    ) as unknown as {
+      mannequinAppearance?: unknown;
+    };
+    delete legacyCurrent.mannequinAppearance;
+
+    const parsed = sceneDocumentSchema.parse(
+      JSON.parse(JSON.stringify(legacyCurrent)),
+    );
+
+    expect(parsed.mannequinAppearance).toEqual({ focusContoursEnabled: false });
   });
 
   it('기존 마네킹 JSON에 체형이 없으면 일반 체형으로 복원한다', () => {
@@ -151,7 +172,7 @@ describe('sceneDocumentSchema', () => {
     }
   });
 
-  it('reserved scene notes와 optional motion guide를 v2 JSON으로 왕복한다', () => {
+  it('reserved scene notes와 optional motion guide를 v3 JSON으로 왕복한다', () => {
     const document = createStarterSceneDocument(STARTER_IDS);
     document.sceneNotes =
       'Subject moves right while the camera dollies in. Keep the clean start frame free of guides.';
@@ -173,7 +194,7 @@ describe('sceneDocumentSchema', () => {
     );
 
     expect(parsed).toEqual(document);
-    expect(parsed.version).toBe(2);
+    expect(parsed.version).toBe(3);
 
     if (parsed.subjectMotionGuide === undefined) {
       throw new Error('subject motion guide was not restored');
@@ -220,6 +241,22 @@ describe('sceneDocumentSchema', () => {
       false,
     );
     expect(sceneDocumentSchema.safeParse(withRuntimeField).success).toBe(false);
+  });
+
+  it('DOF schema는 자동/수동 조리개와 f/1.4..f/22 범위만 허용한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    document.outputCamera.depthOfField = {
+      enabled: true,
+      apertureMode: 'manual',
+      fStop: 1.4,
+    };
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(true);
+    document.outputCamera.depthOfField.fStop = 22;
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(true);
+    document.outputCamera.depthOfField.fStop = 22.1;
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+    document.outputCamera.depthOfField.fStop = Number.NaN;
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
   });
 
   it('MVP의 모든 addable object를 plain-data factory로 결정적으로 만든다', () => {

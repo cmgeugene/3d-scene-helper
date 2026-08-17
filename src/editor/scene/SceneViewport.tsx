@@ -26,6 +26,7 @@ import type { EditorStore } from '../state/editorStore';
 import { CompositionGuides } from './CompositionGuides';
 import { EditorNavigation } from './EditorNavigation';
 import { LightingRig, SHADOW_BOUNDS_M } from './LightingRig';
+import { CinematicDepthOfField } from './CinematicDepthOfField';
 import { MotionGuides } from './MotionGuides';
 import { computeLetterbox, type LetterboxRectangle } from './cameraMath';
 import { OutputCamera } from './OutputCamera';
@@ -152,6 +153,10 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
   const selectedObjectId = useStore(store, (state) => state.selectedObjectId);
   const background = useStore(store, (state) => state.document.background);
   const lighting = useStore(store, (state) => state.document.lighting);
+  const focusContoursEnabled = useStore(
+    store,
+    (state) => state.document.mannequinAppearance.focusContoursEnabled,
+  );
   const selectObject = useStore(store, (state) => state.selectObject);
   const transformMode = useStore(store, (state) => state.transformMode);
   const mannequinTool = useStore(store, (state) => state.mannequinTool);
@@ -228,6 +233,7 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
             onSelect={selectObject}
             onRootReady={handleRootReady}
             runtimeMannequinPose={runtimeMannequinPoses.get(object.id)}
+            focusContoursEnabled={focusContoursEnabled}
             mannequinIK={
               selectedObjectId === object.id &&
               object.kind === 'mannequin' &&
@@ -264,6 +270,7 @@ function RuntimeScene({ store }: { store: StoreApi<EditorStore> }) {
       ) : null}
       {motionGuidesVisible ? <MotionGuides document={document} /> : null}
       <EditorHelpers />
+      <CinematicDepthOfField store={store} />
     </>
   );
 }

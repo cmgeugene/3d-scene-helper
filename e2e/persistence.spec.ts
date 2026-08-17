@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 
-const STORAGE_KEY = 'i2v-3d-scene-helper:scene:v2';
+const STORAGE_KEY = 'i2v-3d-scene-helper:scene:v3';
 
 interface BrowserStorageGlobal {
   localStorage: {
@@ -40,9 +40,17 @@ test('persistence refresh restores the latest autosaved scene', async ({
 }) => {
   await openPersistence(page);
   await page.getByRole('button', { name: '큐브 추가' }).click();
+  await page.getByRole('button', { name: '평면 추가' }).click();
   await expect(
     page.getByRole('button', { name: 'Cube', exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Plane', exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('canvas[data-engine]')).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor,cube,plane',
+  );
   await waitForAutosave(page);
 
   const serializedBeforeReload = await page.evaluate(
@@ -60,6 +68,13 @@ test('persistence refresh restores the latest autosaved scene', async ({
   await expect(
     page.getByRole('button', { name: 'Cube', exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Plane', exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('canvas[data-engine]')).toHaveAttribute(
+    'data-surface-grid-kinds',
+    'floor,cube,plane',
+  );
   expect(
     await page.evaluate(
       (key) =>
@@ -221,6 +236,6 @@ test('persistence exports validated scene JSON and undo shortcuts respect input 
     version: number;
     objects: Array<{ kind: string }>;
   };
-  expect(exported.version).toBe(2);
+  expect(exported.version).toBe(3);
   expect(exported.objects.some(({ kind }) => kind === 'cube')).toBe(true);
 });

@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises';
-import { expect, test, type Page } from '@playwright/test';
+import { readFile, writeFile } from 'node:fs/promises';
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
 
@@ -100,6 +100,72 @@ function frontCuePixelCount(image: PNG) {
     if (red > 145 && green > 175 && blue > 185 && blue > red) count += 1;
   }
   return count;
+}
+
+async function verifySurfaceGridCleanExport(
+  page: Page,
+  testInfo: TestInfo,
+  kind: 'cube' | 'plane',
+  addButtonName: string,
+) {
+  await openExportEditor(page);
+  await page.getByRole('button', { name: addButtonName }).click();
+  const runtimeCanvas = page.locator('canvas[data-engine]');
+  await expect(runtimeCanvas).toHaveAttribute(
+    'data-surface-grid-kinds',
+    new RegExp(`(?:^|,)${kind}(?:,|$)`),
+  );
+  await page.evaluate((ownerKind) => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState();
+    if (state === undefined) throw new Error('E2E editor store가 없습니다.');
+    const owner = state.document.objects.find(({ kind }) => kind === ownerKind);
+    if (owner === undefined) throw new Error(`${ownerKind}를 찾지 못했습니다.`);
+    for (const object of state.document.objects) {
+      state.setObjectVisibility(object.id, object.id === owner.id);
+    }
+    state.setObjectColor(owner.id, '#d8d8d8');
+    state.setLighting({
+      ...state.document.lighting,
+      shadows: { ...state.document.lighting.shadows, enabled: false },
+    });
+    const target = owner.transform.position;
+    state.commitCamera({
+      ...state.document.outputCamera,
+      position: { x: target.x + 3, y: target.y + 3, z: target.z + 3 },
+      target,
+      focalLengthMm: 50,
+      rollDeg: 0,
+    });
+  }, kind);
+
+  const withGridBuffer = (
+    await downloadFrame(page, { preset: '1280x720', mode: 'clean' })
+  ).buffer;
+  const withGrid = decodePng(withGridBuffer);
+  await runtimeCanvas.evaluate((canvas) => {
+    canvas.dispatchEvent(
+      new CustomEvent('i2v:e2e-surface-grid-visibility', {
+        detail: { visible: false },
+      }),
+    );
+  });
+  await page.waitForTimeout(50);
+  const withoutGridBuffer = (
+    await downloadFrame(page, { preset: '1280x720', mode: 'clean' })
+  ).buffer;
+  const withoutGrid = decodePng(withoutGridBuffer);
+  const ratio = changedPixelRatio(withGrid, withoutGrid);
+
+  await writeFile(
+    testInfo.outputPath(`${kind}-clean-grid.png`),
+    withGridBuffer,
+  );
+  await writeFile(
+    testInfo.outputPath(`${kind}-clean-grid-hidden.png`),
+    withoutGridBuffer,
+  );
+  console.log(`${kind} clean PNG grid changed-pixel ratio: ${ratio}`);
+  expect(ratio).toBeGreaterThan(0.0004);
 }
 
 test('body type presets remain visibly distinct in clean PNG exports', async ({
@@ -253,10 +319,18 @@ test('front/rear asymmetric mannequin cues remain pixel-readable in both PNG mod
   await openExportEditor(page);
   await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
   await page.evaluate(() => {
-    const state = globalThis.__I2V_EDITOR_STORE__?.getState();
+    const store = globalThis.__I2V_EDITOR_STORE__;
+    const state = store?.getState();
     if (state === undefined) throw new Error('E2E editor store가 없습니다.');
-    state.commitCamera({
-      ...state.document.outputCamera,
+    (
+      state as unknown as {
+        setCameraDepthOfFieldEnabled: (enabled: boolean) => void;
+      }
+    ).setCameraDepthOfFieldEnabled(false);
+    const latest = store?.getState();
+    if (latest === undefined) throw new Error('E2E editor store가 없습니다.');
+    latest.commitCamera({
+      ...latest.document.outputCamera,
       position: { x: 0, y: 1.6, z: -5 },
       target: { x: 0, y: 1.6, z: 0 },
       rollDeg: 0,
@@ -299,61 +373,16 @@ test('front/rear asymmetric mannequin cues remain pixel-readable in both PNG mod
   );
 });
 
-test('surface grid remains visible in clean PNG exports', async ({ page }) => {
-  await openExportEditor(page);
-  const runtimeCanvas = page.locator('canvas[data-engine]');
-  await expect(runtimeCanvas).toHaveAttribute(
-    'data-surface-grid-kinds',
-    'floor',
-  );
+test('Cube clean PNG isolates its top-face reference grid', async ({
+  page,
+}, testInfo) => {
+  await verifySurfaceGridCleanExport(page, testInfo, 'cube', '큐브 추가');
+});
 
-  await page.evaluate(() => {
-    const state = globalThis.__I2V_EDITOR_STORE__?.getState();
-    if (state === undefined) throw new Error('E2E editor store가 없습니다.');
-    const floor = state.document.objects.find(({ kind }) => kind === 'floor');
-    if (floor === undefined) throw new Error('Floor를 찾지 못했습니다.');
-    for (const object of state.document.objects) {
-      if (object.id !== floor.id) state.setObjectVisibility(object.id, false);
-    }
-    state.setObjectColor(floor.id, '#d8d8d8');
-    state.setLighting({
-      ...state.document.lighting,
-      shadows: { ...state.document.lighting.shadows, enabled: false },
-    });
-    state.commitCamera({
-      position: { x: 4, y: 7, z: 5 },
-      target: { x: 0, y: 0, z: 0 },
-      focalLengthMm: 50,
-      rollDeg: 0,
-    });
-  });
-
-  const withGrid = decodePng(
-    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
-  );
-
-  await page.evaluate(() => {
-    const state = globalThis.__I2V_EDITOR_STORE__?.getState();
-    if (state === undefined) throw new Error('E2E editor store가 없습니다.');
-    const document = structuredClone(state.document);
-    const floor = document.objects.find(({ kind }) => kind === 'floor');
-    if (floor === undefined) throw new Error('Floor를 찾지 못했습니다.');
-    floor.kind = 'cube';
-    (
-      state as unknown as {
-        replaceDocument: (
-          nextDocument: typeof document,
-          persisted: boolean,
-        ) => void;
-      }
-    ).replaceDocument(document, false);
-  });
-  await expect(runtimeCanvas).not.toHaveAttribute('data-surface-grid-kinds');
-  const withoutGrid = decodePng(
-    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
-  );
-
-  expect(changedPixelRatio(withGrid, withoutGrid)).toBeGreaterThan(0.008);
+test('Plane clean PNG isolates its visible-surface reference grid', async ({
+  page,
+}, testInfo) => {
+  await verifySurfaceGridCleanExport(page, testInfo, 'plane', '평면 추가');
 });
 
 test('room set transform persists and changes the clean exported frame', async ({
@@ -451,13 +480,26 @@ test('export dialog traps destructive editor shortcuts until it closes', async (
     exact: true,
   });
   await mannequin.click();
+  const cameraBeforeModal = await page.evaluate(() =>
+    structuredClone(
+      globalThis.__I2V_EDITOR_STORE__?.getState().document.outputCamera,
+    ),
+  );
   await page.getByRole('button', { name: 'PNG 내보내기' }).click();
   const dialog = page.getByRole('dialog', { name: 'PNG 내보내기' });
   await dialog.getByRole('button', { name: '취소' }).focus();
 
   await page.keyboard.press('Delete');
+  await page.keyboard.press('t');
 
   await expect(mannequin).toBeVisible();
   await expect(dialog).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      structuredClone(
+        globalThis.__I2V_EDITOR_STORE__?.getState().document.outputCamera,
+      ),
+    ),
+  ).toEqual(cameraBeforeModal);
   await dialog.getByRole('button', { name: '취소' }).click();
 });

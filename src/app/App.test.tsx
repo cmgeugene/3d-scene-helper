@@ -98,9 +98,7 @@ describe('App', () => {
   });
 
   it('복원된 autosave를 새 장면과 기본 장면 초기화 기준으로 재사용하지 않는다', () => {
-    const runReset = (
-      buttonName: '새 장면' | '기본 장면으로 초기화',
-    ) => {
+    const runReset = (buttonName: '새 장면' | '기본 장면으로 초기화') => {
       const saved = createStarterSceneDocument({
         documentId: 'saved-scene',
         floorId: 'saved-floor',
@@ -143,10 +141,7 @@ describe('App', () => {
     };
 
     expect(runReset('새 장면')).toEqual([]);
-    expect(runReset('기본 장면으로 초기화')).toEqual([
-      'floor',
-      'mannequin',
-    ]);
+    expect(runReset('기본 장면으로 초기화')).toEqual(['floor', 'mannequin']);
   });
 
   it('document mutation을 debounce autosave하고 persisted 전 dirty 상태에서만 beforeunload를 막는다', () => {

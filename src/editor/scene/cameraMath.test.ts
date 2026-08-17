@@ -23,11 +23,15 @@ const OUTPUT_CAMERA = {
   target: { x: 0, y: 1.6, z: 0 },
   focalLengthMm: 50,
   rollDeg: 0,
+  depthOfField: { enabled: true, apertureMode: 'auto' as const, fStop: 2.8 },
 };
 
 function projectBounds(
   bounds: typeof SUBJECT_BOUNDS,
-  cameraData: typeof OUTPUT_CAMERA,
+  cameraData: Pick<
+    typeof OUTPUT_CAMERA,
+    'position' | 'target' | 'focalLengthMm' | 'rollDeg'
+  >,
   aspect: number,
 ) {
   const camera = new PerspectiveCamera();
@@ -242,6 +246,7 @@ describe('bounds 기반 camera composition', () => {
       target: cubeBounds.center,
       focalLengthMm: 50,
       rollDeg: 12,
+      depthOfField: OUTPUT_CAMERA.depthOfField,
     };
 
     const framed = computeFrameSelectedCamera(

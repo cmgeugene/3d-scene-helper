@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 
-const STORAGE_KEY = 'i2v-3d-scene-helper:scene:v2';
+const STORAGE_KEY = 'i2v-3d-scene-helper:scene:v3';
 
 interface GoldenPathState {
   document: {

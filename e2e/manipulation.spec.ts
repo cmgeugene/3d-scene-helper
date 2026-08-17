@@ -133,6 +133,125 @@ async function findGizmoAxis(page: Page, canvas: Locator, axis: 'X' | 'Z') {
   );
 }
 
+async function findGizmoAxisUnderLoad(
+  page: Page,
+  canvas: Locator,
+  axis: 'X' | 'Z',
+) {
+  const origin = JSON.parse(
+    (await canvas.getAttribute('data-gizmo-origin')) ?? 'null',
+  ) as { x: number; y: number };
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) throw new Error('Canvas bounds가 없습니다.');
+
+  for (let radius = 32; radius <= 80; radius += 8) {
+    for (let degrees = 0; degrees < 360; degrees += 8) {
+      const radians = (degrees * Math.PI) / 180;
+      const offset = {
+        x: Math.cos(radians) * radius,
+        y: Math.sin(radians) * radius,
+      };
+      await page.mouse.move(
+        box.x + origin.x + offset.x,
+        box.y + origin.y + offset.y,
+      );
+      await page.waitForTimeout(16);
+      if ((await canvas.getAttribute('data-transform-axis')) === axis) {
+        await page.mouse.move(box.x + 2, box.y + 2);
+        await expect
+          .poll(() => canvas.getAttribute('data-transform-axis'), {
+            timeout: 750,
+          })
+          .not.toBe(axis);
+        await page.mouse.move(
+          box.x + origin.x + offset.x,
+          box.y + origin.y + offset.y,
+        );
+        await page.waitForTimeout(32);
+        if ((await canvas.getAttribute('data-transform-axis')) === axis) {
+          return offset;
+        }
+      }
+    }
+  }
+
+  throw new Error(
+    `${axis} gizmo handle을 부하 안정화 스캔에서도 찾지 못했습니다. origin=${JSON.stringify(origin)} canvas=${JSON.stringify(box)}`,
+  );
+}
+
+async function verifySurfaceGridScalePreview(
+  page: Page,
+  options: {
+    addButtonName: string;
+    displayName: string;
+    lineCountAttribute: string;
+  },
+) {
+  const canvas = await openManipulation(page);
+  await page.getByRole('button', { name: options.addButtonName }).click();
+  await page.getByRole('button', { name: '카메라', exact: true }).click();
+  await page.getByRole('button', { name: '선택 프레임 맞춤' }).click();
+  await expect(page.locator('.status-bar')).toContainText(
+    `${options.displayName}을 프레임에 맞췄습니다.`,
+  );
+  await expect
+    .poll(async () => {
+      const origin = JSON.parse(
+        (await canvas.getAttribute('data-gizmo-origin')) ?? 'null',
+      ) as { x: number; y: number } | null;
+      const box = await canvas.boundingBox();
+      return (
+        origin !== null &&
+        box !== null &&
+        origin.x >= 0 &&
+        origin.x <= box.width &&
+        origin.y >= 0 &&
+        origin.y <= box.height
+      );
+    })
+    .toBe(true);
+  await expect(canvas).toHaveAttribute(options.lineCountAttribute, /\d+/);
+  await page.getByRole('button', { name: '장면', exact: true }).click();
+  await page.keyboard.press('r');
+  await expect(canvas).toHaveAttribute('data-transform-mode', 'scale');
+
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) throw new Error('Canvas bounds가 없습니다.');
+  const xAxis = await findGizmoAxisUnderLoad(page, canvas, 'X');
+  const origin = JSON.parse(
+    (await canvas.getAttribute('data-gizmo-origin')) ?? 'null',
+  ) as { x: number; y: number };
+  const initialLineCount = Number(
+    await canvas.getAttribute(options.lineCountAttribute),
+  );
+  const serializedBefore = await selectedTransform(page);
+
+  await page.mouse.move(box.x + origin.x + xAxis.x, box.y + origin.y + xAxis.y);
+  await page.mouse.down();
+  await page.mouse.move(
+    box.x + origin.x + xAxis.x + 80,
+    box.y + origin.y + xAxis.y,
+    { steps: 12 },
+  );
+
+  await expect(canvas).toHaveAttribute('data-transform-dragging', 'true');
+  await expect
+    .poll(async () =>
+      Number(await canvas.getAttribute(options.lineCountAttribute)),
+    )
+    .toBeGreaterThan(initialLineCount);
+  expect(await selectedTransform(page)).toEqual(serializedBefore);
+  await expect
+    .poll(() => runtimeTransform(canvas))
+    .not.toEqual(serializedBefore);
+
+  await page.mouse.up();
+  await expect(canvas).toHaveAttribute('data-transform-dragging', 'false');
+}
+
 async function rotateZGizmo(
   page: Page,
   canvas: Locator,
@@ -218,6 +337,26 @@ test('Room Set scale preview expands grid coverage without scaling its 0.5m cell
     )
     .toBeGreaterThan(initialLineCount);
   await page.mouse.up();
+});
+
+test('Cube scale preview expands grid coverage before pointer-up', async ({
+  page,
+}) => {
+  await verifySurfaceGridScalePreview(page, {
+    addButtonName: '큐브 추가',
+    displayName: 'Cube',
+    lineCountAttribute: 'data-cube-grid-line-count',
+  });
+});
+
+test('Plane scale preview expands grid coverage before pointer-up', async ({
+  page,
+}) => {
+  await verifySurfaceGridScalePreview(page, {
+    addButtonName: '평면 추가',
+    displayName: 'Plane',
+    lineCountAttribute: 'data-plane-grid-line-count',
+  });
 });
 
 test('manipulation gizmo drag mutates runtime only, disables orbit, then commits once', async ({
@@ -486,7 +625,7 @@ for (const subject of [
 test('manipulation object controls, duplicate/delete shortcuts, and focus guards work in the browser', async ({
   page,
 }) => {
-  await openManipulation(page);
+  const canvas = await openManipulation(page);
   await page.getByRole('button', { name: '큐브 추가' }).click();
   const cubeRow = page.getByRole('button', { name: 'Cube', exact: true });
   await expect(cubeRow).toHaveAttribute('aria-pressed', 'true');
@@ -548,11 +687,14 @@ test('manipulation object controls, duplicate/delete shortcuts, and focus guards
   );
 
   await cubeRow.click();
+  await expect(canvas).toHaveAttribute('data-cube-grid-line-count', '6');
   await page.keyboard.press('Control+d');
   const copyRow = page.getByRole('button', { name: 'Cube copy', exact: true });
   await expect(copyRow).toHaveAttribute('aria-pressed', 'true');
+  await expect(canvas).toHaveAttribute('data-cube-grid-line-count', '12');
   await page.keyboard.press('Delete');
   await expect(copyRow).toHaveCount(0);
+  await expect(canvas).toHaveAttribute('data-cube-grid-line-count', '6');
 
   const cube = await page.evaluate(() =>
     (globalThis as unknown as ManipulationBridge).__I2V_EDITOR_STORE__

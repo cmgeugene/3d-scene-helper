@@ -1,5 +1,7 @@
 import {
+  BoxGeometry,
   LinearSRGBColorSpace,
+  Mesh,
   Scene,
   Vector3,
   Vector4,
@@ -8,6 +10,12 @@ import {
 } from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { createStarterSceneDocument } from '../persistence/sceneSchema';
+import {
+  createMannequinFocusContourMaterialSet,
+  disposeMannequinFocusContourMaterialSet,
+  getMannequinFocusContourMaterialState,
+  setMannequinFocusContourMaterialSetEnabled,
+} from '../mannequin/mannequinFocusContours';
 import {
   calculateAspectLockedDimensions,
   calculateExportSampleCount,
@@ -247,10 +255,16 @@ function createExportDocument(mode: 'clean' | 'reference' = 'clean') {
     mode,
   };
   document.outputCamera = {
+    ...document.outputCamera,
     position: { x: 1, y: 2, z: 6 },
     target: { x: -0.25, y: 1.25, z: 0.5 },
     focalLengthMm: 35,
     rollDeg: 12,
+    depthOfField: {
+      enabled: false,
+      apertureMode: 'auto',
+      fStop: 4,
+    },
   };
   return document;
 }
@@ -372,6 +386,210 @@ function createCanvasDouble(blob = new Blob(['png'], { type: 'image/png' })) {
 }
 
 describe('exportFrame offscreen runtime', () => {
+  it('Clean/Reference export와 injected allocation failure가 shared contour material state를 바꾸지 않는다', async () => {
+    const materials = createMannequinFocusContourMaterialSet(
+      '#a8a8a8',
+      '#979797',
+    );
+    setMannequinFocusContourMaterialSetEnabled(materials, true);
+    const geometry = new BoxGeometry(1, 1, 1);
+    const scene = new Scene();
+    scene.add(new Mesh(geometry, materials.axial));
+    const uuids = Object.values(materials).map(({ uuid }) => uuid);
+    const versions = Object.values(materials).map(({ version }) => version);
+
+    for (const mode of ['clean', 'reference'] as const) {
+      const runtime = createRendererDouble();
+      const target = {
+        texture: { colorSpace: LinearSRGBColorSpace },
+        dispose: vi.fn(),
+      } as unknown as WebGLRenderTarget;
+      const source = createCanvasDouble();
+      const output = createCanvasDouble();
+      const createCanvas = vi
+        .fn<() => HTMLCanvasElement>()
+        .mockReturnValueOnce(source.canvas)
+        .mockReturnValueOnce(output.canvas);
+
+      await exportFrame(
+        {
+          renderer: runtime.renderer,
+          scene,
+          document: createExportDocument(mode),
+          guideVisibility: {
+            thirds: false,
+            center: false,
+            actionSafe: false,
+            titleSafe: false,
+            motion: false,
+          },
+        },
+        { createRenderTarget: () => target, createCanvas },
+      );
+      expect(
+        getMannequinFocusContourMaterialState(materials.axial).enabled,
+      ).toBe(true);
+    }
+
+    const failingRuntime = createRendererDouble();
+    await expect(
+      exportFrame(
+        {
+          renderer: failingRuntime.renderer,
+          scene,
+          document: createExportDocument('clean'),
+          guideVisibility: {
+            thirds: false,
+            center: false,
+            actionSafe: false,
+            titleSafe: false,
+            motion: false,
+          },
+        },
+        {
+          createRenderTarget: () => {
+            throw new Error('injected contour export allocation failure');
+          },
+        },
+      ),
+    ).rejects.toThrow('injected contour export allocation failure');
+    expect(getMannequinFocusContourMaterialState(materials.axial).enabled).toBe(
+      true,
+    );
+    expect(Object.values(materials).map(({ uuid }) => uuid)).toEqual(uuids);
+    expect(Object.values(materials).map(({ version }) => version)).toEqual(
+      versions,
+    );
+
+    geometry.dispose();
+    disposeMannequinFocusContourMaterialSet(materials);
+  });
+
+  it('enabled DOF는 shared composer optics로 render/readback하고 pipeline을 dispose한다', async () => {
+    const runtime = createRendererDouble();
+    const baseTarget = {
+      texture: { colorSpace: LinearSRGBColorSpace },
+      dispose: vi.fn(),
+    } as unknown as WebGLRenderTarget;
+    const outputTarget = {
+      texture: { colorSpace: LinearSRGBColorSpace },
+      dispose: vi.fn(),
+    } as unknown as WebGLRenderTarget;
+    const render = vi.fn(() => outputTarget);
+    const dispose = vi.fn();
+    const createDepthOfFieldPipeline = vi.fn(() => ({
+      render,
+      setSize: vi.fn(),
+      update: vi.fn(),
+      dispose,
+    }));
+    const source = createCanvasDouble();
+    const output = createCanvasDouble();
+    const document = createExportDocument();
+    document.outputCamera.depthOfField.enabled = true;
+    const createCanvas = vi
+      .fn<() => HTMLCanvasElement>()
+      .mockReturnValueOnce(source.canvas)
+      .mockReturnValueOnce(output.canvas);
+
+    await exportFrame(
+      {
+        renderer: runtime.renderer,
+        scene: new Scene(),
+        document,
+        guideVisibility: {
+          thirds: false,
+          center: false,
+          actionSafe: false,
+          titleSafe: false,
+          motion: false,
+        },
+      },
+      {
+        createRenderTarget: () => baseTarget,
+        createCanvas,
+        createDepthOfFieldPipeline,
+      },
+    );
+
+    expect(createDepthOfFieldPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: baseTarget,
+        renderToScreen: false,
+        parameters: expect.objectContaining({
+          enabled: true,
+          focusDistanceM: expect.any(Number),
+          focalLengthMm: 35,
+          fStop: 4,
+        }),
+      }),
+    );
+    expect(baseTarget.texture.colorSpace).toBe(LinearSRGBColorSpace);
+    expect(render).toHaveBeenCalledOnce();
+    expect(runtime.readRenderTargetPixels).toHaveBeenCalledWith(
+      outputTarget,
+      0,
+      0,
+      128,
+      128,
+      expect.any(Uint8Array),
+    );
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(runtime.readState().target).toBe(runtime.originalTarget);
+  });
+
+  it('DOF composer render failure에서도 pipeline과 renderer state를 복구한다', async () => {
+    const runtime = createRendererDouble();
+    const target = {
+      texture: { colorSpace: LinearSRGBColorSpace },
+      dispose: vi.fn(),
+    } as unknown as WebGLRenderTarget;
+    const dispose = vi.fn();
+    const createCanvas = vi.fn(() => createCanvasDouble().canvas);
+    const document = createExportDocument();
+    document.outputCamera.depthOfField.enabled = true;
+
+    await expect(
+      exportFrame(
+        {
+          renderer: runtime.renderer,
+          scene: new Scene(),
+          document,
+          guideVisibility: {
+            thirds: false,
+            center: false,
+            actionSafe: false,
+            titleSafe: false,
+            motion: false,
+          },
+        },
+        {
+          createRenderTarget: () => target,
+          createCanvas,
+          createDepthOfFieldPipeline: () => ({
+            render: () => {
+              throw new Error('DOF render failed');
+            },
+            setSize: vi.fn(),
+            update: vi.fn(),
+            dispose,
+          }),
+        },
+      ),
+    ).rejects.toThrow('DOF render failed');
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(createCanvas).not.toHaveBeenCalled();
+    expect(runtime.readState()).toEqual({
+      target: runtime.originalTarget,
+      pixelRatio: 2,
+      viewport: [3, 4, 320, 180],
+      scissor: [5, 6, 300, 160],
+      scissorTest: true,
+      outputColorSpace: LinearSRGBColorSpace,
+      toneMappingExposure: 0.75,
+    });
+  });
+
   it('saved OutputCamera와 output aspect로 layer-isolated export camera를 재구성한다', () => {
     const document = createExportDocument('reference');
     const camera = createExportCamera(document, 5);
