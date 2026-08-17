@@ -36,6 +36,7 @@ export const MAX_SCENE_STORAGE_BYTES = 4 * 1024 * 1024;
 export const AUTOSAVE_DEBOUNCE_MS = 500 as const;
 export const ASSISTANT_PANEL_WIDTH_STORAGE_KEY = `${STORAGE_NAMESPACE}:assistant-panel-width:v1`;
 export const ASSISTANT_PANEL_COLLAPSED_STORAGE_KEY = `${STORAGE_NAMESPACE}:assistant-panel-collapsed:v1`;
+export const REFERENCE_TRAY_COLLAPSED_STORAGE_KEY = `${STORAGE_NAMESPACE}:reference-tray-collapsed:v1`;
 export const ASSISTANT_PANEL_DEFAULT_WIDTH = 420 as const;
 export const ASSISTANT_PANEL_MIN_WIDTH = 320 as const;
 export const ASSISTANT_PANEL_MAX_WIDTH = 720 as const;

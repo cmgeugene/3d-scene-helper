@@ -39,6 +39,8 @@ interface ReferenceManagerProps {
   maximumSelected?: number;
   reservedInputImages?: number;
   onSelectionChange?: (references: ReferenceArtifact[]) => void;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }
 
 interface ConnectedReferenceManagerProps {
@@ -50,6 +52,8 @@ interface ConnectedReferenceManagerProps {
   maximumSelected: number;
   reservedInputImages: number;
   onSelectionChange: (references: ReferenceArtifact[]) => void;
+  collapsed: boolean;
+  onToggleCollapsed?: () => void;
 }
 
 interface ReferenceCard extends ReferenceArtifact {
@@ -89,6 +93,28 @@ function formatBytes(bytes: number) {
   return `${Math.max(1, Math.round(bytes / 1024))}KB`;
 }
 
+function ReferenceTrayToggle({
+  collapsed,
+  onToggleCollapsed,
+}: {
+  collapsed: boolean;
+  onToggleCollapsed?: () => void;
+}) {
+  if (onToggleCollapsed === undefined) return null;
+  return (
+    <button
+      type="button"
+      className="reference-tray-toggle"
+      aria-expanded={!collapsed}
+      aria-controls="reference-manager-body"
+      aria-label={collapsed ? '레퍼런스 펼치기' : '레퍼런스 접기'}
+      onClick={onToggleCollapsed}
+    >
+      {collapsed ? '펼치기' : '접기'}
+    </button>
+  );
+}
+
 function ConnectedReferenceManager({
   connection,
   clientFactory,
@@ -98,6 +124,8 @@ function ConnectedReferenceManager({
   maximumSelected,
   reservedInputImages,
   onSelectionChange,
+  collapsed,
+  onToggleCollapsed,
 }: ConnectedReferenceManagerProps) {
   const client = useMemo(
     () => clientFactory(connection),
@@ -332,7 +360,10 @@ function ConnectedReferenceManager({
   );
 
   return (
-    <section className="reference-manager" aria-labelledby="references-title">
+    <section
+      className={`reference-manager${collapsed ? ' reference-manager--collapsed' : ''}`}
+      aria-labelledby="references-title"
+    >
       <div className="reference-manager-heading">
         <div>
           <p className="eyebrow">Project assets</p>
@@ -346,168 +377,176 @@ function ConnectedReferenceManager({
             {selectedCount + reservedInputImages}/{IMAGEGEN_MAX_INPUT_IMAGES}
           </p>
         </div>
-        <label className="reference-import-button">
-          이미지 가져오기
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            onChange={chooseFile}
+        <div className="reference-manager-heading-actions">
+          <label className="reference-import-button">
+            이미지 가져오기
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={chooseFile}
+            />
+          </label>
+          <ReferenceTrayToggle
+            collapsed={collapsed}
+            onToggleCollapsed={onToggleCollapsed}
           />
-        </label>
+        </div>
       </div>
 
-      {pendingFile === null ? null : (
-        <form className="reference-import-form" onSubmit={importReference}>
-          <label>
-            <span>이름</span>
-            <input
-              value={pendingName}
-              maxLength={120}
-              onChange={(event) => setPendingName(event.target.value)}
-            />
-          </label>
-          <label>
-            <span>역할</span>
-            <select
-              value={pendingKind}
-              onChange={(event) =>
-                setPendingKind(event.target.value as ReferenceKind)
-              }
+      <div id="reference-manager-body" hidden={collapsed}>
+        {pendingFile === null ? null : (
+          <form className="reference-import-form" onSubmit={importReference}>
+            <label>
+              <span>이름</span>
+              <input
+                value={pendingName}
+                maxLength={120}
+                onChange={(event) => setPendingName(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>역할</span>
+              <select
+                value={pendingKind}
+                onChange={(event) =>
+                  setPendingKind(event.target.value as ReferenceKind)
+                }
+              >
+                {Object.entries(REFERENCE_KIND_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              disabled={importing || pendingName.trim() === ''}
             >
-              {Object.entries(REFERENCE_KIND_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="submit"
-            disabled={importing || pendingName.trim() === ''}
-          >
-            {importing ? '가져오는 중…' : '프로젝트에 추가'}
-          </button>
-          <button type="button" onClick={cancelImport} disabled={importing}>
-            취소
-          </button>
-        </form>
-      )}
-
-      {editingId === null ? null : (
-        <form className="reference-metadata-form" onSubmit={saveMetadata}>
-          <label>
-            <span>연결 대상</span>
-            <select
-              value={targetObjectId}
-              disabled={
-                references.find(({ id }) => id === editingId)?.kind !==
-                'character'
-              }
-              onChange={(event) => setTargetObjectId(event.target.value)}
-            >
-              <option value="">장면 전체 / 연결 안 함</option>
-              {targetObjectId !== '' &&
-              !targets.some(({ id }) => id === targetObjectId) ? (
-                <option value={targetObjectId} disabled>
-                  삭제된 object · {targetObjectId}
-                </option>
-              ) : null}
-              {targets.map((target) => (
-                <option key={target.id} value={target.id}>
-                  {target.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>사용 범위 · 쉼표 구분</span>
-            <input
-              value={useScope}
-              onChange={(event) => setUseScope(event.target.value)}
-            />
-          </label>
-          <label>
-            <span>제외 범위 · 쉼표 구분</span>
-            <input
-              value={excludeScope}
-              onChange={(event) => setExcludeScope(event.target.value)}
-            />
-          </label>
-          <div className="reference-metadata-actions">
-            <button type="submit" disabled={saving}>
-              {saving ? '저장 중…' : '설정 저장'}
+              {importing ? '가져오는 중…' : '프로젝트에 추가'}
             </button>
-            <button type="button" onClick={cancelEditing} disabled={saving}>
+            <button type="button" onClick={cancelImport} disabled={importing}>
               취소
             </button>
-          </div>
-        </form>
-      )}
+          </form>
+        )}
 
-      {error === null ? null : (
-        <p className="reference-error" role="alert">
-          {error}
-        </p>
-      )}
-
-      {selectedCount <= maximumSelected ? null : (
-        <p className="reference-error" role="alert">
-          현재 모드에서는 {selectedCount - maximumSelected}장을 더 해제해야
-          합니다.
-        </p>
-      )}
-
-      <div className="reference-list">
-        {loading ? <p className="reference-empty">불러오는 중…</p> : null}
-        {!loading && references.length === 0 ? (
-          <p className="reference-empty">
-            배경, 캐릭터, 레이아웃 또는 스타일 이미지를 추가하세요.
-          </p>
-        ) : null}
-        {references.map((reference) => (
-          <article
-            key={reference.id}
-            className={`reference-card${reference.enabled ? ' reference-card--selected' : ''}`}
-          >
-            <label className="reference-card-select">
-              <input
-                type="checkbox"
-                checked={reference.enabled}
-                disabled={!reference.enabled && selectionAtLimit}
-                onChange={() => void toggleSelection(reference)}
-                aria-label={`${reference.name} 생성에 포함`}
-                aria-describedby="reference-selection-budget"
-                title={
-                  !reference.enabled && selectionAtLimit
-                    ? `레퍼런스는 최대 ${maximumSelected}장까지 선택할 수 있습니다.`
-                    : undefined
+        {editingId === null ? null : (
+          <form className="reference-metadata-form" onSubmit={saveMetadata}>
+            <label>
+              <span>연결 대상</span>
+              <select
+                value={targetObjectId}
+                disabled={
+                  references.find(({ id }) => id === editingId)?.kind !==
+                  'character'
                 }
-              />
-              <img src={reference.thumbnailUrl} alt="" />
-              <span className="reference-card-copy">
-                <strong>{reference.name}</strong>
-                <span>
-                  {REFERENCE_KIND_LABELS[reference.kind]} ·{' '}
-                  {reference.width === null || reference.height === null
-                    ? formatBytes(reference.byteLength)
-                    : `${reference.width}×${reference.height}`}
-                </span>
-              </span>
+                onChange={(event) => setTargetObjectId(event.target.value)}
+              >
+                <option value="">장면 전체 / 연결 안 함</option>
+                {targetObjectId !== '' &&
+                !targets.some(({ id }) => id === targetObjectId) ? (
+                  <option value={targetObjectId} disabled>
+                    삭제된 object · {targetObjectId}
+                  </option>
+                ) : null}
+                {targets.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.name}
+                  </option>
+                ))}
+              </select>
             </label>
-            <button type="button" onClick={() => beginEditing(reference)}>
-              {reference.targetObjectId === null
-                ? '설정'
-                : `연결 · ${targets.find(({ id }) => id === reference.targetObjectId)?.name ?? reference.targetObjectId}`}
-            </button>
-            {reference.targetObjectId !== null &&
-            !targets.some(({ id }) => id === reference.targetObjectId) ? (
-              <span className="reference-integrity-warning" role="alert">
-                삭제된 object에 연결됨 · 설정에서 연결을 해제하세요.
-              </span>
-            ) : null}
-          </article>
-        ))}
+            <label>
+              <span>사용 범위 · 쉼표 구분</span>
+              <input
+                value={useScope}
+                onChange={(event) => setUseScope(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>제외 범위 · 쉼표 구분</span>
+              <input
+                value={excludeScope}
+                onChange={(event) => setExcludeScope(event.target.value)}
+              />
+            </label>
+            <div className="reference-metadata-actions">
+              <button type="submit" disabled={saving}>
+                {saving ? '저장 중…' : '설정 저장'}
+              </button>
+              <button type="button" onClick={cancelEditing} disabled={saving}>
+                취소
+              </button>
+            </div>
+          </form>
+        )}
+
+        {error === null ? null : (
+          <p className="reference-error" role="alert">
+            {error}
+          </p>
+        )}
+
+        {selectedCount <= maximumSelected ? null : (
+          <p className="reference-error" role="alert">
+            현재 모드에서는 {selectedCount - maximumSelected}장을 더 해제해야
+            합니다.
+          </p>
+        )}
+
+        <div className="reference-list">
+          {loading ? <p className="reference-empty">불러오는 중…</p> : null}
+          {!loading && references.length === 0 ? (
+            <p className="reference-empty">
+              배경, 캐릭터, 레이아웃 또는 스타일 이미지를 추가하세요.
+            </p>
+          ) : null}
+          {references.map((reference) => (
+            <article
+              key={reference.id}
+              className={`reference-card${reference.enabled ? ' reference-card--selected' : ''}`}
+            >
+              <label className="reference-card-select">
+                <input
+                  type="checkbox"
+                  checked={reference.enabled}
+                  disabled={!reference.enabled && selectionAtLimit}
+                  onChange={() => void toggleSelection(reference)}
+                  aria-label={`${reference.name} 생성에 포함`}
+                  aria-describedby="reference-selection-budget"
+                  title={
+                    !reference.enabled && selectionAtLimit
+                      ? `레퍼런스는 최대 ${maximumSelected}장까지 선택할 수 있습니다.`
+                      : undefined
+                  }
+                />
+                <img src={reference.thumbnailUrl} alt="" />
+                <span className="reference-card-copy">
+                  <strong>{reference.name}</strong>
+                  <span>
+                    {REFERENCE_KIND_LABELS[reference.kind]} ·{' '}
+                    {reference.width === null || reference.height === null
+                      ? formatBytes(reference.byteLength)
+                      : `${reference.width}×${reference.height}`}
+                  </span>
+                </span>
+              </label>
+              <button type="button" onClick={() => beginEditing(reference)}>
+                {reference.targetObjectId === null
+                  ? '설정'
+                  : `연결 · ${targets.find(({ id }) => id === reference.targetObjectId)?.name ?? reference.targetObjectId}`}
+              </button>
+              {reference.targetObjectId !== null &&
+              !targets.some(({ id }) => id === reference.targetObjectId) ? (
+                <span className="reference-integrity-warning" role="alert">
+                  삭제된 object에 연결됨 · 설정에서 연결을 해제하세요.
+                </span>
+              ) : null}
+            </article>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -522,6 +561,8 @@ export function ReferenceManager({
   maximumSelected = FRESH_GENERATION_MAX_REFERENCES,
   reservedInputImages = 1,
   onSelectionChange = ignoreSelectionChange,
+  collapsed = false,
+  onToggleCollapsed,
 }: ReferenceManagerProps) {
   useEffect(() => {
     if (connection === null) onSelectionChange([]);
@@ -529,16 +570,25 @@ export function ReferenceManager({
 
   if (connection === null) {
     return (
-      <section className="reference-manager" aria-labelledby="references-title">
+      <section
+        className={`reference-manager${collapsed ? ' reference-manager--collapsed' : ''}`}
+        aria-labelledby="references-title"
+      >
         <div className="reference-manager-heading">
           <div>
             <p className="eyebrow">Project assets</p>
             <h2 id="references-title">References</h2>
           </div>
+          <ReferenceTrayToggle
+            collapsed={collapsed}
+            onToggleCollapsed={onToggleCollapsed}
+          />
         </div>
-        <p className="reference-empty">
-          Companion 연결 후 프로젝트 레퍼런스를 가져올 수 있습니다.
-        </p>
+        <div id="reference-manager-body" hidden={collapsed}>
+          <p className="reference-empty">
+            Companion 연결 후 프로젝트 레퍼런스를 가져올 수 있습니다.
+          </p>
+        </div>
       </section>
     );
   }
@@ -554,6 +604,8 @@ export function ReferenceManager({
       maximumSelected={maximumSelected}
       reservedInputImages={reservedInputImages}
       onSelectionChange={onSelectionChange}
+      collapsed={collapsed}
+      onToggleCollapsed={onToggleCollapsed}
     />
   );
 }

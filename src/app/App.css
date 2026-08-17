@@ -107,6 +107,10 @@ p {
   grid-template-rows: auto minmax(0, 1fr) 2rem;
 }
 
+.desktop-editor--references-collapsed {
+  grid-template-rows: auto minmax(0, 1fr) 2.6rem 2rem;
+}
+
 .top-toolbar {
   display: grid;
   grid-template-columns: 11.5rem minmax(0, 1fr);
@@ -2068,6 +2072,44 @@ p {
 .reference-manager-heading h2 {
   margin: 0.15rem 0 0;
   font-size: 0.82rem;
+}
+
+.reference-manager-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.reference-tray-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.9rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid #38517c;
+  border-radius: 0.45rem;
+  color: #d8e6fb;
+  font-size: 0.69rem;
+  font-weight: 700;
+  background: #1a2d4d;
+  cursor: pointer;
+}
+
+.reference-manager--collapsed {
+  align-items: center;
+}
+
+.reference-manager--collapsed .reference-manager-heading {
+  flex: 1 1 auto;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.reference-manager--collapsed .reference-selection-count,
+.reference-manager--collapsed .reference-import-button {
+  display: none;
 }
 
 .reference-selection-count {

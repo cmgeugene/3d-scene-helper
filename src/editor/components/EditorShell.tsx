@@ -41,6 +41,7 @@ import {
   ASSISTANT_PANEL_MAX_WIDTH,
   ASSISTANT_PANEL_MIN_WIDTH,
   ASSISTANT_PANEL_WIDTH_STORAGE_KEY,
+  REFERENCE_TRAY_COLLAPSED_STORAGE_KEY,
 } from '../constants';
 import { EditorShortcuts } from './EditorShortcuts';
 import { Inspector } from './Inspector';
@@ -121,6 +122,14 @@ function readAssistantPanelCollapsed(storage: Storage) {
   }
 }
 
+function readReferenceTrayCollapsed(storage: Storage) {
+  try {
+    return storage.getItem(REFERENCE_TRAY_COLLAPSED_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 const WORKSPACE_MODE_STORAGE_KEY = 'i2v.workspace.mode.v1';
 
 function readWorkspaceMode(storage: Storage): 'scene' | 'keyframe' {
@@ -187,6 +196,9 @@ export function EditorShell({
   );
   const [assistantPanelCollapsed, setAssistantPanelCollapsed] = useState(() =>
     readAssistantPanelCollapsed(storage),
+  );
+  const [referenceTrayCollapsed, setReferenceTrayCollapsed] = useState(() =>
+    readReferenceTrayCollapsed(storage),
   );
   const [assistantPanelExpanded, setAssistantPanelExpanded] = useState(false);
   const [resizingAssistantPanel, setResizingAssistantPanel] = useState(false);
@@ -264,6 +276,17 @@ export function EditorShell({
       // UI preferences should not make the editor unusable when storage fails.
     }
   }, [assistantPanelCollapsed, storage]);
+
+  useEffect(() => {
+    try {
+      storage.setItem(
+        REFERENCE_TRAY_COLLAPSED_STORAGE_KEY,
+        String(referenceTrayCollapsed),
+      );
+    } catch {
+      // UI preferences should not make the editor unusable when storage fails.
+    }
+  }, [referenceTrayCollapsed, storage]);
 
   useEffect(() => {
     try {
@@ -368,7 +391,9 @@ export function EditorShell({
   return (
     <main className="editor-shell">
       {workspaceMode === 'scene' ? <EditorShortcuts store={store} /> : null}
-      <div className={`desktop-editor desktop-editor--${workspaceMode}`}>
+      <div
+        className={`desktop-editor desktop-editor--${workspaceMode}${workspaceMode === 'scene' && referenceTrayCollapsed ? ' desktop-editor--references-collapsed' : ''}`}
+      >
         {workspaceMode === 'scene' ? (
           <TopToolbar
             store={store}
@@ -590,6 +615,10 @@ export function EditorShell({
             maximumSelected={maximumSelectedReferences}
             reservedInputImages={reservedGenerationImages}
             onSelectionChange={setSelectedReferences}
+            collapsed={referenceTrayCollapsed}
+            onToggleCollapsed={() =>
+              setReferenceTrayCollapsed((current) => !current)
+            }
           />
         ) : null}
         <StatusBar store={store} />

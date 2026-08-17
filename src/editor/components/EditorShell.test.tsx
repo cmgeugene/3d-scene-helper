@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ASSISTANT_PANEL_COLLAPSED_STORAGE_KEY,
   ASSISTANT_PANEL_WIDTH_STORAGE_KEY,
+  REFERENCE_TRAY_COLLAPSED_STORAGE_KEY,
   SCENE_STORAGE_KEY,
 } from '../constants';
 import { encodeSceneDocument } from '../persistence/sceneCodec';
@@ -552,6 +553,44 @@ describe('EditorShell', () => {
     expect(
       screen.getByRole('separator', { name: '우측 패널 너비 조절' }),
     ).toHaveAttribute('aria-valuenow', '416');
+  });
+
+  it('하단 레퍼런스 트레이를 접고 펼치며 상태를 저장한다', async () => {
+    const user = userEvent.setup();
+    const storage = createMemoryStorage();
+    const view = render(
+      <EditorShell
+        store={createTestStore()}
+        webGLState="available"
+        storage={storage}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'References' })).toBeVisible();
+    expect(screen.getByText(/Companion 연결 후/)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: '레퍼런스 접기' }));
+    expect(screen.getByText(/Companion 연결 후/)).not.toBeVisible();
+    expect(
+      screen.getByRole('button', { name: '레퍼런스 펼치기' }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(storage.getItem(REFERENCE_TRAY_COLLAPSED_STORAGE_KEY)).toBe(
+        'true',
+      ),
+    );
+    view.unmount();
+
+    render(
+      <EditorShell
+        store={createTestStore()}
+        webGLState="available"
+        storage={storage}
+      />,
+    );
+    expect(screen.getByText(/Companion 연결 후/)).not.toBeVisible();
+    await user.click(screen.getByRole('button', { name: '레퍼런스 펼치기' }));
+    expect(screen.getByText(/Companion 연결 후/)).toBeVisible();
   });
 
   it('화면비와 가이드를 바꾸고 기본 장면으로 초기화한다', async () => {
