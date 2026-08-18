@@ -48,6 +48,8 @@ export const layoutSpecSchema = z.object({
         'sphere',
         'cylinder',
         'plane',
+        'rounded-cube',
+        'bent-plane',
         'mannequin',
         'room',
       ]),

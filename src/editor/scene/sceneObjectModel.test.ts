@@ -13,6 +13,8 @@ describe('sceneObjectModel', () => {
     ['sphere', 'sphere'],
     ['cylinder', 'cylinder'],
     ['plane', 'plane'],
+    ['rounded-cube', 'rounded-cube'],
+    ['bent-plane', 'bent-plane'],
     ['mannequin', 'mannequin'],
     ['room', 'room'],
   ] as const)('%s 문서 종류를 %s runtime model로 매핑한다', (kind, model) => {

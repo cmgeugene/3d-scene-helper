@@ -343,7 +343,15 @@ describe('sceneDocumentSchema', () => {
   });
 
   it('MVP의 모든 addable object를 plain-data factory로 결정적으로 만든다', () => {
-    const kinds = ['cube', 'sphere', 'cylinder', 'plane', 'mannequin'] as const;
+    const kinds = [
+      'cube',
+      'sphere',
+      'cylinder',
+      'plane',
+      'rounded-cube',
+      'bent-plane',
+      'mannequin',
+    ] as const;
 
     const objects = kinds.map((kind) =>
       createSceneObject(`object-${kind}`, { kind }),

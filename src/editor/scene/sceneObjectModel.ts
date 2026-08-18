@@ -3,7 +3,14 @@ import { computeMannequinPoseBounds } from '../mannequin/mannequinRig';
 import type { SceneObject, SceneObjectKind } from '../persistence/sceneSchema';
 
 export type RuntimeGeometry =
-  'box' | 'sphere' | 'cylinder' | 'plane' | 'mannequin' | 'room';
+  | 'box'
+  | 'sphere'
+  | 'cylinder'
+  | 'plane'
+  | 'rounded-cube'
+  | 'bent-plane'
+  | 'mannequin'
+  | 'room';
 
 export interface SceneObjectModel {
   geometry: RuntimeGeometry;
@@ -26,6 +33,8 @@ const GEOMETRY_BY_KIND: Record<SceneObjectKind, RuntimeGeometry> = {
   sphere: 'sphere',
   cylinder: 'cylinder',
   plane: 'plane',
+  'rounded-cube': 'rounded-cube',
+  'bent-plane': 'bent-plane',
   mannequin: 'mannequin',
   room: 'room',
 };

@@ -1,5 +1,17 @@
-import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
-import { DoubleSide, MathUtils, type Group, type Mesh } from 'three';
+import {
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from 'react';
+import {
+  DoubleSide,
+  MathUtils,
+  type BufferGeometry,
+  type Group,
+  type Mesh,
+} from 'three';
 import { RENDER_LAYERS } from '../constants';
 import {
   computeMannequinPoseBounds,
@@ -16,6 +28,10 @@ import { RoomSet } from './RoomSet';
 import { SurfaceGrid } from './SurfaceGrid';
 import { getSceneObjectModel } from './sceneObjectModel';
 import { consumeObjectSelectionSuppression } from './objectSelectionGuard';
+import {
+  createBentPlaneGeometry,
+  createRoundedCubeGeometry,
+} from './presetGeometries';
 
 interface SceneObjectProps {
   object: SceneObjectData;
@@ -34,6 +50,36 @@ interface PrimitiveProps {
   castShadow: boolean;
   receiveShadow: boolean;
   focusContoursEnabled: boolean;
+}
+
+function PresetGeometryMesh({
+  dimensions,
+  createGeometry,
+  castShadow,
+  receiveShadow,
+  material,
+}: {
+  dimensions: SceneObjectData['dimensions'];
+  createGeometry: (dimensions: SceneObjectData['dimensions']) => BufferGeometry;
+  castShadow: boolean;
+  receiveShadow: boolean;
+  material: ReactNode;
+}) {
+  const { x, y, z } = dimensions;
+  const geometry = useMemo(
+    () => createGeometry({ x, y, z }),
+    [createGeometry, x, y, z],
+  );
+  useLayoutEffect(() => () => geometry.dispose(), [geometry]);
+  return (
+    <mesh
+      castShadow={castShadow}
+      receiveShadow={receiveShadow}
+      geometry={geometry}
+    >
+      {material}
+    </mesh>
+  );
 }
 
 function Primitive({
@@ -137,6 +183,33 @@ function Primitive({
             width={dimensions.x}
           />
         </>
+      );
+    case 'rounded-cube':
+      return (
+        <PresetGeometryMesh
+          dimensions={dimensions}
+          createGeometry={createRoundedCubeGeometry}
+          castShadow={castShadow}
+          receiveShadow={receiveShadow}
+          material={material}
+        />
+      );
+    case 'bent-plane':
+      return (
+        <PresetGeometryMesh
+          dimensions={dimensions}
+          createGeometry={createBentPlaneGeometry}
+          castShadow={castShadow}
+          receiveShadow={receiveShadow}
+          material={
+            <meshStandardMaterial
+              color={object.color}
+              roughness={0.82}
+              metalness={0}
+              side={DoubleSide}
+            />
+          }
+        />
       );
     case 'mannequin':
       return (

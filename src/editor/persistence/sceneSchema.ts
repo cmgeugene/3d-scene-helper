@@ -107,6 +107,8 @@ const validatedSceneObjectSchema = z
       'sphere',
       'cylinder',
       'plane',
+      'rounded-cube',
+      'bent-plane',
       'mannequin',
       'room',
     ]),
@@ -410,6 +412,18 @@ const OBJECT_DEFAULTS: Record<
     dimensions: { x: 2, y: 0.02, z: 2 },
     color: '#b8b8b8',
     positionY: 0.01,
+  },
+  'rounded-cube': {
+    name: 'Rounded Cube',
+    dimensions: { x: 1, y: 1, z: 1 },
+    color: '#7d8b99',
+    positionY: 0.5,
+  },
+  'bent-plane': {
+    name: 'Curved Surface',
+    dimensions: { x: 2, y: 2, z: 0.7 },
+    color: '#b0b8c0',
+    positionY: 1,
   },
   room: {
     name: 'Room Set',
