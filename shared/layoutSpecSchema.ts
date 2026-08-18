@@ -50,6 +50,7 @@ export const layoutSpecSchema = z.object({
         'plane',
         'rounded-cube',
         'bent-plane',
+        'triangle',
         'mannequin',
         'room',
       ]),

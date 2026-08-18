@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createBentPlaneGeometry,
+  createEquilateralTriangleGeometry,
   createRoundedCubeGeometry,
 } from './presetGeometries';
 
@@ -43,6 +44,24 @@ describe('presetGeometries', () => {
     expect(maxZ - minZ).toBeCloseTo(0.7, 2);
     expect(centerZ / centerSamples).toBeGreaterThan(0.6);
     expect(minZ).toBeCloseTo(0, 2);
+    geometry.dispose();
+  });
+
+  it('builds a centered equilateral triangle facing the camera', () => {
+    const geometry = createEquilateralTriangleGeometry({
+      x: 2,
+      y: 1,
+      z: 0.02,
+    });
+    const position = geometry.getAttribute('position');
+    expect(position.count).toBe(3);
+    const xs = [0, 1, 2]
+      .map((index) => position.getX(index))
+      .sort((a, b) => a - b);
+    const ys = [0, 1, 2].map((index) => position.getY(index));
+    expect(xs[0]).toBeCloseTo(-1);
+    expect(xs[2]).toBeCloseTo(1);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(Math.sqrt(3), 5);
     geometry.dispose();
   });
 });

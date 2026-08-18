@@ -88,6 +88,12 @@ export interface EditorStoreOptions {
   idFactory: () => string;
 }
 
+export interface LayoutGuide {
+  objectUrl: string | null;
+  fileName: string | null;
+  opacity: number;
+}
+
 export interface EditorStore {
   document: SceneDocument;
   history: DocumentHistory<SceneDocument, DocumentMutationKind>;
@@ -98,6 +104,7 @@ export interface EditorStore {
   transformMode: TransformMode;
   mannequinTool: MannequinTool;
   guideVisibility: GuideVisibility;
+  layoutGuide: LayoutGuide;
   isDirty: boolean;
   activePanel: EditorPanel;
   navigation: EditorNavigation;
@@ -155,6 +162,8 @@ export interface EditorStore {
   setTransformMode: (mode: TransformMode) => void;
   setMannequinTool: (tool: MannequinTool) => void;
   setGuideVisibility: (visibility: Partial<GuideVisibility>) => void;
+  setLayoutGuideFile: (file: File | null) => void;
+  setLayoutGuideOpacity: (opacity: number) => void;
   setActivePanel: (panel: EditorPanel) => void;
   setNavigation: (navigation: EditorNavigation) => void;
   setExportState: (exportState: ExportState) => void;
@@ -286,6 +295,11 @@ export function createEditorStore(options: EditorStoreOptions) {
       actionSafe: false,
       titleSafe: false,
       motion: false,
+    },
+    layoutGuide: {
+      objectUrl: null,
+      fileName: null,
+      opacity: 0.35,
     },
     isDirty: false,
     activePanel: 'scene',
@@ -923,6 +937,38 @@ export function createEditorStore(options: EditorStoreOptions) {
     setGuideVisibility: (visibility) => {
       set((state) => ({
         guideVisibility: { ...state.guideVisibility, ...visibility },
+      }));
+    },
+    setLayoutGuideFile: (file) => {
+      const previousUrl = get().layoutGuide.objectUrl;
+      if (previousUrl !== null) URL.revokeObjectURL(previousUrl);
+      if (file === null) {
+        set((state) => ({
+          layoutGuide: {
+            ...state.layoutGuide,
+            objectUrl: null,
+            fileName: null,
+          },
+          statusMessage: '레이아웃 가이드 이미지를 제거했습니다.',
+        }));
+        return;
+      }
+      set((state) => ({
+        layoutGuide: {
+          ...state.layoutGuide,
+          objectUrl: URL.createObjectURL(file),
+          fileName: file.name,
+        },
+        statusMessage: '레이아웃 가이드 이미지를 표시합니다.',
+      }));
+    },
+    setLayoutGuideOpacity: (opacity) => {
+      const nextOpacity = Math.min(1, Math.max(0, opacity));
+      set((state) => ({
+        layoutGuide: {
+          ...state.layoutGuide,
+          opacity: nextOpacity,
+        },
       }));
     },
     setActivePanel: (activePanel) => {

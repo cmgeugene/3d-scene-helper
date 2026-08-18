@@ -243,6 +243,7 @@ function CameraControls({ store }: InspectorProps) {
   const selectedMotionPreset = CAMERA_MOTION_PRESETS.find(
     ({ motionType }) => motionType === motionGuide?.motionType,
   );
+  const layoutGuide = useStore(store, (state) => state.layoutGuide);
 
   return (
     <div className="camera-controls">
@@ -339,6 +340,51 @@ function CameraControls({ store }: InspectorProps) {
             </button>
           ))}
         </div>
+      </fieldset>
+      <fieldset>
+        <legend>레이아웃 가이드 이미지</legend>
+        <p>
+          OutputCamera 프레임에만 겹칩니다. Clean PNG와 생성 첨부에는 들어가지
+          않습니다.
+        </p>
+        <label className="camera-field">
+          <span>이미지</span>
+          <input
+            aria-label="레이아웃 가이드 이미지"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0] ?? null;
+              store.getState().setLayoutGuideFile(file);
+              event.currentTarget.value = '';
+            }}
+          />
+        </label>
+        <label className="camera-field">
+          <span>불투명도 {Math.round(layoutGuide.opacity * 100)}%</span>
+          <input
+            aria-label="레이아웃 가이드 불투명도"
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            disabled={layoutGuide.objectUrl === null}
+            value={Math.round(layoutGuide.opacity * 100)}
+            onChange={(event) => {
+              store
+                .getState()
+                .setLayoutGuideOpacity(Number(event.currentTarget.value) / 100);
+            }}
+          />
+        </label>
+        {layoutGuide.fileName === null ? null : <p>{layoutGuide.fileName}</p>}
+        <button
+          type="button"
+          disabled={layoutGuide.objectUrl === null}
+          onClick={() => store.getState().setLayoutGuideFile(null)}
+        >
+          가이드 이미지 제거
+        </button>
       </fieldset>
       <div className="camera-actions">
         <button

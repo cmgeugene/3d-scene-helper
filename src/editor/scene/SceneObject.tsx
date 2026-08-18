@@ -30,6 +30,7 @@ import { getSceneObjectModel } from './sceneObjectModel';
 import { consumeObjectSelectionSuppression } from './objectSelectionGuard';
 import {
   createBentPlaneGeometry,
+  createEquilateralTriangleGeometry,
   createRoundedCubeGeometry,
 } from './presetGeometries';
 
@@ -205,6 +206,23 @@ function Primitive({
             <meshStandardMaterial
               color={object.color}
               roughness={0.82}
+              metalness={0}
+              side={DoubleSide}
+            />
+          }
+        />
+      );
+    case 'triangle':
+      return (
+        <PresetGeometryMesh
+          dimensions={dimensions}
+          createGeometry={createEquilateralTriangleGeometry}
+          castShadow={castShadow}
+          receiveShadow={receiveShadow}
+          material={
+            <meshStandardMaterial
+              color={object.color}
+              roughness={0.78}
               metalness={0}
               side={DoubleSide}
             />

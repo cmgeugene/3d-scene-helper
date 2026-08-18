@@ -720,6 +720,7 @@ describe('EditorShell', () => {
       screen.getByRole('button', { name: '라운드 큐브 추가' }),
     ).toBeEnabled();
     expect(screen.getByRole('button', { name: '곡면 추가' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '정삼각형 추가' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '마네킹 추가' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '방 세트 추가' })).toBeEnabled();
 

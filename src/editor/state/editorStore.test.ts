@@ -57,6 +57,11 @@ describe('editorStore', () => {
       titleSafe: false,
       motion: false,
     });
+    expect(state.layoutGuide).toEqual({
+      objectUrl: null,
+      fileName: null,
+      opacity: 0.35,
+    });
     expect(state.isDirty).toBe(false);
     expect(state.activePanel).toBe('scene');
     expect(state.navigation).toEqual({
@@ -71,6 +76,21 @@ describe('editorStore', () => {
       progress: 0,
       error: null,
     });
+  });
+
+  it('레이아웃 가이드 이미지와 불투명도를 문서와 분리해 보관한다', () => {
+    const file = new File(['guide'], 'dressing-room.png', {
+      type: 'image/png',
+    });
+    store.getState().setLayoutGuideFile(file);
+    expect(store.getState().layoutGuide.fileName).toBe('dressing-room.png');
+    expect(store.getState().layoutGuide.objectUrl).toMatch(/^blob:/);
+    expect(store.getState().document).toBe(store.getState().document);
+    store.getState().setLayoutGuideOpacity(0.2);
+    expect(store.getState().layoutGuide.opacity).toBe(0.2);
+    store.getState().setLayoutGuideFile(null);
+    expect(store.getState().layoutGuide.objectUrl).toBeNull();
+    expect(store.getState().isDirty).toBe(false);
   });
 
   it('주입된 ID로 object를 추가하고 선택하며 dirty로 표시한다', () => {

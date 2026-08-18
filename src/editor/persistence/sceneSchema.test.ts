@@ -350,6 +350,7 @@ describe('sceneDocumentSchema', () => {
       'plane',
       'rounded-cube',
       'bent-plane',
+      'triangle',
       'mannequin',
     ] as const;
 

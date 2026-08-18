@@ -387,6 +387,7 @@ export function SceneViewport({
   );
   const outputAspect = ASPECT_RATIO_VALUES[outputAspectId];
   const guideVisibility = useStore(store, (state) => state.guideVisibility);
+  const layoutGuide = useStore(store, (state) => state.layoutGuide);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const readOnlyRendererRef = useRef<ReadOnlyPreviewRenderer | null>(null);
   const previewDiagnosticsRef = useRef<PreviewResourceDiagnostics | null>(null);
@@ -482,6 +483,16 @@ export function SceneViewport({
           }}
         >
           <CompositionGuides visibility={guideVisibility} />
+          {layoutGuide.objectUrl === null ? null : (
+            <img
+              className="layout-guide-overlay"
+              src={layoutGuide.objectUrl}
+              alt=""
+              aria-hidden="true"
+              data-testid="layout-guide-overlay"
+              style={{ opacity: layoutGuide.opacity }}
+            />
+          )}
         </div>
       )}
       {readOnly ? null : (

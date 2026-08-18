@@ -9,6 +9,7 @@ export type RuntimeGeometry =
   | 'plane'
   | 'rounded-cube'
   | 'bent-plane'
+  | 'triangle'
   | 'mannequin'
   | 'room';
 
@@ -35,6 +36,7 @@ const GEOMETRY_BY_KIND: Record<SceneObjectKind, RuntimeGeometry> = {
   plane: 'plane',
   'rounded-cube': 'rounded-cube',
   'bent-plane': 'bent-plane',
+  triangle: 'triangle',
   mannequin: 'mannequin',
   room: 'room',
 };

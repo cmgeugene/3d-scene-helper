@@ -109,6 +109,7 @@ const validatedSceneObjectSchema = z
       'plane',
       'rounded-cube',
       'bent-plane',
+      'triangle',
       'mannequin',
       'room',
     ]),
@@ -424,6 +425,12 @@ const OBJECT_DEFAULTS: Record<
     dimensions: { x: 2, y: 2, z: 0.7 },
     color: '#b0b8c0',
     positionY: 1,
+  },
+  triangle: {
+    name: 'Triangle',
+    dimensions: { x: 1, y: Math.sqrt(3) / 2, z: 0.02 },
+    color: '#8a94a0',
+    positionY: Math.sqrt(3) / 4,
   },
   room: {
     name: 'Room Set',

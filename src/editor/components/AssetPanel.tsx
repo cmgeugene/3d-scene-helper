@@ -18,6 +18,7 @@ const ASSETS: ReadonlyArray<{
   { kind: 'plane', label: '평면' },
   { kind: 'rounded-cube', label: '라운드 큐브' },
   { kind: 'bent-plane', label: '곡면' },
+  { kind: 'triangle', label: '정삼각형' },
   { kind: 'mannequin', label: '마네킹' },
   { kind: 'room', label: '방 세트' },
 ];
