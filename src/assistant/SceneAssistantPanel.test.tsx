@@ -404,11 +404,11 @@ describe('SceneAssistantPanel', () => {
     expect(interruptTurn).toHaveBeenCalledWith(active.threadId, active.turnId);
   });
 
-  it('연결 정보가 없으면 launchUrl 안내를 표시한다', () => {
+  it('연결 정보가 없으면 로컬 개발 서버 연결 안내를 표시한다', () => {
     render(<SceneAssistantPanel connection={null} />);
 
     expect(screen.getByRole('status')).toHaveTextContent('연결 안 됨');
-    expect(screen.getByText(/launchUrl/)).toBeVisible();
+    expect(screen.getByText(/npm run dev:all/)).toBeVisible();
   });
 
   it('Companion runtime과 ChatGPT 플랜을 표시한다', async () => {

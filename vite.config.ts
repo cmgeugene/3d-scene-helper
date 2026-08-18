@@ -1,8 +1,9 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
+import { companionDevSessionPlugin } from './companion/viteDevSessionPlugin';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), companionDevSessionPlugin()],
   server: {
     host: '127.0.0.1',
     port: 5173,

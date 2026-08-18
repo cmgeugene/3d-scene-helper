@@ -26,6 +26,7 @@ blob-report/
 /conversations.json
 /runtime-requests.json
 /.i2v-companion.lock
+.i2v/
 
 # Local environment and editor files
 .env

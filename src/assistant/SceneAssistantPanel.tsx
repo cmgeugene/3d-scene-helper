@@ -2079,8 +2079,9 @@ export function SceneAssistantPanel({
         <p className="assistant-message">
           {connectionError ?? (
             <>
-              Companion을 실행한 뒤 출력된 <strong>launchUrl</strong>로 편집기를
-              여세요.
+              Companion이 켜져 있으면 이 페이지가 자동으로 연결됩니다. 같은
+              컴퓨터에서 <code>npm run dev:all</code> 후{' '}
+              <code>http://127.0.0.1:5173</code>을 여세요.
             </>
           )}
         </p>

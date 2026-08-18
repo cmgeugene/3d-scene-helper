@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { CodexAppServerClient } from './appServerClient';
 import { openBrowser } from './browserLauncher';
 import {
@@ -8,6 +10,15 @@ import {
 import { acquireCompanionInstanceLock } from './instanceLock';
 import { createCompanionLaunchUrl } from './launchUrl';
 import { startCompanionServerWithPortFallback } from './serverLifecycle';
+import {
+  clearCompanionDevSession,
+  writeCompanionDevSession,
+} from './devSession';
+
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+);
 
 const options = parseCompanionCliOptions(process.argv.slice(2));
 if (options.showHelp) {
@@ -29,6 +40,7 @@ async function runCompanion(options: CompanionCliOptions) {
     shuttingDown = true;
     await server?.close();
     await runtime.stop();
+    await clearCompanionDevSession(repoRoot);
     await instanceLock.release();
   }
 
@@ -46,6 +58,10 @@ async function runCompanion(options: CompanionCliOptions) {
     });
     server = started.server;
     await instanceLock.updateUrl(server.url);
+    await writeCompanionDevSession(repoRoot, {
+      url: server.url,
+      token: server.token,
+    });
     const launchUrl = createCompanionLaunchUrl(
       options.editorRoot === null ? options.editorUrl : server.url,
       {

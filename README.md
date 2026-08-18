@@ -27,9 +27,10 @@ npm run dev
 npm run dev:all
 ```
 
-기본 프로젝트 루트는 명령을 실행한 현재 디렉터리이며, Vite가 준비된 뒤 Companion이 기본
-브라우저를 엽니다. 다른 프로젝트를 사용하거나 브라우저 자동 실행을 끄려면 Companion 옵션을
-그대로 전달합니다.
+기본 프로젝트 루트는 명령을 실행한 현재 디렉터리입니다. Companion이 준비되면
+`http://127.0.0.1:5173`을 연 탭이 자동으로 연결됩니다. 기본 브라우저도 열리지만
+그 탭의 launchUrl을 쓰지 않아도 됩니다. 다른 프로젝트를 사용하거나 브라우저 자동
+실행을 끄려면 Companion 옵션을 그대로 전달합니다.
 
 ```bash
 npm run dev:all -- --project-root /absolute/path/to/project --no-open
@@ -66,7 +67,12 @@ npm run dev
 npm run dev:companion -- --project-root .
 ```
 
-Companion은 준비가 끝나면 세션 `launchUrl`을 기본 브라우저에서 자동으로 엽니다. Vite 주소가 기본값인 `http://127.0.0.1:5173`과 다르면 `--editor-url http://127.0.0.1:<port>`를 함께 지정합니다. 브라우저를 열지 않으려면 `--no-open`을 사용합니다. 지정 포트가 이미 사용 중이면 임의의 빈 포트로 한 번 전환하며, 고정 포트가 반드시 필요하면 `--strict-port`를 추가합니다. 연결 정보는 URL fragment에서 즉시 제거되고 현재 탭의 `sessionStorage`에만 보관됩니다.
+Companion은 준비가 끝나면 개발 편집기가 같은 컴퓨터에서 자동으로 찾을 수 있게 루프백 세션을
+남기고, 기본 브라우저로 편집기를 엽니다. Vite 주소가 기본값인 `http://127.0.0.1:5173`과
+다르면 `--editor-url http://127.0.0.1:<port>`를 함께 지정합니다. 브라우저를 열지 않으려면
+`--no-open`을 사용하고 그 주소만 직접 열면 됩니다. 지정 포트가 이미 사용 중이면 임의의 빈
+포트로 한 번 전환하며, 고정 포트가 반드시 필요하면 `--strict-port`를 추가합니다. 연결 정보는
+탭의 `sessionStorage`에 보관됩니다.
 
 프로젝트마다 하나의 Companion만 실행할 수 있습니다. 실행 중인 프로젝트를 다시 시작하면 중복 실행을 거부하고, 비정상 종료로 남은 lock은 자동 복구합니다. `SIGINT`나 `SIGTERM`으로 종료하면 HTTP 서버, App Server와 lock을 함께 정리합니다.
 

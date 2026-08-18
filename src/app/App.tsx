@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { StoreApi } from 'zustand/vanilla';
 import {
   clearCompanionConnection,
+  COMPANION_SESSION_KEY,
   consumeCompanionConnection,
+  discoverCompanionConnection,
 } from '../assistant/companionConnection';
 import { EditorShell, type WebGLState } from '../editor/components/EditorShell';
 import { AUTOSAVE_DEBOUNCE_MS, SCENE_STORAGE_KEY } from '../editor/constants';
@@ -92,10 +94,33 @@ export function App({
       replaceUrl: (url) => window.history.replaceState(null, '', url),
     }),
   );
+  const skipCompanionDiscoveryRef = useRef(false);
   const disconnectCompanion = useCallback(() => {
+    skipCompanionDiscoveryRef.current = true;
     clearCompanionConnection(window.sessionStorage);
     setCompanionState({ connection: null, error: null });
   }, []);
+
+  useEffect(() => {
+    if (
+      companionState.connection !== null ||
+      skipCompanionDiscoveryRef.current
+    ) {
+      return;
+    }
+    let cancelled = false;
+    void discoverCompanionConnection().then((connection) => {
+      if (cancelled || connection === null) return;
+      window.sessionStorage.setItem(
+        COMPANION_SESSION_KEY,
+        JSON.stringify(connection),
+      );
+      setCompanionState({ connection, error: null });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [companionState.connection]);
 
   useEffect(() => {
     const nextState = canUseWebGL() ? 'available' : 'fallback';

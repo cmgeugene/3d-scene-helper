@@ -92,6 +92,28 @@ export function consumeCompanionConnection(
   }
 }
 
+export function parseCompanionConnectionPayload(value: unknown) {
+  const parsed = connectionSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+export const COMPANION_DEV_DISCOVERY_PATH = '/__i2v/companion-connection';
+
+export async function discoverCompanionConnection(
+  fetchImpl: typeof fetch = fetch,
+): Promise<CompanionConnection | null> {
+  try {
+    const response = await fetchImpl(COMPANION_DEV_DISCOVERY_PATH, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) return null;
+    return parseCompanionConnectionPayload((await response.json()) as unknown);
+  } catch {
+    return null;
+  }
+}
+
 export function clearCompanionConnection(storage: Storage) {
   storage.removeItem(COMPANION_SESSION_KEY);
 }

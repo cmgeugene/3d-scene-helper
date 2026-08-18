@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   COMPANION_SESSION_KEY,
   consumeCompanionConnection,
+  discoverCompanionConnection,
+  parseCompanionConnectionPayload,
 } from './companionConnection';
 
 function createStorage(): Storage {
@@ -89,5 +91,52 @@ describe('consumeCompanionConnection', () => {
         replaceUrl: vi.fn(),
       }).connection,
     ).toMatchObject({ url: 'http://localhost:61234' });
+  });
+});
+
+describe('parseCompanionConnectionPayload', () => {
+  it('loopback Companion 세션만 수락한다', () => {
+    expect(
+      parseCompanionConnectionPayload({
+        version: 1,
+        url: 'http://127.0.0.1:59990',
+        token: 'c'.repeat(43),
+      }),
+    ).toEqual({
+      version: 1,
+      url: 'http://127.0.0.1:59990',
+      token: 'c'.repeat(43),
+    });
+    expect(
+      parseCompanionConnectionPayload({
+        version: 1,
+        url: 'https://example.com',
+        token: 'c'.repeat(43),
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('discoverCompanionConnection', () => {
+  it('개발 서버 세션이 있으면 연결을 반환한다', async () => {
+    const connection = {
+      version: 1 as const,
+      url: 'http://127.0.0.1:59990',
+      token: 'e'.repeat(43),
+    };
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify(connection), { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    await expect(discoverCompanionConnection(fetchImpl)).resolves.toEqual(
+      connection,
+    );
+  });
+
+  it('세션이 없으면 null을 반환한다', async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(null, { status: 404 }),
+    ) as unknown as typeof fetch;
+    await expect(discoverCompanionConnection(fetchImpl)).resolves.toBeNull();
   });
 });
