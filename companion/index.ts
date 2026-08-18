@@ -52,6 +52,11 @@ async function runCompanion(options: CompanionCliOptions) {
       allowedOrigins: options.allowedOrigins,
       port: options.port,
       fallbackOnPortConflict: options.fallbackOnPortConflict,
+      imageProvider: options.imageProvider,
+      oauthUrl: options.oauthUrl,
+      imageModel: options.imageModel,
+      imageQuality: options.imageQuality,
+      reasoningEffort: options.reasoningEffort,
       ...(options.editorRoot === null
         ? {}
         : { editorRoot: options.editorRoot }),

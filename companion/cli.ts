@@ -9,6 +9,11 @@ export interface CompanionCliOptions {
   fallbackOnPortConflict: boolean;
   editorRoot: string | null;
   showHelp: boolean;
+  imageProvider: 'codex' | 'oauth';
+  oauthUrl: string;
+  imageModel: string;
+  imageQuality: 'low' | 'medium' | 'high' | 'auto';
+  reasoningEffort: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 export function companionCliHelp() {
@@ -25,6 +30,11 @@ export function companionCliHelp() {
   --origin <url>         추가로 허용할 브라우저 Origin
   --no-open              기본 브라우저를 자동으로 열지 않음
   --strict-port          지정 포트 충돌 시 빈 포트로 전환하지 않음
+  --image-provider <id>  생성 경로: codex(기본) 또는 oauth
+  --oauth-url <url>      ima2-gen과 같은 openai-oauth 프록시 (기본값: http://127.0.0.1:10531)
+  --image-model <id>     OAuth Responses 모델 (기본값: gpt-5.4-mini)
+  --image-quality <id>   OAuth image_generation quality (low|medium|high|auto)
+  --reasoning-effort <id> OAuth reasoning.effort (none|low|medium|high|xhigh)
   --help, -h             이 도움말 표시
 `;
 }
@@ -38,6 +48,11 @@ export function parseCompanionCliOptions(args: string[]): CompanionCliOptions {
   let fallbackOnPortConflict = true;
   let editorRoot: string | null = null;
   let showHelp = false;
+  let imageProvider: CompanionCliOptions['imageProvider'] = 'codex';
+  let oauthUrl = 'http://127.0.0.1:10531';
+  let imageModel = 'gpt-5.4-mini';
+  let imageQuality: CompanionCliOptions['imageQuality'] = 'medium';
+  let reasoningEffort: CompanionCliOptions['reasoningEffort'] = 'none';
 
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
@@ -83,6 +98,44 @@ export function parseCompanionCliOptions(args: string[]): CompanionCliOptions {
       showHelp = true;
       continue;
     }
+    if (flag === '--image-provider' && value !== undefined) {
+      if (value !== 'codex' && value !== 'oauth') {
+        throw new Error('--image-provider는 codex 또는 oauth여야 합니다.');
+      }
+      imageProvider = value;
+      index += 1;
+      continue;
+    }
+    if (flag === '--oauth-url' && value !== undefined) {
+      oauthUrl = new URL(value).origin;
+      index += 1;
+      continue;
+    }
+    if (flag === '--image-model' && value !== undefined) {
+      imageModel = value;
+      index += 1;
+      continue;
+    }
+    if (flag === '--image-quality' && value !== undefined) {
+      if (!['low', 'medium', 'high', 'auto'].includes(value)) {
+        throw new Error(
+          '--image-quality는 low, medium, high, auto 중 하나여야 합니다.',
+        );
+      }
+      imageQuality = value as CompanionCliOptions['imageQuality'];
+      index += 1;
+      continue;
+    }
+    if (flag === '--reasoning-effort' && value !== undefined) {
+      if (!['none', 'low', 'medium', 'high', 'xhigh'].includes(value)) {
+        throw new Error(
+          '--reasoning-effort는 none, low, medium, high, xhigh 중 하나여야 합니다.',
+        );
+      }
+      reasoningEffort = value as CompanionCliOptions['reasoningEffort'];
+      index += 1;
+      continue;
+    }
     throw new Error(`알 수 없는 Companion 옵션입니다: ${flag}`);
   }
 
@@ -95,5 +148,10 @@ export function parseCompanionCliOptions(args: string[]): CompanionCliOptions {
     fallbackOnPortConflict,
     editorRoot,
     showHelp,
+    imageProvider,
+    oauthUrl,
+    imageModel,
+    imageQuality,
+    reasoningEffort,
   };
 }

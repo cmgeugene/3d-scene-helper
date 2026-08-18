@@ -12,6 +12,11 @@ describe('Companion CLI options', () => {
       fallbackOnPortConflict: true,
       editorRoot: null,
       showHelp: false,
+      imageProvider: 'codex',
+      oauthUrl: 'http://127.0.0.1:10531',
+      imageModel: 'gpt-5.4-mini',
+      imageQuality: 'medium',
+      reasoningEffort: 'none',
     });
   });
 
@@ -43,5 +48,30 @@ describe('Companion CLI options', () => {
     expect(parseCompanionCliOptions(['-h']).showHelp).toBe(true);
     expect(companionCliHelp()).toContain('--editor-root <path>');
     expect(companionCliHelp()).toContain('--project-root <path>');
+    expect(companionCliHelp()).toContain('--image-provider <id>');
+    expect(companionCliHelp()).toContain('--oauth-url <url>');
+  });
+
+  it('oauth 이미지 공급자 옵션을 선택한다', () => {
+    expect(
+      parseCompanionCliOptions([
+        '--image-provider',
+        'oauth',
+        '--oauth-url',
+        'http://127.0.0.1:10541',
+        '--image-model',
+        'gpt-5.4',
+        '--image-quality',
+        'low',
+        '--reasoning-effort',
+        'high',
+      ]),
+    ).toMatchObject({
+      imageProvider: 'oauth',
+      oauthUrl: 'http://127.0.0.1:10541',
+      imageModel: 'gpt-5.4',
+      imageQuality: 'low',
+      reasoningEffort: 'high',
+    });
   });
 });

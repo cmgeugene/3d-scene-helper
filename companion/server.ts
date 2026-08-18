@@ -32,6 +32,11 @@ import { ConversationStore } from './conversationStore';
 import { RuntimeRequestStore } from './runtimeRequestStore';
 import { resolveProjectArtifact } from './projectArtifacts';
 import { createStaticEditor } from './staticEditor';
+import { generateOAuthImageFromFiles } from './oauthImageRuntime';
+import type {
+  OAuthImageQuality,
+  OAuthReasoningEffort,
+} from './oauthImageProvider';
 import {
   ReferenceInputError,
   ReferenceNotFoundError,
@@ -221,6 +226,11 @@ export interface CompanionServerOptions {
   token?: string;
   port?: number;
   editorRoot?: string;
+  imageProvider?: 'codex' | 'oauth';
+  oauthUrl?: string;
+  imageModel?: string;
+  imageQuality?: OAuthImageQuality;
+  reasoningEffort?: OAuthReasoningEffort;
 }
 
 export interface CompanionServerHandle {
@@ -844,7 +854,9 @@ export async function startCompanionServer(
                 reused: true,
               };
             }
+            const useOAuthImageProvider = options.imageProvider === 'oauth';
             if (
+              !useOAuthImageProvider &&
               options.runtime.status.capabilities?.imageGeneration === false
             ) {
               throw new ReferenceInputError(
@@ -923,10 +935,9 @@ export async function startCompanionServer(
                 detail: 'original',
               });
             }
-            const turnId = await options.runtime.startTurn(
-              body.threadId,
-              input,
-            );
+            const turnId = useOAuthImageProvider
+              ? `oauth_${body.requestId}`
+              : await options.runtime.startTurn(body.threadId, input);
             await conversationStore.recordTurnStarted(body.threadId, turnId, {
               kind: 'generation',
               userMessage:
@@ -973,14 +984,76 @@ export async function startCompanionServer(
                 ],
               })
               .catch(async (error) => {
-                await options.runtime
-                  .interruptTurn(body.threadId, turnId)
-                  .catch(() => undefined);
-                await conversationStore
-                  .recordTurnCompleted(body.threadId, turnId, 'interrupted')
-                  .catch(() => undefined);
+                if (!useOAuthImageProvider) {
+                  await options.runtime
+                    .interruptTurn(body.threadId, turnId)
+                    .catch(() => undefined);
+                  await conversationStore
+                    .recordTurnCompleted(body.threadId, turnId, 'interrupted')
+                    .catch(() => undefined);
+                }
                 throw error;
               });
+            if (useOAuthImageProvider) {
+              void (async () => {
+                try {
+                  const filePaths = [
+                    ...(sourceGeneration === null
+                      ? []
+                      : [
+                          await resolveProjectArtifact(
+                            options.projectRoot,
+                            sourceGeneration.assetPath,
+                          ),
+                        ]),
+                    await resolveProjectArtifact(
+                      options.projectRoot,
+                      layout.assetPath,
+                    ),
+                    ...(await Promise.all(
+                      references.map((reference) =>
+                        resolveProjectArtifact(
+                          options.projectRoot,
+                          reference.assetPath,
+                        ),
+                      ),
+                    )),
+                  ];
+                  const generated = await generateOAuthImageFromFiles({
+                    baseUrl: options.oauthUrl ?? 'http://127.0.0.1:10531',
+                    model: options.imageModel ?? 'gpt-5.4-mini',
+                    quality: options.imageQuality ?? 'medium',
+                    reasoningEffort: options.reasoningEffort ?? 'none',
+                    prompt: body.prompt,
+                    filePaths,
+                  });
+                  try {
+                    await generationStore.importGenerationResult(
+                      turnId,
+                      generated.filePath,
+                      generated.revisedPrompt,
+                    );
+                  } finally {
+                    await generated.cleanup();
+                  }
+                  const completed = await generationStore.completeTurn(
+                    turnId,
+                    'completed',
+                    null,
+                  );
+                  if (completed !== null) broadcast('generation', completed);
+                } catch (error) {
+                  const failed = await generationStore.completeTurn(
+                    turnId,
+                    'failed',
+                    error instanceof Error
+                      ? error.message
+                      : 'OAuth 이미지 생성에 실패했습니다.',
+                  );
+                  if (failed !== null) broadcast('generation', failed);
+                }
+              })();
+            }
             return { turnId, generation, reused: false };
           },
         );
