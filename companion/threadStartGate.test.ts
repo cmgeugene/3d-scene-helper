@@ -2,7 +2,10 @@
 
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
-import { createThreadStartGate } from './threadStartGate';
+import {
+  createThreadStartGate,
+  withMissingRolloutRetry,
+} from './threadStartGate';
 import type { JsonRpcNotification } from './jsonRpcPeer';
 
 class FakeRuntime extends EventEmitter {
@@ -31,5 +34,43 @@ describe('createThreadStartGate', () => {
     });
     await expect(pending).resolves.toBeUndefined();
     gate.dispose();
+  });
+});
+
+describe('withMissingRolloutRetry', () => {
+  it('no rollout 오류가 나면 turn/start를 다시 시도한다', async () => {
+    const delays: number[] = [];
+    let attempts = 0;
+    const result = await withMissingRolloutRetry(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) {
+          throw new Error('no rollout for thread id thread-new');
+        }
+        return 'turn-1';
+      },
+      {
+        attempts: 4,
+        delayMs: 25,
+        sleep: async (ms) => {
+          delays.push(ms);
+        },
+      },
+    );
+
+    expect(result).toBe('turn-1');
+    expect(attempts).toBe(3);
+    expect(delays).toEqual([25, 50]);
+  });
+
+  it('rollout과 무관한 오류는 다시 시도하지 않는다', async () => {
+    let attempts = 0;
+    await expect(
+      withMissingRolloutRetry(async () => {
+        attempts += 1;
+        throw new Error('permission denied');
+      }),
+    ).rejects.toThrow('permission denied');
+    expect(attempts).toBe(1);
   });
 });

@@ -9,7 +9,10 @@ import {
   type JsonRpcNotification,
   type JsonRpcServerRequest,
 } from './jsonRpcPeer';
-import { createThreadStartGate } from './threadStartGate';
+import {
+  createThreadStartGate,
+  withMissingRolloutRetry,
+} from './threadStartGate';
 
 const require = createRequire(import.meta.url);
 
@@ -252,13 +255,15 @@ export class CodexAppServerClient extends EventEmitter implements CodexRuntime {
     options: TurnOptions = {},
   ) {
     const response = turnResponseSchema.parse(
-      await this.getPeer().request('turn/start', {
-        threadId,
-        input,
-        ...(options.outputSchema === undefined
-          ? {}
-          : { outputSchema: options.outputSchema }),
-      }),
+      await withMissingRolloutRetry(() =>
+        this.getPeer().request('turn/start', {
+          threadId,
+          input,
+          ...(options.outputSchema === undefined
+            ? {}
+            : { outputSchema: options.outputSchema }),
+        }),
+      ),
     );
     return response.turn.id;
   }

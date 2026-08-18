@@ -64,3 +64,40 @@ export function createThreadStartGate(runtime: {
     },
   };
 }
+
+export function isMissingRolloutError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /no rollout/i.test(message);
+}
+
+export async function withMissingRolloutRetry<T>(
+  operation: () => Promise<T>,
+  options: {
+    attempts?: number;
+    delayMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
+) {
+  const attempts = options.attempts ?? 5;
+  const delayMs = options.delayMs ?? 200;
+  const sleep =
+    options.sleep ??
+    (async (ms: number) => {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, ms);
+      });
+    });
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isMissingRolloutError(error) || attempt === attempts) {
+        throw error;
+      }
+      await sleep(delayMs * attempt);
+    }
+  }
+  throw lastError;
+}
