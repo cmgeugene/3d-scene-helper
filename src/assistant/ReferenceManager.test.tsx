@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type {
@@ -113,6 +113,123 @@ describe('ReferenceManager', () => {
       ),
     );
     expect(await screen.findByText('정민 캐릭터 시트')).toBeVisible();
+  });
+
+  it('Project assets 영역에 이미지를 끌어다 놓으면 같은 확인 폼으로 가져온다', async () => {
+    const user = userEvent.setup();
+    const importReference = vi.fn(async () => characterReference);
+    const client = {
+      listReferences: async () => [],
+      importReference,
+      loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      updateReference: async () => characterReference,
+    };
+    render(
+      <ReferenceManager
+        connection={connection}
+        clientFactory={() => client}
+        createObjectUrl={() => 'blob:dropped'}
+        revokeObjectUrl={() => undefined}
+      />,
+    );
+    const file = new File(['png'], 'alley.png', { type: 'image/png' });
+    const tray = await screen.findByRole('region', { name: 'References' });
+    fireEvent.drop(tray, {
+      dataTransfer: { files: [file], types: ['Files'] },
+    });
+
+    expect(screen.getByLabelText('이름')).toHaveValue('alley');
+    await user.selectOptions(screen.getByLabelText('역할'), 'background');
+    await user.click(screen.getByRole('button', { name: '프로젝트에 추가' }));
+
+    await waitFor(() =>
+      expect(importReference).toHaveBeenCalledWith(file, 'alley', 'background'),
+    );
+  });
+
+  it('이미지가 아닌 파일을 끌어다 놓으면 가져오지 않는다', async () => {
+    const importReference = vi.fn(async () => characterReference);
+    const client = {
+      listReferences: async () => [],
+      importReference,
+      loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      updateReference: async () => characterReference,
+    };
+    render(
+      <ReferenceManager
+        connection={connection}
+        clientFactory={() => client}
+        createObjectUrl={() => 'blob:dropped'}
+        revokeObjectUrl={() => undefined}
+      />,
+    );
+    const tray = await screen.findByRole('region', { name: 'References' });
+    fireEvent.drop(tray, {
+      dataTransfer: {
+        files: [new File(['note'], 'notes.txt', { type: 'text/plain' })],
+        types: ['Files'],
+      },
+    });
+
+    expect(screen.queryByLabelText('이름')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'PNG, JPEG, WebP 이미지만 가져올 수 있습니다.',
+    );
+    expect(importReference).not.toHaveBeenCalled();
+  });
+
+  it('새 장면이나 새 대화 reset token이 바뀌면 선택된 레퍼런스를 해제한다', async () => {
+    const updateReference = vi.fn(async (_id, metadata) => ({
+      ...characterReference,
+      enabled: metadata.enabled ?? false,
+    }));
+    const client = {
+      listReferences: async () => [characterReference],
+      importReference: async () => characterReference,
+      loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      updateReference,
+    };
+    const clientFactory = () => client;
+    const createObjectUrl = () => 'blob:reference-reset';
+    const revokeObjectUrl = () => undefined;
+    const rendered = render(
+      <ReferenceManager
+        connection={connection}
+        clientFactory={clientFactory}
+        createObjectUrl={createObjectUrl}
+        revokeObjectUrl={revokeObjectUrl}
+        selectionResetToken={0}
+      />,
+    );
+
+    const checkbox = await screen.findByRole('checkbox', {
+      name: '정민 캐릭터 시트 생성에 포함',
+    });
+    expect(checkbox).toBeChecked();
+
+    rendered.rerender(
+      <ReferenceManager
+        connection={connection}
+        clientFactory={clientFactory}
+        createObjectUrl={createObjectUrl}
+        revokeObjectUrl={revokeObjectUrl}
+        selectionResetToken={1}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(updateReference).toHaveBeenCalledWith('ref-1', {
+        targetObjectId: null,
+        use: ['face', 'body', 'hair', 'clothing'],
+        exclude: ['pose', 'background', 'text'],
+        enabled: false,
+      }),
+    );
+    expect(
+      screen.getByRole('checkbox', {
+        name: '정민 캐릭터 시트 생성에 포함',
+      }),
+    ).not.toBeChecked();
   });
 
   it('캐릭터 레퍼런스를 마네킹에 연결하고 사용 범위를 저장한다', async () => {

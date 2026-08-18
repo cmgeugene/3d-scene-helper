@@ -2105,6 +2105,12 @@ p {
   background: #0d141f;
 }
 
+.reference-manager--drop-target {
+  border-top-color: #6ea8ff;
+  box-shadow: inset 0 0 0 1px #3d6eb3;
+  background: #122033;
+}
+
 .reference-manager-heading {
   display: flex;
   flex: 0 0 11.5rem;

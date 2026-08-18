@@ -883,6 +883,36 @@ describe('SceneAssistantPanel', () => {
     expect(screen.getByText('장면 대화')).toBeVisible();
   });
 
+  it('새 대화를 시작하면 레퍼런스 선택 초기화 콜백을 호출한다', async () => {
+    sessionStorage.setItem('i2v.scene-assistant.thread.v1', 'thread-existing');
+    const user = userEvent.setup();
+    const onConversationReset = vi.fn();
+    const client: CompanionBrowserClient = {
+      ...conversationMethods,
+      getRuntime: async () => ({
+        state: 'ready',
+        version: 'codex-test',
+        account: { type: 'chatgpt', email: null, planType: 'plus' },
+        requiresOpenaiAuth: true,
+        error: null,
+      }),
+      startThread: async () => 'thread-fresh',
+      subscribe: () => () => undefined,
+    };
+
+    render(
+      <SceneAssistantPanel
+        connection={connection}
+        clientFactory={() => client}
+        onConversationReset={onConversationReset}
+      />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: '새 대화' }));
+
+    await waitFor(() => expect(onConversationReset).toHaveBeenCalledTimes(1));
+  });
+
   it('Codex 승인 요청의 출처·영향을 표시하고 승인과 질문 답변을 명시적으로 보낸다', async () => {
     const user = userEvent.setup();
     const createdAt = '2026-08-04T00:00:00.000Z';

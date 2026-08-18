@@ -20,6 +20,7 @@ interface TopToolbarProps {
   frameExporter: FrameExportHandler | null;
   exportUnavailable?: boolean;
   titleAccessory?: ReactNode;
+  onDocumentReplaced?: () => void;
 }
 
 const GUIDE_OPTIONS: ReadonlyArray<{
@@ -59,6 +60,7 @@ export function TopToolbar({
   frameExporter,
   exportUnavailable = false,
   titleAccessory,
+  onDocumentReplaced,
 }: TopToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportButtonRef = useRef<HTMLButtonElement>(null);
@@ -99,7 +101,10 @@ export function TopToolbar({
           <button
             type="button"
             onClick={() => {
-              if (confirmDocumentReplacement()) newScene();
+              if (confirmDocumentReplacement()) {
+                newScene();
+                onDocumentReplaced?.();
+              }
             }}
           >
             새 장면
@@ -107,7 +112,10 @@ export function TopToolbar({
           <button
             type="button"
             onClick={() => {
-              if (confirmDocumentReplacement()) resetScene();
+              if (confirmDocumentReplacement()) {
+                resetScene();
+                onDocumentReplaced?.();
+              }
             }}
           >
             기본 장면으로 초기화

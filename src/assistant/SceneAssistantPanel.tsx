@@ -110,6 +110,7 @@ interface SceneAssistantPanelProps {
   onApplySpecPatchProposal?: (
     proposal: SpecPatchProposal,
   ) => SpecPatchEvaluation;
+  onConversationReset?: () => void;
 }
 
 interface ConnectedSceneAssistantProps {
@@ -128,6 +129,7 @@ interface ConnectedSceneAssistantProps {
   onApplySpecPatchProposal: (
     proposal: SpecPatchProposal,
   ) => SpecPatchEvaluation;
+  onConversationReset: () => void;
 }
 
 const defaultClientFactory = (connection: CompanionConnection) =>
@@ -159,6 +161,7 @@ function revokeAfterRender(
 }
 const ignoreRefinementModeChange = () => undefined;
 const ignoreRefinementSourceChange = () => undefined;
+const ignoreConversationReset = () => undefined;
 const unavailableSpecPatchApply = (): never => {
   throw new Error('Semantic Scene Spec 변경 적용기가 연결되지 않았습니다.');
 };
@@ -242,6 +245,7 @@ function ConnectedSceneAssistant({
   refinementSource: controlledRefinementSource,
   onRefinementSourceChange,
   onApplySpecPatchProposal,
+  onConversationReset,
 }: ConnectedSceneAssistantProps) {
   const client = useMemo(
     () => clientFactory(connection),
@@ -1374,6 +1378,7 @@ function ConnectedSceneAssistant({
       setConversationDecisionRequired(false);
       setMessages([]);
       changeRefinementSource(null);
+      onConversationReset();
     } catch (reason) {
       setConversationError(
         reason instanceof Error
@@ -1383,7 +1388,12 @@ function ConnectedSceneAssistant({
     } finally {
       setSessionActionInFlight(false);
     }
-  }, [changeRefinementSource, client, sessionActionInFlight]);
+  }, [
+    changeRefinementSource,
+    client,
+    onConversationReset,
+    sessionActionInFlight,
+  ]);
 
   const respondToRuntimeRequest = useCallback(
     async (requestId: string, response: RuntimeRequestResponse) => {
@@ -2153,6 +2163,7 @@ export function SceneAssistantPanel({
   refinementSource,
   onRefinementSourceChange = ignoreRefinementSourceChange,
   onApplySpecPatchProposal = unavailableSpecPatchApply,
+  onConversationReset = ignoreConversationReset,
 }: SceneAssistantPanelProps) {
   if (connection === null) {
     return (
@@ -2190,6 +2201,7 @@ export function SceneAssistantPanel({
       refinementSource={refinementSource}
       onRefinementSourceChange={onRefinementSourceChange}
       onApplySpecPatchProposal={onApplySpecPatchProposal}
+      onConversationReset={onConversationReset}
     />
   );
 }

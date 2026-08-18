@@ -358,6 +358,109 @@ describe('EditorShell', () => {
     expect(screen.getByText(/v1.*generation-selected.*결과/)).toBeVisible();
   });
 
+  it('키프레임 탭을 다녀와도 활성화된 장면 대화와 메시지를 유지하고 이어하기를 다시 묻지 않는다', async () => {
+    const user = userEvent.setup();
+    const startThread = vi.fn(
+      async (threadId?: string) => threadId ?? 'thread-new',
+    );
+    const startConversationTurn = vi.fn(async () => 'turn-next');
+    const client: CompanionBrowserClient = {
+      getRuntime: async () => ({
+        state: 'ready',
+        version: 'codex-test',
+        account: { type: 'chatgpt', email: null, planType: 'plus' },
+        requiresOpenaiAuth: true,
+        error: null,
+      }),
+      getConversationSession: async () => ({
+        version: 1,
+        activeTask: {
+          threadId: 'thread-live',
+          state: 'active',
+          turnCount: 2,
+          lastTurnId: 'turn-saved',
+          lastTurnKind: 'conversation',
+          lastTurnStatus: 'completed',
+          lastUserMessage: '조명을 더 따뜻하게 해줘.',
+          lastAssistantSummary: '조명 변경안을 준비했습니다.',
+          sceneRevision: 3,
+          specRevision: 2,
+          generationIntent: null,
+          createdAt: '2026-08-18T00:00:00.000Z',
+          updatedAt: '2026-08-18T00:01:00.000Z',
+        },
+        archivedTaskCount: 0,
+      }),
+      startThread,
+      startTurn: async () => 'turn-fallback',
+      startConversationTurn,
+      interruptTurn: async () => undefined,
+      listReferences: async () => [],
+      importReference: async () => {
+        throw new Error('not used');
+      },
+      updateReference: async () => {
+        throw new Error('not used');
+      },
+      loadReferenceBlob: async () => new Blob(),
+      createSceneRender: async () => {
+        throw new Error('not used');
+      },
+      loadSceneRenderBlob: async () =>
+        new Blob(['layout'], { type: 'image/png' }),
+      listGenerations: async () => [],
+      startGeneration: async () => {
+        throw new Error('not used');
+      },
+      loadGenerationBlob: async () =>
+        new Blob(['result'], { type: 'image/png' }),
+      subscribe: () => () => undefined,
+    };
+    render(
+      <EditorShell
+        store={createTestStore()}
+        webGLState="available"
+        storage={createMemoryStorage({
+          [RIGHT_PANEL_TAB_STORAGE_KEY]: 'assistant',
+        })}
+        companionConnection={{
+          version: 1,
+          url: 'http://127.0.0.1:61234',
+          token: 'a'.repeat(43),
+        }}
+        assistantClientFactory={() => client}
+        createAssistantObjectUrl={() => 'blob:test'}
+        revokeAssistantObjectUrl={() => undefined}
+      />,
+    );
+
+    const choice = await screen.findByRole('article', {
+      name: '저장된 Codex task 선택',
+    });
+    await user.click(
+      within(choice).getByRole('button', { name: '저장된 task 재개' }),
+    );
+    await user.type(
+      await screen.findByLabelText('장면에 대해 말하기'),
+      '이 조명 그대로 유지해줘.',
+    );
+    await user.click(screen.getByRole('button', { name: '보내기' }));
+    expect(await screen.findByText('이 조명 그대로 유지해줘.')).toBeVisible();
+    expect(screen.getByText('장면 대화')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: '키프레임' }));
+    expect(
+      await screen.findByRole('heading', { name: '키프레임 작업 공간' }),
+    ).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '3D 씬' }));
+
+    expect(
+      screen.queryByRole('article', { name: '저장된 Codex task 선택' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('장면 대화')).toBeVisible();
+    expect(screen.getByText('이 조명 그대로 유지해줘.')).toBeVisible();
+  });
+
   it('pre-apply save 실패 시 live scene, selection, history, dirty와 autosave를 전혀 변경하지 않는다', async () => {
     const user = userEvent.setup();
     const store = createTestStore();

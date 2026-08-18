@@ -216,6 +216,11 @@ export function EditorShell({
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>(() =>
     readRightPanelTab(storage),
   );
+  const [referenceSelectionResetToken, setReferenceSelectionResetToken] =
+    useState(0);
+  const resetReferenceSelection = useCallback(() => {
+    setReferenceSelectionResetToken((current) => current + 1);
+  }, []);
   const [assistantPanelExpanded, setAssistantPanelExpanded] = useState(false);
   const [resizingAssistantPanel, setResizingAssistantPanel] = useState(false);
   const resizeStart = useRef({ pointerX: 0, width: assistantPanelWidth });
@@ -425,6 +430,7 @@ export function EditorShell({
             frameExporter={frameExporter}
             exportUnavailable={runtimeFailure !== null}
             titleAccessory={workspaceModeSwitch}
+            onDocumentReplaced={resetReferenceSelection}
           />
         ) : (
           <header className="top-toolbar keyframe-toolbar">
@@ -435,204 +441,209 @@ export function EditorShell({
             <span>Generation workspace</span>
           </header>
         )}
-        {workspaceMode === 'scene' ? (
-          <div
-            className={`editor-workspace${assistantPanelCollapsed ? ' editor-workspace--assistant-collapsed' : ''}`}
-            style={workspaceStyle}
-          >
-            <aside className="left-panel" aria-label="에셋과 장면">
-              <AssetPanel store={store} />
-              <Outliner store={store} />
-            </aside>
-            <section className="viewport-panel" aria-label="장면 뷰포트">
-              {sceneDocument.generationSource === undefined &&
-              preApplyRecovery === null ? null : (
-                <aside
-                  className="scene-generation-provenance"
+        <div
+          className={`editor-workspace${assistantPanelCollapsed ? ' editor-workspace--assistant-collapsed' : ''}`}
+          hidden={workspaceMode !== 'scene'}
+          style={workspaceStyle}
+        >
+          {workspaceMode === 'scene' ? (
+            <>
+              <aside className="left-panel" aria-label="에셋과 장면">
+                <AssetPanel store={store} />
+                <Outliner store={store} />
+              </aside>
+              <section className="viewport-panel" aria-label="장면 뷰포트">
+                {sceneDocument.generationSource === undefined &&
+                preApplyRecovery === null ? null : (
+                  <aside
+                    className="scene-generation-provenance"
+                    role="status"
+                    aria-label="적용된 generation 출처"
+                  >
+                    {sceneDocument.generationSource === undefined ? null : (
+                      <span>
+                        출처 {sceneDocument.generationSource.generationId} · v
+                        {sceneDocument.generationSource.versionNumber} · fresh
+                      </span>
+                    )}
+                    {preApplyRecovery === null ? null : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          try {
+                            storage.removeItem(PRE_APPLY_RECOVERY_STORAGE_KEY);
+                          } catch {
+                            setRecoveryError(
+                              '적용 전 복구 지점을 지우지 못해 현재 씬을 변경하지 않았습니다.',
+                            );
+                            return;
+                          }
+                          const recovery = preApplyRecovery;
+                          store
+                            .getState()
+                            .replaceDocument(recovery.document, false);
+                          store
+                            .getState()
+                            .selectObject(recovery.selectedObjectId);
+                          setPreApplyRecovery(null);
+                          setRecoveryError(null);
+                          setRefinementSource(null);
+                        }}
+                      >
+                        적용 전 씬 복구
+                      </button>
+                    )}
+                    {recoveryError === null ? null : (
+                      <span role="alert">{recoveryError}</span>
+                    )}
+                  </aside>
+                )}
+                {canvasEnabled && webGLState === 'available' ? (
+                  <SceneErrorBoundary onError={handleViewportError}>
+                    <Suspense
+                      fallback={<ViewportPlaceholder webGLState={webGLState} />}
+                    >
+                      <SceneViewport
+                        store={store}
+                        onExportReady={handleExportReady}
+                        onRuntimeFailure={handleRuntimeFailure}
+                      />
+                    </Suspense>
+                  </SceneErrorBoundary>
+                ) : (
+                  <ViewportPlaceholder webGLState={webGLState} />
+                )}
+                {runtimeFailure?.kind !== 'context-loss' ? null : (
+                  <div className="viewport-placeholder" role="alert">
+                    <p className="eyebrow">WebGL 연결 오류</p>
+                    <h2>장면 데이터는 안전합니다</h2>
+                    <p>{runtimeFailure.message}</p>
+                  </div>
+                )}
+                <p
+                  className={`webgl-status webgl-status--${effectiveWebGLState}`}
                   role="status"
-                  aria-label="적용된 generation 출처"
+                  data-webgl-state={effectiveWebGLState}
                 >
-                  {sceneDocument.generationSource === undefined ? null : (
-                    <span>
-                      출처 {sceneDocument.generationSource.generationId} · v
-                      {sceneDocument.generationSource.versionNumber} · fresh
-                    </span>
-                  )}
-                  {preApplyRecovery === null ? null : (
+                  {WEBGL_MESSAGES[effectiveWebGLState]}
+                </p>
+              </section>
+            </>
+          ) : null}
+          <div
+            className="assistant-panel-resizer"
+            role="separator"
+            aria-label="우측 패널 너비 조절"
+            aria-orientation="vertical"
+            aria-valuemin={ASSISTANT_PANEL_MIN_WIDTH}
+            aria-valuemax={maxAssistantPanelWidth()}
+            aria-valuenow={assistantPanelWidth}
+            tabIndex={assistantPanelCollapsed ? -1 : 0}
+            onPointerDown={beginAssistantPanelResize}
+            onKeyDown={resizeAssistantPanelWithKeyboard}
+          />
+          <aside className="inspector-panel" aria-label="속성">
+            {assistantPanelCollapsed ? (
+              <div className="assistant-dock-collapsed">
+                <button
+                  type="button"
+                  aria-label="우측 패널 펼치기"
+                  title="우측 패널 펼치기"
+                  onClick={() => setAssistantPanelCollapsed(false)}
+                >
+                  ‹
+                </button>
+                <span>Assistant</span>
+              </div>
+            ) : (
+              <>
+                <div className="assistant-dock-toolbar">
+                  <span>우측 패널 · {assistantPanelWidth}px</span>
+                  <div>
                     <button
                       type="button"
-                      onClick={() => {
-                        try {
-                          storage.removeItem(PRE_APPLY_RECOVERY_STORAGE_KEY);
-                        } catch {
-                          setRecoveryError(
-                            '적용 전 복구 지점을 지우지 못해 현재 씬을 변경하지 않았습니다.',
-                          );
-                          return;
-                        }
-                        const recovery = preApplyRecovery;
-                        store
-                          .getState()
-                          .replaceDocument(recovery.document, false);
-                        store
-                          .getState()
-                          .selectObject(recovery.selectedObjectId);
-                        setPreApplyRecovery(null);
-                        setRecoveryError(null);
-                        setRefinementSource(null);
-                      }}
+                      onClick={toggleAssistantPanelExpanded}
                     >
-                      적용 전 씬 복구
+                      {assistantPanelExpanded ? '이전 너비' : '넓게'}
                     </button>
-                  )}
-                  {recoveryError === null ? null : (
-                    <span role="alert">{recoveryError}</span>
-                  )}
-                </aside>
-              )}
-              {canvasEnabled && webGLState === 'available' ? (
-                <SceneErrorBoundary onError={handleViewportError}>
-                  <Suspense
-                    fallback={<ViewportPlaceholder webGLState={webGLState} />}
-                  >
-                    <SceneViewport
-                      store={store}
-                      onExportReady={handleExportReady}
-                      onRuntimeFailure={handleRuntimeFailure}
-                    />
-                  </Suspense>
-                </SceneErrorBoundary>
-              ) : (
-                <ViewportPlaceholder webGLState={webGLState} />
-              )}
-              {runtimeFailure?.kind !== 'context-loss' ? null : (
-                <div className="viewport-placeholder" role="alert">
-                  <p className="eyebrow">WebGL 연결 오류</p>
-                  <h2>장면 데이터는 안전합니다</h2>
-                  <p>{runtimeFailure.message}</p>
+                    <button
+                      type="button"
+                      onClick={() => setAssistantPanelCollapsed(true)}
+                    >
+                      접기
+                    </button>
+                  </div>
                 </div>
-              )}
-              <p
-                className={`webgl-status webgl-status--${effectiveWebGLState}`}
-                role="status"
-                data-webgl-state={effectiveWebGLState}
-              >
-                {WEBGL_MESSAGES[effectiveWebGLState]}
-              </p>
-            </section>
-            <div
-              className="assistant-panel-resizer"
-              role="separator"
-              aria-label="우측 패널 너비 조절"
-              aria-orientation="vertical"
-              aria-valuemin={ASSISTANT_PANEL_MIN_WIDTH}
-              aria-valuemax={maxAssistantPanelWidth()}
-              aria-valuenow={assistantPanelWidth}
-              tabIndex={assistantPanelCollapsed ? -1 : 0}
-              onPointerDown={beginAssistantPanelResize}
-              onKeyDown={resizeAssistantPanelWithKeyboard}
-            />
-            <aside className="inspector-panel" aria-label="속성">
-              {assistantPanelCollapsed ? (
-                <div className="assistant-dock-collapsed">
+                <div
+                  className="right-panel-tabs"
+                  role="tablist"
+                  aria-label="우측 패널"
+                >
                   <button
                     type="button"
-                    aria-label="우측 패널 펼치기"
-                    title="우측 패널 펼치기"
-                    onClick={() => setAssistantPanelCollapsed(false)}
+                    role="tab"
+                    id="right-panel-tab-inspector"
+                    aria-selected={rightPanelTab === 'inspector'}
+                    aria-controls="right-panel-inspector"
+                    onClick={() => setRightPanelTab('inspector')}
                   >
-                    ‹
+                    속성
                   </button>
-                  <span>Assistant</span>
+                  <button
+                    type="button"
+                    role="tab"
+                    id="right-panel-tab-assistant"
+                    aria-selected={rightPanelTab === 'assistant'}
+                    aria-controls="right-panel-assistant"
+                    onClick={() => setRightPanelTab('assistant')}
+                  >
+                    Assistant
+                  </button>
                 </div>
-              ) : (
-                <>
-                  <div className="assistant-dock-toolbar">
-                    <span>우측 패널 · {assistantPanelWidth}px</span>
-                    <div>
-                      <button
-                        type="button"
-                        onClick={toggleAssistantPanelExpanded}
-                      >
-                        {assistantPanelExpanded ? '이전 너비' : '넓게'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAssistantPanelCollapsed(true)}
-                      >
-                        접기
-                      </button>
-                    </div>
-                  </div>
-                  <div
-                    className="right-panel-tabs"
-                    role="tablist"
-                    aria-label="우측 패널"
-                  >
-                    <button
-                      type="button"
-                      role="tab"
-                      id="right-panel-tab-inspector"
-                      aria-selected={rightPanelTab === 'inspector'}
-                      aria-controls="right-panel-inspector"
-                      onClick={() => setRightPanelTab('inspector')}
-                    >
-                      속성
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      id="right-panel-tab-assistant"
-                      aria-selected={rightPanelTab === 'assistant'}
-                      aria-controls="right-panel-assistant"
-                      onClick={() => setRightPanelTab('assistant')}
-                    >
-                      Assistant
-                    </button>
-                  </div>
-                  <div
-                    id="right-panel-inspector"
-                    role="tabpanel"
-                    aria-labelledby="right-panel-tab-inspector"
-                    hidden={rightPanelTab !== 'inspector'}
-                  >
-                    <Inspector store={store} />
-                  </div>
-                  <div
-                    id="right-panel-assistant"
-                    className="right-panel-assistant"
-                    role="tabpanel"
-                    aria-labelledby="right-panel-tab-assistant"
-                    hidden={rightPanelTab !== 'assistant'}
-                  >
-                    <SceneAssistantPanel
-                      connection={companionConnection}
-                      connectionError={companionConnectionError}
-                      onDisconnect={onDisconnectCompanion}
-                      getSceneContext={() => store.getState().document}
-                      getSelectedReferences={getSelectedReferences}
-                      captureLayout={
-                        frameExporter === null ? null : captureAssistantLayout
-                      }
-                      onRefinementModeChange={(active) => {
-                        setRefinementModeActive(active);
-                        if (active) setRightPanelTab('assistant');
-                      }}
-                      refinementSource={refinementSource}
-                      onRefinementSourceChange={setRefinementSource}
-                      onApplySpecPatchProposal={(proposal) =>
-                        store.getState().applySpecPatchProposal(proposal)
-                      }
-                      clientFactory={assistantClientFactory}
-                      createObjectUrl={createAssistantObjectUrl}
-                      revokeObjectUrl={revokeAssistantObjectUrl}
-                    />
-                  </div>
-                </>
-              )}
-            </aside>
-          </div>
-        ) : (
+                <div
+                  id="right-panel-inspector"
+                  role="tabpanel"
+                  aria-labelledby="right-panel-tab-inspector"
+                  hidden={rightPanelTab !== 'inspector'}
+                >
+                  <Inspector store={store} />
+                </div>
+                <div
+                  id="right-panel-assistant"
+                  className="right-panel-assistant"
+                  role="tabpanel"
+                  aria-labelledby="right-panel-tab-assistant"
+                  hidden={rightPanelTab !== 'assistant'}
+                >
+                  <SceneAssistantPanel
+                    connection={companionConnection}
+                    connectionError={companionConnectionError}
+                    onDisconnect={onDisconnectCompanion}
+                    getSceneContext={() => store.getState().document}
+                    getSelectedReferences={getSelectedReferences}
+                    captureLayout={
+                      frameExporter === null ? null : captureAssistantLayout
+                    }
+                    onRefinementModeChange={(active) => {
+                      setRefinementModeActive(active);
+                      if (active) setRightPanelTab('assistant');
+                    }}
+                    refinementSource={refinementSource}
+                    onRefinementSourceChange={setRefinementSource}
+                    onConversationReset={resetReferenceSelection}
+                    onApplySpecPatchProposal={(proposal) =>
+                      store.getState().applySpecPatchProposal(proposal)
+                    }
+                    clientFactory={assistantClientFactory}
+                    createObjectUrl={createAssistantObjectUrl}
+                    revokeObjectUrl={revokeAssistantObjectUrl}
+                  />
+                </div>
+              </>
+            )}
+          </aside>
+        </div>
+        {workspaceMode === 'keyframe' ? (
           <KeyframeWorkspace
             connection={companionConnection}
             storage={storage}
@@ -675,7 +686,7 @@ export function EditorShell({
               setWorkspaceMode('scene');
             }}
           />
-        )}
+        ) : null}
         {workspaceMode === 'scene' ? (
           <ReferenceManager
             connection={companionConnection}
@@ -683,6 +694,7 @@ export function EditorShell({
             maximumSelected={maximumSelectedReferences}
             reservedInputImages={reservedGenerationImages}
             onSelectionChange={setSelectedReferences}
+            selectionResetToken={referenceSelectionResetToken}
             collapsed={referenceTrayCollapsed}
             onToggleCollapsed={() =>
               setReferenceTrayCollapsed((current) => !current)

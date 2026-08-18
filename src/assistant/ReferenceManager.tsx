@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type DragEvent,
   type FormEvent,
 } from 'react';
 import type { CompanionConnection } from './companionConnection';
@@ -41,6 +42,7 @@ interface ReferenceManagerProps {
   onSelectionChange?: (references: ReferenceArtifact[]) => void;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  selectionResetToken?: number;
 }
 
 interface ConnectedReferenceManagerProps {
@@ -54,6 +56,7 @@ interface ConnectedReferenceManagerProps {
   onSelectionChange: (references: ReferenceArtifact[]) => void;
   collapsed: boolean;
   onToggleCollapsed?: () => void;
+  selectionResetToken: number;
 }
 
 interface ReferenceCard extends ReferenceArtifact {
@@ -71,6 +74,23 @@ const defaultClientFactory = (connection: CompanionConnection) =>
   new CompanionClient(connection);
 const defaultCreateObjectUrl = (blob: Blob) => URL.createObjectURL(blob);
 const defaultRevokeObjectUrl = (url: string) => URL.revokeObjectURL(url);
+const ACCEPTED_REFERENCE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+]);
+const MAX_REFERENCE_BYTES = 25 * 1024 * 1024;
+
+function rejectReferenceFile(file: File) {
+  if (!ACCEPTED_REFERENCE_TYPES.has(file.type)) {
+    return 'PNG, JPEG, WebP 이미지만 가져올 수 있습니다.';
+  }
+  if (file.size > MAX_REFERENCE_BYTES) {
+    return '레퍼런스 이미지는 25MB 이하여야 합니다.';
+  }
+  return null;
+}
+
 const ignoreSelectionChange = () => undefined;
 
 function parseScopeList(value: string) {
@@ -126,6 +146,7 @@ function ConnectedReferenceManager({
   onSelectionChange,
   collapsed,
   onToggleCollapsed,
+  selectionResetToken,
 }: ConnectedReferenceManagerProps) {
   const client = useMemo(
     () => clientFactory(connection),
@@ -143,8 +164,10 @@ function ConnectedReferenceManager({
   const [excludeScope, setExcludeScope] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
   const objectUrls = useRef(new Set<string>());
   const inputRef = useRef<HTMLInputElement>(null);
+  const referencesRef = useRef(references);
   const selectedCount = references.filter(({ enabled }) => enabled).length;
   const selectionAtLimit = selectedCount >= maximumSelected;
 
@@ -199,18 +222,56 @@ function ConnectedReferenceManager({
     );
   }, [onSelectionChange, references]);
 
-  const chooseFile = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    if (file === null) return;
-    if (file.size > 25 * 1024 * 1024) {
-      setError('레퍼런스 이미지는 25MB 이하여야 합니다.');
-      event.target.value = '';
-      return;
+  useEffect(() => {
+    referencesRef.current = references;
+  }, [references]);
+
+  const queueImportFile = useCallback((file: File) => {
+    const rejection = rejectReferenceFile(file);
+    if (rejection !== null) {
+      setError(rejection);
+      return false;
     }
     setPendingFile(file);
     setPendingName(defaultReferenceName(file));
     setError(null);
+    return true;
   }, []);
+
+  const chooseFile = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0] ?? null;
+      if (file === null) return;
+      if (!queueImportFile(file)) {
+        event.target.value = '';
+      }
+    },
+    [queueImportFile],
+  );
+
+  const handleDragOver = useCallback((event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setDragActive(true);
+  }, []);
+
+  const handleDragLeave = useCallback((event: DragEvent<HTMLElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+    setDragActive(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (event: DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      setDragActive(false);
+      const file = event.dataTransfer.files[0];
+      if (file === undefined) return;
+      queueImportFile(file);
+    },
+    [queueImportFile],
+  );
 
   const cancelImport = useCallback(() => {
     setPendingFile(null);
@@ -264,6 +325,43 @@ function ConnectedReferenceManager({
       ),
     );
   }, []);
+
+  useEffect(() => {
+    if (selectionResetToken === 0) return;
+    const enabled = referencesRef.current.filter(({ enabled }) => enabled);
+    if (enabled.length === 0) return;
+    setReferences((current) =>
+      current.map((item) =>
+        item.enabled ? { ...item, enabled: false } : item,
+      ),
+    );
+    void Promise.all(
+      enabled.map(async (reference) => {
+        try {
+          const updated = await client.updateReference(reference.id, {
+            targetObjectId: reference.targetObjectId,
+            use: reference.use,
+            exclude: reference.exclude,
+            enabled: false,
+          });
+          updateCard(updated);
+        } catch (reason) {
+          setReferences((current) =>
+            current.map((item) =>
+              item.id === reference.id
+                ? { ...item, enabled: reference.enabled }
+                : item,
+            ),
+          );
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : '레퍼런스 선택을 초기화하지 못했습니다.',
+          );
+        }
+      }),
+    );
+  }, [client, selectionResetToken, updateCard]);
 
   const toggleSelection = useCallback(
     async (reference: ReferenceCard) => {
@@ -361,8 +459,12 @@ function ConnectedReferenceManager({
 
   return (
     <section
-      className={`reference-manager${collapsed ? ' reference-manager--collapsed' : ''}`}
+      className={`reference-manager${collapsed ? ' reference-manager--collapsed' : ''}${dragActive ? ' reference-manager--drop-target' : ''}`}
       aria-labelledby="references-title"
+      onDragEnter={handleDragOver}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       <div className="reference-manager-heading">
         <div>
@@ -500,7 +602,8 @@ function ConnectedReferenceManager({
           {loading ? <p className="reference-empty">불러오는 중…</p> : null}
           {!loading && references.length === 0 ? (
             <p className="reference-empty">
-              배경, 캐릭터, 레이아웃 또는 스타일 이미지를 추가하세요.
+              이미지를 끌어다 놓거나 가져오기로 배경, 캐릭터, 레이아웃, 스타일
+              이미지를 추가하세요.
             </p>
           ) : null}
           {references.map((reference) => (
@@ -563,6 +666,7 @@ export function ReferenceManager({
   onSelectionChange = ignoreSelectionChange,
   collapsed = false,
   onToggleCollapsed,
+  selectionResetToken = 0,
 }: ReferenceManagerProps) {
   useEffect(() => {
     if (connection === null) onSelectionChange([]);
@@ -606,6 +710,7 @@ export function ReferenceManager({
       onSelectionChange={onSelectionChange}
       collapsed={collapsed}
       onToggleCollapsed={onToggleCollapsed}
+      selectionResetToken={selectionResetToken}
     />
   );
 }
