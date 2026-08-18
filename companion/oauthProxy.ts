@@ -4,7 +4,9 @@ import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import {
+  DEFAULT_OAUTH_IMAGE_MODEL,
   DEFAULT_OAUTH_PROXY_PORT,
+  OAUTH_IMAGE_MODELS,
   filterOAuthImageModels,
   parseOAuthReadyUrl,
 } from './oauthImageProvider';
@@ -64,14 +66,13 @@ function findAvailablePort(startPort: number) {
 
 async function listOAuthModels(baseUrl: string) {
   const response = await fetch(`${baseUrl}/v1/models`);
-  if (!response.ok)
-    return [...filterOAuthImageModels(['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'])];
+  if (!response.ok) return [...OAUTH_IMAGE_MODELS];
   const body = (await response.json()) as { data?: Array<{ id?: string }> };
   const ids = (body.data ?? [])
     .map((item) => item.id)
     .filter((id): id is string => typeof id === 'string');
   const filtered = filterOAuthImageModels(ids);
-  return filtered.length > 0 ? filtered : ['gpt-5.4-mini'];
+  return filtered.length > 0 ? filtered : [DEFAULT_OAUTH_IMAGE_MODEL];
 }
 
 export async function startManagedOAuthProxy(options: {

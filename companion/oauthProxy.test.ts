@@ -22,13 +22,15 @@ describe('oauth proxy helpers', () => {
     expect(
       filterOAuthImageModels([
         'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
         'gpt-5.5',
         'gpt-5.4',
         'gpt-5.4-mini',
         'gpt-5.3-codex-spark',
         'codex-auto-review',
       ]),
-    ).toEqual(['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini']);
+    ).toEqual(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini']);
     expect(OAUTH_IMAGE_MODELS).toContain(DEFAULT_OAUTH_IMAGE_MODEL);
     expect(DEFAULT_OAUTH_IMAGE_QUALITY).toBe('medium');
   });
