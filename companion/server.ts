@@ -698,7 +698,7 @@ export async function startCompanionServer(
     if (request.method === 'OPTIONS') {
       response.writeHead(204, {
         'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-        'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
         'Access-Control-Max-Age': '600',
       });
       response.end();

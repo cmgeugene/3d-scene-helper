@@ -969,6 +969,24 @@ describe('Companion loopback API', () => {
     expect(missingResponse.status).toBe(404);
   });
 
+  it('레퍼런스 DELETE preflight가 CORS에서 허용된다', async () => {
+    const { server } = await createServer();
+    const preflight = await fetch(`${server.url}/api/references/ref_example`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://127.0.0.1:5173',
+        'Access-Control-Request-Method': 'DELETE',
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe(
+      'http://127.0.0.1:5173',
+    );
+    expect(preflight.headers.get('access-control-allow-methods')).toMatch(
+      /\bDELETE\b/,
+    );
+  });
+
   it('3D 구도와 imagegen 결과를 생성 기록으로 보관한다', async () => {
     const { projectRoot, runtime, server } = await createServer();
     const headers = {
