@@ -597,7 +597,6 @@ function ConnectedSceneAssistant({
             conversationActivatedRef.current &&
             threadIdRef.current === activeTask.threadId
           ) {
-            threadReadyRef.current = false;
             setThreadId(activeTask.threadId);
             setConversationDecisionRequired(false);
             return;

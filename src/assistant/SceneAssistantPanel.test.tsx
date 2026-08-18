@@ -886,6 +886,95 @@ describe('SceneAssistantPanel', () => {
     expect(screen.getByText('장면 대화')).toBeVisible();
   });
 
+  it('새 thread 생성 뒤 같은 session hydration이 와도 첫 메시지에서 resume하지 않는다', async () => {
+    sessionStorage.setItem('i2v.scene-assistant.thread.v1', 'thread-existing');
+    const user = userEvent.setup();
+    let resolveSession!: (
+      value: Awaited<
+        ReturnType<
+          NonNullable<CompanionBrowserClient['getConversationSession']>
+        >
+      >,
+    ) => void;
+    const session = new Promise<
+      Awaited<
+        ReturnType<
+          NonNullable<CompanionBrowserClient['getConversationSession']>
+        >
+      >
+    >((resolve) => {
+      resolveSession = resolve;
+    });
+    const startThread = vi.fn(
+      async (threadId?: string) => threadId ?? 'thread-fresh',
+    );
+    const startConversationTurn = vi.fn(async () => 'turn-fresh');
+    const client: CompanionBrowserClient = {
+      ...conversationMethods,
+      getRuntime: async () => ({
+        state: 'ready',
+        version: 'codex-test',
+        account: { type: 'chatgpt', email: null, planType: 'plus' },
+        requiresOpenaiAuth: true,
+        error: null,
+      }),
+      getConversationSession: async () => session,
+      startThread,
+      startConversationTurn,
+      subscribe: () => () => undefined,
+    };
+
+    render(
+      <SceneAssistantPanel
+        connection={connection}
+        clientFactory={() => client}
+      />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: '새 대화' }));
+    await waitFor(() => expect(startThread).toHaveBeenCalledTimes(1));
+    expect(startThread).toHaveBeenLastCalledWith();
+
+    resolveSession({
+      version: 1,
+      activeTask: {
+        threadId: 'thread-fresh',
+        state: 'active',
+        turnCount: 0,
+        lastTurnId: null,
+        lastTurnKind: null,
+        lastTurnStatus: null,
+        lastUserMessage: null,
+        lastAssistantSummary: null,
+        sceneRevision: null,
+        specRevision: null,
+        generationIntent: null,
+        createdAt: '2026-08-19T00:00:00.000Z',
+        updatedAt: '2026-08-19T00:00:00.000Z',
+      },
+      archivedTaskCount: 0,
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByText('프로젝트의 저장된 Codex task를 확인하고 있습니다.'),
+      ).not.toBeInTheDocument(),
+    );
+
+    await user.type(
+      screen.getByLabelText('장면에 대해 말하기'),
+      '첫 메시지야.',
+    );
+    await user.click(screen.getByRole('button', { name: '보내기' }));
+
+    expect(startThread).toHaveBeenCalledTimes(1);
+    expect(startConversationTurn).toHaveBeenCalledWith(
+      'thread-fresh',
+      expect.stringContaining('첫 메시지야.'),
+      [],
+      expect.objectContaining({ userMessage: '첫 메시지야.' }),
+    );
+  });
+
   it('새 대화를 시작하면 레퍼런스 선택 초기화 콜백을 호출한다', async () => {
     sessionStorage.setItem('i2v.scene-assistant.thread.v1', 'thread-existing');
     const user = userEvent.setup();
