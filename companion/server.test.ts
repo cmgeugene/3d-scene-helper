@@ -53,7 +53,13 @@ class FakeRuntime extends EventEmitter implements CodexRuntime {
   async refreshAccount() {
     return this.status;
   }
-  readonly startThread = vi.fn(async () => 'thread_1');
+  readonly startThread = vi.fn(async () => {
+    this.emit('notification', {
+      method: 'thread/started',
+      params: { thread: { id: 'thread_1' } },
+    });
+    return 'thread_1';
+  });
   readonly resumeThread = vi.fn(async (threadId: string) => threadId);
   readonly respondServerRequest = vi.fn();
   readonly rejectServerRequest = vi.fn();
@@ -348,6 +354,37 @@ describe('Companion loopback API', () => {
       'thread_1',
       expect.any(String),
     );
+  });
+
+  it('새 thread는 thread/started 전에는 대화를 시작하지 않는다', async () => {
+    const { runtime, server } = await createServer();
+    runtime.startThread.mockImplementation(async () => 'thread_1');
+    const headers = {
+      Authorization: 'Bearer test-token',
+      'Content-Type': 'application/json',
+    };
+    const pending = fetch(`${server.url}/api/threads`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ mode: 'new' }),
+    });
+    const premature = await Promise.race([
+      pending.then(() => 'resolved' as const),
+      new Promise<'pending'>((resolve) => {
+        setTimeout(() => resolve('pending'), 40);
+      }),
+    ]);
+    expect(premature).toBe('pending');
+
+    runtime.emit('notification', {
+      method: 'thread/started',
+      params: { thread: { id: 'thread_1' } },
+    });
+    const started = await pending;
+    expect(started.status).toBe(200);
+    await expect(started.json()).resolves.toMatchObject({
+      threadId: 'thread_1',
+    });
   });
 
   it('OAuth 생성은 실제 imagegen 스킬 prompt를 최종 전달하고 task를 completed로 종료한다', async () => {

@@ -9,6 +9,7 @@ import {
   type JsonRpcNotification,
   type JsonRpcServerRequest,
 } from './jsonRpcPeer';
+import { createThreadStartGate } from './threadStartGate';
 
 const require = createRequire(import.meta.url);
 
@@ -210,21 +211,27 @@ export class CodexAppServerClient extends EventEmitter implements CodexRuntime {
   }
 
   async startThread(projectRoot: string, options: ThreadStartOptions = {}) {
-    const response = threadResponseSchema.parse(
-      await this.getPeer().request('thread/start', {
-        cwd: path.resolve(projectRoot),
-        approvalPolicy: options.approvalPolicy ?? 'on-request',
-        sandbox: options.sandbox ?? 'read-only',
-        personality: 'pragmatic',
-        ...(options.ephemeral === undefined
-          ? {}
-          : { ephemeral: options.ephemeral }),
-        ...(options.threadSource === undefined
-          ? {}
-          : { threadSource: options.threadSource }),
-      }),
-    );
-    return response.thread.id;
+    const gate = createThreadStartGate(this);
+    try {
+      const response = threadResponseSchema.parse(
+        await this.getPeer().request('thread/start', {
+          cwd: path.resolve(projectRoot),
+          approvalPolicy: options.approvalPolicy ?? 'on-request',
+          sandbox: options.sandbox ?? 'read-only',
+          personality: 'pragmatic',
+          ...(options.ephemeral === undefined
+            ? {}
+            : { ephemeral: options.ephemeral }),
+          ...(options.threadSource === undefined
+            ? {}
+            : { threadSource: options.threadSource }),
+        }),
+      );
+      await gate.wait(response.thread.id);
+      return response.thread.id;
+    } finally {
+      gate.dispose();
+    }
   }
 
   async resumeThread(threadId: string, projectRoot: string) {

@@ -6,6 +6,7 @@ import {
 } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { z } from 'zod';
+import { createThreadStartGate } from './threadStartGate';
 import type {
   AppServerStatus,
   CodexRuntime,
@@ -325,6 +326,17 @@ ${body.userMessage}
 
 [현재 SceneDocument]
 ${JSON.stringify(body.sceneDocument)}`;
+}
+
+async function startFreshThread(runtime: CodexRuntime, projectRoot: string) {
+  const gate = createThreadStartGate(runtime);
+  try {
+    const threadId = await runtime.startThread(projectRoot);
+    await gate.wait(threadId);
+    return threadId;
+  } finally {
+    gate.dispose();
+  }
 }
 
 export async function startCompanionServer(
@@ -1308,7 +1320,7 @@ export async function startCompanionServer(
           body.mode ?? (body.threadId === undefined ? 'new' : 'resume');
         const threadId =
           mode === 'new'
-            ? await options.runtime.startThread(options.projectRoot)
+            ? await startFreshThread(options.runtime, options.projectRoot)
             : await options.runtime.resumeThread(
                 body.threadId!,
                 options.projectRoot,
