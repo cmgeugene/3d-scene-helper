@@ -923,6 +923,52 @@ describe('Companion loopback API', () => {
     ]);
   });
 
+  it('레퍼런스를 삭제하면 목록과 content API에서 제거한다', async () => {
+    const { server } = await createServer();
+    const importedResponse = await fetch(
+      `${server.url}/api/references?name=${encodeURIComponent('삭제할 배경')}&kind=background&fileName=alley.png`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-token',
+          'Content-Type': 'image/png',
+        },
+        body: onePixelPng,
+      },
+    );
+    const imported = (await importedResponse.json()) as {
+      reference: { id: string };
+    };
+
+    const deletedResponse = await fetch(
+      `${server.url}/api/references/${imported.reference.id}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer test-token' },
+      },
+    );
+    expect(deletedResponse.status).toBe(200);
+    await expect(deletedResponse.json()).resolves.toEqual({
+      deleted: imported.reference.id,
+    });
+
+    const listResponse = await fetch(`${server.url}/api/references`, {
+      headers: { Authorization: 'Bearer test-token' },
+    });
+    await expect(listResponse.json()).resolves.toMatchObject({
+      references: [],
+    });
+
+    const missingResponse = await fetch(
+      `${server.url}/api/references/${imported.reference.id}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer test-token' },
+      },
+    );
+    expect(missingResponse.status).toBe(404);
+  });
+
   it('3D 구도와 imagegen 결과를 생성 기록으로 보관한다', async () => {
     const { projectRoot, runtime, server } = await createServer();
     const headers = {

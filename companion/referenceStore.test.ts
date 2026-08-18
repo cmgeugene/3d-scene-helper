@@ -146,4 +146,40 @@ describe('ReferenceStore', () => {
       }),
     ]);
   });
+
+  it('레퍼런스를 삭제하면 manifest와 파일을 제거하고 다시 찾을 수 없게 한다', async () => {
+    const { root, store } = await createStore();
+    const imported = await store.importReference({
+      name: '정민 캐릭터 시트',
+      kind: 'character',
+      originalFileName: 'character.png',
+      data: onePixelPng,
+    });
+    const kept = await store.importReference({
+      name: '골목 배경',
+      kind: 'background',
+      originalFileName: 'alley.png',
+      data: onePixelPng,
+    });
+    const manifest = JSON.parse(
+      await readFile(path.join(root, 'references.json'), 'utf8'),
+    ) as { references: Array<{ id: string; assetPath: string }> };
+    const deletedAsset = path.join(
+      root,
+      'assets',
+      manifest.references.find(({ id }) => id === imported.id)!.assetPath,
+    );
+
+    await expect(store.deleteReference(imported.id)).resolves.toEqual({
+      id: imported.id,
+    });
+    await expect(store.list()).resolves.toEqual([kept]);
+    await expect(readFile(deletedAsset)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(store.deleteReference(imported.id)).rejects.toThrow(
+      '레퍼런스를 찾을 수 없습니다',
+    );
+    await expect(store.list()).resolves.toEqual([kept]);
+  });
 });

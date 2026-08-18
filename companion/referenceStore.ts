@@ -233,6 +233,17 @@ export class ReferenceStore {
     return operation;
   }
 
+  deleteReference(referenceId: string) {
+    const operation = this.mutationQueue.then(() =>
+      this.deleteReferenceInternal(referenceId),
+    );
+    this.mutationQueue = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
   async resolveReferenceAttachments(referenceIds: string[]) {
     const requestedIds = [...new Set(referenceIds)];
     const requested = new Set(requestedIds);
@@ -348,6 +359,26 @@ export class ReferenceStore {
     references[referenceIndex] = updated;
     await this.writeManifest({ version: 1, references });
     return toPublicReference(updated);
+  }
+
+  private async deleteReferenceInternal(referenceId: string) {
+    const manifest = await this.readManifest();
+    const reference = manifest.references.find(({ id }) => id === referenceId);
+    if (reference === undefined) {
+      throw new ReferenceNotFoundError('레퍼런스를 찾을 수 없습니다.');
+    }
+    const filePath = await resolveProjectArtifact(
+      this.projectRoot,
+      reference.assetPath,
+    );
+    await this.writeManifest({
+      version: 1,
+      references: manifest.references.filter(({ id }) => id !== referenceId),
+    });
+    await unlink(filePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+    return { id: referenceId };
   }
 
   private async readManifest(): Promise<ReferenceManifest> {

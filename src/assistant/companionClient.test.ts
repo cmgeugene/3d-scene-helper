@@ -377,6 +377,9 @@ describe('CompanionClient', () => {
           }),
         );
       }
+      if (init?.method === 'DELETE') {
+        return new Response(JSON.stringify({ deleted: 'ref-1' }));
+      }
       return new Response(new Uint8Array([1, 2, 3]), {
         headers: { 'Content-Type': 'image/png' },
       });
@@ -398,6 +401,7 @@ describe('CompanionClient', () => {
         enabled: false,
       }),
     ).resolves.toMatchObject({ enabled: false });
+    await expect(client.deleteReference('ref-1')).resolves.toBe('ref-1');
     await expect(client.loadReferenceBlob('ref-1')).resolves.toMatchObject({
       type: 'image/png',
       size: 3,
@@ -428,6 +432,12 @@ describe('CompanionClient', () => {
       }),
     });
     expect(fetchCalls[3]).toMatchObject({
+      input: 'http://127.0.0.1:61234/api/references/ref-1',
+      init: expect.objectContaining({
+        method: 'DELETE',
+      }),
+    });
+    expect(fetchCalls[4]).toMatchObject({
       input: 'http://127.0.0.1:61234/api/references/ref-1/content',
       init: {
         headers: { Authorization: `Bearer ${connection.token}` },

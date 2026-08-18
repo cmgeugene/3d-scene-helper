@@ -13,6 +13,10 @@ const connection = {
   token: 'a'.repeat(43),
 };
 
+const unusedDelete = async () => {
+  throw new Error('not used');
+};
+
 const characterReference: ReferenceArtifact = {
   id: 'ref-1',
   name: '정민 캐릭터 시트',
@@ -46,6 +50,7 @@ describe('ReferenceManager', () => {
       listReferences: async () => [characterReference],
       importReference: async () => characterReference,
       loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference: unusedDelete,
       updateReference: async () => ({ ...characterReference, enabled: false }),
     };
     const rendered = render(
@@ -86,6 +91,7 @@ describe('ReferenceManager', () => {
       listReferences: async () => [],
       importReference,
       loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference: unusedDelete,
       updateReference: async () => characterReference,
     };
     render(
@@ -122,6 +128,7 @@ describe('ReferenceManager', () => {
       listReferences: async () => [],
       importReference,
       loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference: unusedDelete,
       updateReference: async () => characterReference,
     };
     render(
@@ -153,6 +160,7 @@ describe('ReferenceManager', () => {
       listReferences: async () => [],
       importReference,
       loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference: unusedDelete,
       updateReference: async () => characterReference,
     };
     render(
@@ -187,6 +195,7 @@ describe('ReferenceManager', () => {
       listReferences: async () => [characterReference],
       importReference: async () => characterReference,
       loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference: unusedDelete,
       updateReference,
     };
     const clientFactory = () => client;
@@ -242,6 +251,7 @@ describe('ReferenceManager', () => {
       listReferences: async () => [characterReference],
       importReference: async () => characterReference,
       loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference: unusedDelete,
       updateReference,
     };
     render(
@@ -291,6 +301,7 @@ describe('ReferenceManager', () => {
       listReferences: async () => [danglingReference],
       importReference: async () => danglingReference,
       loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference: unusedDelete,
       updateReference,
     };
     render(
@@ -343,6 +354,7 @@ describe('ReferenceManager', () => {
       listReferences: async () => references,
       importReference: async () => references[0],
       loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference: unusedDelete,
       updateReference,
     };
     render(
@@ -382,6 +394,7 @@ describe('ReferenceManager', () => {
       listReferences: async () => references,
       importReference: async () => references[0],
       loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference: unusedDelete,
       updateReference: async (
         id: string,
         metadata: ReferenceMetadataInput,
@@ -407,5 +420,68 @@ describe('ReferenceManager', () => {
         name: '보정 레퍼런스 4 생성에 포함',
       }),
     ).toBeDisabled();
+  });
+
+  it('확인 후 레퍼런스를 삭제하고 썸네일 URL을 해제한다', async () => {
+    const user = userEvent.setup();
+    const deleteReference = vi.fn(async () => 'ref-1');
+    const revokeObjectUrl = vi.fn();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const client = {
+      listReferences: async () => [characterReference],
+      importReference: async () => characterReference,
+      loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference,
+      updateReference: unusedDelete,
+    };
+    render(
+      <ReferenceManager
+        connection={connection}
+        clientFactory={() => client}
+        createObjectUrl={() => 'blob:delete-me'}
+        revokeObjectUrl={revokeObjectUrl}
+      />,
+    );
+
+    expect(await screen.findByText('정민 캐릭터 시트')).toBeVisible();
+    await user.click(
+      screen.getByRole('button', { name: '정민 캐릭터 시트 삭제' }),
+    );
+
+    expect(confirm).toHaveBeenCalled();
+    await waitFor(() => expect(deleteReference).toHaveBeenCalledWith('ref-1'));
+    expect(screen.queryByText('정민 캐릭터 시트')).not.toBeInTheDocument();
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:delete-me');
+    confirm.mockRestore();
+  });
+
+  it('삭제를 취소하면 레퍼런스를 유지한다', async () => {
+    const user = userEvent.setup();
+    const deleteReference = vi.fn(async () => 'ref-1');
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const client = {
+      listReferences: async () => [characterReference],
+      importReference: async () => characterReference,
+      loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference,
+      updateReference: unusedDelete,
+    };
+    render(
+      <ReferenceManager
+        connection={connection}
+        clientFactory={() => client}
+        createObjectUrl={() => 'blob:keep-me'}
+        revokeObjectUrl={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText('정민 캐릭터 시트')).toBeVisible();
+    await user.click(
+      screen.getByRole('button', { name: '정민 캐릭터 시트 삭제' }),
+    );
+
+    expect(deleteReference).not.toHaveBeenCalled();
+    expect(screen.getByText('정민 캐릭터 시트')).toBeVisible();
+    confirm.mockRestore();
   });
 });

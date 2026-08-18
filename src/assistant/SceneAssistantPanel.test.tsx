@@ -45,6 +45,9 @@ const conversationMethods = {
   updateReference: async () => {
     throw new Error('not implemented in this test');
   },
+  deleteReference: async () => {
+    throw new Error('not implemented in this test');
+  },
   createSceneRender: async () => {
     throw new Error('not implemented in this test');
   },

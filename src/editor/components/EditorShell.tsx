@@ -444,6 +444,7 @@ export function EditorShell({
         <div
           className={`editor-workspace${assistantPanelCollapsed ? ' editor-workspace--assistant-collapsed' : ''}`}
           hidden={workspaceMode !== 'scene'}
+          inert={workspaceMode !== 'scene'}
           style={workspaceStyle}
         >
           {workspaceMode === 'scene' ? (

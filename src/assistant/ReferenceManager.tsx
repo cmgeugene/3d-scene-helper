@@ -23,7 +23,11 @@ import {
 
 type ReferenceClient = Pick<
   CompanionBrowserClient,
-  'listReferences' | 'importReference' | 'loadReferenceBlob' | 'updateReference'
+  | 'listReferences'
+  | 'importReference'
+  | 'loadReferenceBlob'
+  | 'updateReference'
+  | 'deleteReference'
 >;
 
 export interface ReferenceTarget {
@@ -404,6 +408,37 @@ function ConnectedReferenceManager({
     [client, maximumSelected, selectionAtLimit, updateCard],
   );
 
+  const deleteCard = useCallback(
+    async (reference: ReferenceCard) => {
+      if (
+        !window.confirm(
+          `"${reference.name}" 레퍼런스를 프로젝트에서 삭제할까요?`,
+        )
+      ) {
+        return;
+      }
+      setError(null);
+      try {
+        await client.deleteReference(reference.id);
+        setReferences((current) =>
+          current.filter(({ id }) => id !== reference.id),
+        );
+        objectUrls.current.delete(reference.thumbnailUrl);
+        revokeObjectUrl(reference.thumbnailUrl);
+        if (editingId === reference.id) {
+          setEditingId(null);
+        }
+      } catch (reason) {
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : '레퍼런스를 삭제하지 못했습니다.',
+        );
+      }
+    },
+    [client, editingId, revokeObjectUrl],
+  );
+
   const beginEditing = useCallback((reference: ReferenceCard) => {
     setEditingId(reference.id);
     setTargetObjectId(reference.targetObjectId ?? '');
@@ -636,11 +671,20 @@ function ConnectedReferenceManager({
                   </span>
                 </span>
               </label>
-              <button type="button" onClick={() => beginEditing(reference)}>
-                {reference.targetObjectId === null
-                  ? '설정'
-                  : `연결 · ${targets.find(({ id }) => id === reference.targetObjectId)?.name ?? reference.targetObjectId}`}
-              </button>
+              <div className="reference-card-actions">
+                <button type="button" onClick={() => beginEditing(reference)}>
+                  {reference.targetObjectId === null
+                    ? '설정'
+                    : `연결 · ${targets.find(({ id }) => id === reference.targetObjectId)?.name ?? reference.targetObjectId}`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteCard(reference)}
+                  aria-label={`${reference.name} 삭제`}
+                >
+                  삭제
+                </button>
+              </div>
               {reference.targetObjectId !== null &&
               !targets.some(({ id }) => id === reference.targetObjectId) ? (
                 <span className="reference-integrity-warning" role="alert">

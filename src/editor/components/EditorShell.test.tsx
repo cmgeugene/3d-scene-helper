@@ -133,6 +133,9 @@ function clientWithGeneration(
     updateReference: async () => {
       throw new Error('not used');
     },
+    deleteReference: async () => {
+      throw new Error('not used');
+    },
     loadReferenceBlob: async () => new Blob(),
     createSceneRender: async () => {
       throw new Error('not used');
@@ -275,6 +278,9 @@ describe('EditorShell', () => {
       updateReference: async () => {
         throw new Error('not used');
       },
+      deleteReference: async () => {
+        throw new Error('not used');
+      },
       loadReferenceBlob: async () => new Blob(),
       createSceneRender: async () => {
         throw new Error('not used');
@@ -324,6 +330,12 @@ describe('EditorShell', () => {
     expect(
       await screen.findByRole('heading', { name: '키프레임 작업 공간' }),
     ).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'Generation 이력' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: 'Scene Assistant' }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('region', { name: '장면 뷰포트' }),
     ).not.toBeInTheDocument();
@@ -400,6 +412,9 @@ describe('EditorShell', () => {
         throw new Error('not used');
       },
       updateReference: async () => {
+        throw new Error('not used');
+      },
+      deleteReference: async () => {
         throw new Error('not used');
       },
       loadReferenceBlob: async () => new Blob(),

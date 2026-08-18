@@ -297,6 +297,7 @@ export interface CompanionBrowserClient {
     metadata: ReferenceMetadataInput,
     signal?: AbortSignal,
   ): Promise<ReferenceArtifact>;
+  deleteReference(referenceId: string, signal?: AbortSignal): Promise<string>;
   loadReferenceBlob(referenceId: string, signal?: AbortSignal): Promise<Blob>;
   createSceneRender(
     blob: Blob,
@@ -571,6 +572,22 @@ export class CompanionClient implements CompanionBrowserClient {
     return z
       .object({ reference: referenceArtifactSchema })
       .parse(await response.json()).reference;
+  }
+
+  async deleteReference(referenceId: string, signal?: AbortSignal) {
+    const response = await this.fetchImpl(
+      `${this.connection.url}/api/references/${encodeURIComponent(referenceId)}`,
+      {
+        method: 'DELETE',
+        headers: this.headers(),
+        signal,
+      },
+    );
+    if (!response.ok) {
+      throw await this.createHttpError(response);
+    }
+    return z.object({ deleted: z.string().min(1) }).parse(await response.json())
+      .deleted;
   }
 
   async createSceneRender(blob: Blob, sceneId: string, signal?: AbortSignal) {

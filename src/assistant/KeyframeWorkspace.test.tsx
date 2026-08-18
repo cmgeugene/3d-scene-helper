@@ -131,6 +131,9 @@ function clientWith(generations: GenerationRecord[]): CompanionBrowserClient {
     updateReference: async () => {
       throw new Error('not used');
     },
+    deleteReference: async () => {
+      throw new Error('not used');
+    },
     loadReferenceBlob: async () => new Blob(),
     createSceneRender: async () => {
       throw new Error('not used');

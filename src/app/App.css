@@ -235,6 +235,10 @@ p {
   min-height: 0;
 }
 
+.editor-workspace[hidden] {
+  display: none !important;
+}
+
 .editor-workspace--assistant-collapsed {
   grid-template-columns: 15rem minmax(0, 1fr) 0 2.75rem;
 }
@@ -2354,7 +2358,12 @@ p {
   background: #080d15;
 }
 
-.reference-card > button {
+.reference-card-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.reference-card-actions button {
   min-height: 1.45rem;
   padding: 0.15rem 0.35rem;
   overflow: hidden;
@@ -2366,6 +2375,13 @@ p {
   text-overflow: ellipsis;
   white-space: nowrap;
   background: #121f33;
+}
+
+.reference-card-actions button[aria-label$='삭제'] {
+  min-width: 2.4rem;
+  color: #ffb3a6;
+  border-left: 1px solid #2b394d;
+  background: #241616;
 }
 
 .reference-integrity-warning {

@@ -1278,6 +1278,12 @@ export async function startCompanionServer(
         sendJson(response, 200, { reference });
         return;
       }
+      if (request.method === 'DELETE' && referenceMatch !== null) {
+        const referenceId = decodeURIComponent(referenceMatch[1] ?? '');
+        const deleted = await referenceStore.deleteReference(referenceId);
+        sendJson(response, 200, { deleted: deleted.id });
+        return;
+      }
 
       const referenceContentMatch = requestUrl.pathname.match(
         /^\/api\/references\/([^/]+)\/content$/,
