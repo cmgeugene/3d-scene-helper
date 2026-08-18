@@ -767,7 +767,7 @@ function ConnectedSceneAssistant({
       const previewUrl = generationPreviewUrlRef.current;
       if (previewUrl !== null) {
         generationPreviewUrlRef.current = null;
-        revokeAfterRender(revokeObjectUrl, previewUrl);
+        revokeObjectUrl(previewUrl);
       }
     };
   }, [
@@ -1567,6 +1567,18 @@ function ConnectedSceneAssistant({
                     {savedTask.specRevision ?? '?'}
                   </dd>
                 </div>
+                {savedTask.generationIntent === null ? null : (
+                  <div>
+                    <dt>
+                      다음 OAuth 생성 반영 의도 r
+                      {savedTask.generationIntent.revision}
+                    </dt>
+                    <dd>
+                      마지막 완료 대화를 자동 반영 ·{' '}
+                      {savedTask.generationIntent.sourceTurnId}
+                    </dd>
+                  </div>
+                )}
               </dl>
               <div>
                 <button

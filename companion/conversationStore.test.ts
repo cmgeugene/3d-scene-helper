@@ -46,6 +46,17 @@ describe('ConversationStore', () => {
     await store.recordTurnCompleted('thread-1', 'turn-1', 'completed');
 
     await expect(
+      new ConversationStore(root).getGenerationIntent('thread-1'),
+    ).resolves.toEqual({
+      revision: 1,
+      sourceTurnId: 'turn-1',
+      userMessage: '노란 오브젝트는 전봇대야.',
+      assistantSummary: '전봇대 의미를 장면에 반영할 변경안을 제안할게요.',
+      sceneRevision: 12,
+      specRevision: 7,
+    });
+
+    await expect(
       new ConversationStore(root).getSession(),
     ).resolves.toMatchObject({
       version: 1,

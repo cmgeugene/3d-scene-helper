@@ -1046,7 +1046,41 @@ export function KeyframeWorkspace({
                   )}
                 </section>
                 <section>
-                  <h4>생성 모델의 수정 프롬프트</h4>
+                  <h4>생성 실행 경로</h4>
+                  <p>
+                    {selected.provider === 'oauth'
+                      ? `OAuth · ${selected.responseModel ?? '모델 기록 없음'} · ${selected.imageQuality ?? 'quality 기록 없음'} · reasoning ${selected.reasoningEffort ?? '기록 없음'}`
+                      : selected.provider === 'codex'
+                        ? 'Codex $imagegen'
+                        : '구형 기록 · provider 없음'}
+                  </p>
+                </section>
+                <section>
+                  <h4>Companion 대화 의도</h4>
+                  {selected.generationIntentSnapshot == null ? (
+                    <p>반영된 완료 대화 없음</p>
+                  ) : (
+                    <>
+                      <p>{selected.generationIntentSnapshot.userMessage}</p>
+                      <p>
+                        {selected.generationIntentSnapshot.assistantSummary}
+                      </p>
+                      <small>
+                        intent r{selected.generationIntentSnapshot.revision} ·{' '}
+                        {selected.generationIntentSnapshot.sourceTurnId}
+                      </small>
+                    </>
+                  )}
+                </section>
+                <section>
+                  <h4>English Generation Spec</h4>
+                  <p className="generation-spec">
+                    {selected.generationSpec ??
+                      'Codex 또는 구형 기록 · 별도 스펙 없음'}
+                  </p>
+                </section>
+                <section>
+                  <h4>이미지 도구의 수정 프롬프트</h4>
                   <p>{selected.revisedPrompt ?? '기록 없음'}</p>
                 </section>
                 <section>

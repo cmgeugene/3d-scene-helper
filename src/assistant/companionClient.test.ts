@@ -152,6 +152,7 @@ describe('CompanionClient', () => {
         lastAssistantSummary: '오른쪽 이동 변경안을 준비했습니다.',
         sceneRevision: 4,
         specRevision: 2,
+        generationIntent: null,
         createdAt: '2026-08-04T00:00:00.000Z',
         updatedAt: '2026-08-04T00:01:00.000Z',
       },

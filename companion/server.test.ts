@@ -60,7 +60,7 @@ class FakeRuntime extends EventEmitter implements CodexRuntime {
   async interruptTurn() {}
 }
 
-async function createServer() {
+async function createServer(options: Record<string, unknown> = {}) {
   const projectRoot = await mkdtemp(path.join(tmpdir(), 'i2v-companion-'));
   tempRoots.push(projectRoot);
   await mkdir(path.join(projectRoot, 'assets', 'references'), {
@@ -76,6 +76,7 @@ async function createServer() {
     projectRoot,
     allowedOrigins: ['http://127.0.0.1:5173'],
     token: 'test-token',
+    ...options,
   });
   servers.push(server);
   return { projectRoot, runtime, server };
@@ -347,6 +348,147 @@ describe('Companion loopback API', () => {
       'thread_1',
       expect.any(String),
     );
+  });
+
+  it('OAuth 생성은 영어 스펙과 대화 의도를 저장하고 task를 completed로 종료한다', async () => {
+    let generatedPath = '';
+    const cleanup = vi.fn(async () => undefined);
+    const oauthImageGenerator = vi.fn(async () => ({
+      base64: onePixelPng.toString('base64'),
+      revisedPrompt: 'tool revised prompt',
+      generationSpec:
+        'Use case: photorealistic-natural\nAsset type: cinematic I2V start frame',
+      filePath: generatedPath,
+      cleanup,
+    }));
+    const { projectRoot, runtime, server } = await createServer({
+      imageProvider: 'oauth',
+      oauthUrl: 'http://127.0.0.1:10532',
+      imageModel: 'gpt-5.6-sol',
+      imageQuality: 'high',
+      reasoningEffort: 'high',
+      oauthImageGenerator,
+    });
+    generatedPath = path.join(projectRoot, 'oauth-result.png');
+    await writeFile(generatedPath, onePixelPng);
+    const jsonHeaders = {
+      Authorization: 'Bearer test-token',
+      'Content-Type': 'application/json',
+    };
+    const imageHeaders = {
+      Authorization: 'Bearer test-token',
+      'Content-Type': 'image/png',
+    };
+
+    await fetch(`${server.url}/api/threads`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ mode: 'new' }),
+    });
+    runtime.startTurn.mockResolvedValueOnce('turn-intent');
+    await fetch(`${server.url}/api/turns`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({
+        threadId: 'thread_1',
+        prompt: 'scene prompt',
+        metadata: {
+          kind: 'conversation',
+          userMessage: '비가 그친 새벽으로 해줘.',
+          sceneRevision: 1,
+          specRevision: 0,
+        },
+      }),
+    });
+    runtime.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread_1',
+        turnId: 'turn-intent',
+        item: {
+          type: 'agentMessage',
+          id: 'intent-message',
+          text: '젖은 노면과 차가운 새벽빛을 반영합니다.',
+        },
+      },
+    });
+    runtime.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread_1',
+        turn: { id: 'turn-intent', status: 'completed', error: null },
+      },
+    });
+    await vi.waitFor(async () => {
+      const session = await fetch(`${server.url}/api/conversation-session`, {
+        headers: { Authorization: 'Bearer test-token' },
+      }).then((response) => response.json());
+      expect(session).toMatchObject({
+        activeTask: { generationIntent: { sourceTurnId: 'turn-intent' } },
+      });
+    });
+
+    const sceneSnapshot = createStarterSceneDocument({
+      documentId: 'scene-oauth',
+      floorId: 'floor-oauth',
+      mannequinId: 'mannequin-oauth',
+    });
+    const renderResponse = await fetch(
+      `${server.url}/api/scene-renders?sceneId=scene-oauth`,
+      { method: 'POST', headers: imageHeaders, body: onePixelPng },
+    );
+    const render = (await renderResponse.json()) as { render: { id: string } };
+    const generationResponse = await fetch(`${server.url}/api/generations`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({
+        requestId: 'oauth-intent-request',
+        threadId: 'thread_1',
+        prompt: '$imagegen current scene evidence',
+        layoutSpec: createLayoutSpec(sceneSnapshot),
+        sceneSnapshot,
+        layoutRenderId: render.render.id,
+        referenceIds: [],
+        imageModel: 'gpt-5.6-sol',
+        imageQuality: 'high',
+      }),
+    });
+    expect(generationResponse.status).toBe(202);
+
+    await vi.waitFor(async () => {
+      const generations = (await fetch(`${server.url}/api/generations`, {
+        headers: { Authorization: 'Bearer test-token' },
+      }).then((response) => response.json())) as {
+        generations: Array<Record<string, unknown>>;
+      };
+      expect(generations.generations).toContainEqual(
+        expect.objectContaining({
+          status: 'completed',
+          provider: 'oauth',
+          responseModel: 'gpt-5.6-sol',
+          imageQuality: 'high',
+          reasoningEffort: 'high',
+          generationSpec:
+            'Use case: photorealistic-natural\nAsset type: cinematic I2V start frame',
+          revisedPrompt: 'tool revised prompt',
+          generationIntentSnapshot: expect.objectContaining({
+            sourceTurnId: 'turn-intent',
+            userMessage: '비가 그친 새벽으로 해줘.',
+          }),
+        }),
+      );
+      const session = await fetch(`${server.url}/api/conversation-session`, {
+        headers: { Authorization: 'Bearer test-token' },
+      }).then((response) => response.json());
+      expect(session).toMatchObject({
+        activeTask: {
+          lastTurnKind: 'generation',
+          lastTurnStatus: 'completed',
+        },
+      });
+    });
+    expect(oauthImageGenerator).toHaveBeenCalledOnce();
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
   it('구조화된 Codex outputSchema 응답을 동일 proposal schema로 검증해 SSE에 전달한다', async () => {

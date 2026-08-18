@@ -758,6 +758,14 @@ describe('SceneAssistantPanel', () => {
           lastAssistantSummary: '배경 손님 변경안을 준비했습니다.',
           sceneRevision: 7,
           specRevision: 3,
+          generationIntent: {
+            revision: 1,
+            sourceTurnId: 'turn-saved',
+            userMessage: '배경 오른쪽에 손님을 추가해줘.',
+            assistantSummary: '배경 손님 변경안을 준비했습니다.',
+            sceneRevision: 7,
+            specRevision: 3,
+          },
           createdAt: '2026-08-04T00:00:00.000Z',
           updatedAt: '2026-08-04T00:01:00.000Z',
         },
@@ -785,6 +793,7 @@ describe('SceneAssistantPanel', () => {
     expect(choice).toHaveTextContent(
       'turn 3개 · completed · scene r7 · spec r3',
     );
+    expect(choice).toHaveTextContent('다음 OAuth 생성 반영 의도 r1');
     expect(screen.getByLabelText('장면에 대해 말하기')).toBeDisabled();
 
     await user.click(
@@ -839,6 +848,7 @@ describe('SceneAssistantPanel', () => {
           lastAssistantSummary: '이전 응답',
           sceneRevision: 1,
           specRevision: 1,
+          generationIntent: null,
           createdAt: '2026-08-04T00:00:00.000Z',
           updatedAt: '2026-08-04T00:01:00.000Z',
         },

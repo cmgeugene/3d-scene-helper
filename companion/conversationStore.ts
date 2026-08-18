@@ -58,6 +58,14 @@ export class ConversationStore {
     return publicSession(await this.readManifest());
   }
 
+  async getGenerationIntent(threadId: string) {
+    const manifest = await this.readManifest();
+    return (
+      manifest.tasks.find((task) => task.threadId === threadId)
+        ?.generationIntent ?? null
+    );
+  }
+
   recoverInProgressTask() {
     return this.mutate(async () => {
       const manifest = await this.readManifest();
@@ -104,6 +112,7 @@ export class ConversationStore {
               lastAssistantSummary: null,
               sceneRevision: null,
               specRevision: null,
+              generationIntent: null,
               createdAt: now,
               updatedAt: now,
             }
@@ -154,14 +163,29 @@ export class ConversationStore {
     turnId: string,
     status: 'completed' | 'failed' | 'interrupted',
   ) {
-    return this.updateTask(threadId, (task) =>
-      task.lastTurnId !== turnId
-        ? task
-        : {
-            ...task,
-            lastTurnStatus: conversationTurnStatusSchema.parse(status),
-          },
-    );
+    return this.updateTask(threadId, (task) => {
+      if (task.lastTurnId !== turnId) return task;
+      const completed = status === 'completed';
+      const generationIntent =
+        completed &&
+        task.lastTurnKind === 'conversation' &&
+        task.lastUserMessage !== null &&
+        task.lastAssistantSummary !== null
+          ? {
+              revision: (task.generationIntent?.revision ?? 0) + 1,
+              sourceTurnId: turnId,
+              userMessage: task.lastUserMessage,
+              assistantSummary: task.lastAssistantSummary,
+              sceneRevision: task.sceneRevision,
+              specRevision: task.specRevision,
+            }
+          : task.generationIntent;
+      return {
+        ...task,
+        lastTurnStatus: conversationTurnStatusSchema.parse(status),
+        generationIntent,
+      };
+    });
   }
 
   private updateTask(

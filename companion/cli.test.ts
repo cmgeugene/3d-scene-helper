@@ -16,7 +16,7 @@ describe('Companion CLI options', () => {
       oauthUrl: null,
       imageModel: 'gpt-5.4-mini',
       imageQuality: 'medium',
-      reasoningEffort: 'none',
+      reasoningEffort: 'high',
     });
   });
 

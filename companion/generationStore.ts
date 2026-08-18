@@ -27,6 +27,10 @@ import {
   type GenerationExecutionSummary,
 } from '../shared/generationExecutionSummary';
 import { generationPromptEvidence } from '../shared/generationPromptEvidence';
+import {
+  generationIntentSchema,
+  type GenerationIntent,
+} from '../shared/conversationMetadata';
 import { resolveProjectArtifact } from './projectArtifacts';
 import {
   publicReferenceSchema,
@@ -93,6 +97,18 @@ const generationSchema = z
     turnId: z.string().min(1),
     status: z.enum(['inProgress', 'completed', 'failed', 'interrupted']),
     prompt: z.string().min(1),
+    provider: z.enum(['codex', 'oauth']).nullable().default(null),
+    responseModel: z.string().min(1).nullable().default(null),
+    imageQuality: z
+      .enum(['low', 'medium', 'high', 'auto'])
+      .nullable()
+      .default(null),
+    reasoningEffort: z
+      .enum(['none', 'low', 'medium', 'high', 'xhigh'])
+      .nullable()
+      .default(null),
+    generationIntentSnapshot: generationIntentSchema.nullable().default(null),
+    generationSpec: z.string().min(1).nullable().default(null),
     layoutSpec: layoutSpecSchema.nullable().default(null),
     sceneSnapshot: sceneDocumentSchema.nullable().default(null),
     semanticSceneSpecSnapshot: semanticSceneSpecSchema.nullable().default(null),
@@ -149,6 +165,11 @@ export interface CreateGenerationInput {
   threadId: string;
   turnId: string;
   prompt: string;
+  provider?: 'codex' | 'oauth' | null;
+  responseModel?: string | null;
+  imageQuality?: 'low' | 'medium' | 'high' | 'auto' | null;
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | null;
+  generationIntentSnapshot?: GenerationIntent | null;
   layoutSpec: LayoutSpec;
   sceneSnapshot: SceneDocument;
   referenceSnapshots: PublicReference[];
@@ -570,9 +591,15 @@ export class GenerationStore {
     turnId: string,
     savedPath: string,
     revisedPrompt: string | null,
+    metadata: { generationSpec?: string | null } = {},
   ) {
     return this.mutate(() =>
-      this.importGenerationResultInternal(turnId, savedPath, revisedPrompt),
+      this.importGenerationResultInternal(
+        turnId,
+        savedPath,
+        revisedPrompt,
+        metadata,
+      ),
     );
   }
 
@@ -834,6 +861,7 @@ export class GenerationStore {
       refinementDirective,
       generationMode,
       status: 'inProgress',
+      generationSpec: null,
       revisedPrompt: null,
       result: null,
       error: null,
@@ -892,6 +920,7 @@ export class GenerationStore {
     turnId: string,
     savedPath: string,
     revisedPrompt: string | null,
+    metadata: { generationSpec?: string | null },
   ) {
     const manifest = await this.readManifest();
     const index = manifest.generations.findIndex(
@@ -960,6 +989,7 @@ export class GenerationStore {
     const updated: GenerationRecord = {
       ...current,
       result,
+      generationSpec: metadata.generationSpec ?? current.generationSpec,
       revisedPrompt,
       updatedAt: new Date().toISOString(),
     };

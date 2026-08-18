@@ -1,6 +1,8 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import type { GenerationIntent } from '../shared/conversationMetadata';
+import { createGenerationSpec } from './generationSpecPlanner';
 import {
   generateOAuthImage,
   type OAuthImageQuality,
@@ -50,22 +52,38 @@ export async function writeOAuthImageResult(base64: string) {
 
 export async function generateOAuthImageFromFiles(
   options: OAuthImageProviderOptions & {
-    prompt: string;
+    sourcePrompt: string;
+    generationIntent: GenerationIntent | null;
     filePaths: string[];
   },
+  fetchImpl: typeof fetch = fetch,
 ) {
-  const result = await generateOAuthImage({
-    baseUrl: options.baseUrl,
-    prompt: options.prompt,
-    model: options.model,
-    quality: options.quality,
-    size: options.size ?? 'auto',
-    reasoningEffort: options.reasoningEffort,
-    references: await loadOAuthImageReferences(options.filePaths),
-  });
+  const generationSpec = await createGenerationSpec(
+    {
+      baseUrl: options.baseUrl,
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
+      sourcePrompt: options.sourcePrompt,
+      generationIntent: options.generationIntent,
+    },
+    fetchImpl,
+  );
+  const result = await generateOAuthImage(
+    {
+      baseUrl: options.baseUrl,
+      prompt: generationSpec,
+      model: options.model,
+      quality: options.quality,
+      size: options.size ?? 'auto',
+      reasoningEffort: options.reasoningEffort,
+      references: await loadOAuthImageReferences(options.filePaths),
+    },
+    fetchImpl,
+  );
   const saved = await writeOAuthImageResult(result.base64);
   return {
     ...result,
+    generationSpec,
     ...saved,
   };
 }

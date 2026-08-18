@@ -235,6 +235,7 @@ export interface CompanionServerOptions {
   imageQuality?: OAuthImageQuality;
   reasoningEffort?: OAuthReasoningEffort;
   oauthStatus?: OAuthProxyStatus;
+  oauthImageGenerator?: typeof generateOAuthImageFromFiles;
 }
 
 export interface CompanionServerHandle {
@@ -330,6 +331,8 @@ export async function startCompanionServer(
   const referenceStore = new ReferenceStore(options.projectRoot);
   const generationStore = new GenerationStore(options.projectRoot);
   const conversationStore = new ConversationStore(options.projectRoot);
+  const oauthImageGenerator =
+    options.oauthImageGenerator ?? generateOAuthImageFromFiles;
   const runtimeRequestStore = new RuntimeRequestStore(options.projectRoot);
   const staticEditor =
     options.editorRoot === undefined
@@ -948,6 +951,18 @@ export async function startCompanionServer(
                 detail: 'original',
               });
             }
+            const responseModel = useOAuthImageProvider
+              ? (body.imageModel ?? options.imageModel ?? 'gpt-5.4-mini')
+              : null;
+            const imageQuality = useOAuthImageProvider
+              ? (body.imageQuality ?? options.imageQuality ?? 'medium')
+              : null;
+            const reasoningEffort = useOAuthImageProvider
+              ? (options.reasoningEffort ?? 'high')
+              : null;
+            const generationIntent = useOAuthImageProvider
+              ? await conversationStore.getGenerationIntent(body.threadId)
+              : null;
             const turnId = useOAuthImageProvider
               ? `oauth_${body.requestId}`
               : await options.runtime.startTurn(body.threadId, input);
@@ -968,6 +983,11 @@ export async function startCompanionServer(
                 threadId: body.threadId,
                 turnId,
                 prompt: body.prompt,
+                provider: useOAuthImageProvider ? 'oauth' : 'codex',
+                responseModel,
+                imageQuality,
+                reasoningEffort,
+                generationIntentSnapshot: generationIntent,
                 layoutSpec: body.layoutSpec,
                 sceneSnapshot: body.sceneSnapshot,
                 referenceSnapshots: references.map(toPublicReference),
@@ -1001,10 +1021,14 @@ export async function startCompanionServer(
                   await options.runtime
                     .interruptTurn(body.threadId, turnId)
                     .catch(() => undefined);
-                  await conversationStore
-                    .recordTurnCompleted(body.threadId, turnId, 'interrupted')
-                    .catch(() => undefined);
                 }
+                await conversationStore
+                  .recordTurnCompleted(
+                    body.threadId,
+                    turnId,
+                    useOAuthImageProvider ? 'failed' : 'interrupted',
+                  )
+                  .catch(() => undefined);
                 throw error;
               });
             if (useOAuthImageProvider) {
@@ -1032,17 +1056,16 @@ export async function startCompanionServer(
                       ),
                     )),
                   ];
-                  const generated = await generateOAuthImageFromFiles({
+                  const generated = await oauthImageGenerator({
                     baseUrl:
                       options.oauthUrl ??
                       options.oauthStatus?.url ??
                       'http://127.0.0.1:10532',
-                    model:
-                      body.imageModel ?? options.imageModel ?? 'gpt-5.4-mini',
-                    quality:
-                      body.imageQuality ?? options.imageQuality ?? 'medium',
-                    reasoningEffort: options.reasoningEffort ?? 'none',
-                    prompt: body.prompt,
+                    model: responseModel!,
+                    quality: imageQuality!,
+                    reasoningEffort: reasoningEffort!,
+                    sourcePrompt: body.prompt,
+                    generationIntent,
                     filePaths,
                   });
                   try {
@@ -1050,6 +1073,7 @@ export async function startCompanionServer(
                       turnId,
                       generated.filePath,
                       generated.revisedPrompt,
+                      { generationSpec: generated.generationSpec },
                     );
                   } finally {
                     await generated.cleanup();
@@ -1058,6 +1082,11 @@ export async function startCompanionServer(
                     turnId,
                     'completed',
                     null,
+                  );
+                  await conversationStore.recordTurnCompleted(
+                    body.threadId,
+                    turnId,
+                    'completed',
                   );
                   if (completed !== null) broadcast('generation', completed);
                 } catch (error) {
@@ -1068,6 +1097,9 @@ export async function startCompanionServer(
                       ? error.message
                       : 'OAuth 이미지 생성에 실패했습니다.',
                   );
+                  await conversationStore
+                    .recordTurnCompleted(body.threadId, turnId, 'failed')
+                    .catch(() => undefined);
                   if (failed !== null) broadcast('generation', failed);
                 }
               })();

@@ -13,6 +13,7 @@ import {
 import {
   conversationSessionSchema,
   conversationTurnMetadataInputSchema,
+  generationIntentSchema,
   type ConversationSession,
   type ConversationTurnMetadataInput,
 } from '../../shared/conversationMetadata';
@@ -144,6 +145,15 @@ export const generationRecordSchema = z.object({
   turnId: z.string().min(1),
   status: z.enum(['inProgress', 'completed', 'failed', 'interrupted']),
   prompt: z.string().min(1),
+  provider: z.enum(['codex', 'oauth']).nullable().optional(),
+  responseModel: z.string().min(1).nullable().optional(),
+  imageQuality: z.enum(['low', 'medium', 'high', 'auto']).nullable().optional(),
+  reasoningEffort: z
+    .enum(['none', 'low', 'medium', 'high', 'xhigh'])
+    .nullable()
+    .optional(),
+  generationIntentSnapshot: generationIntentSchema.nullable().optional(),
+  generationSpec: z.string().min(1).nullable().optional(),
   layoutSpec: layoutSpecSchema.nullable(),
   sceneSnapshot: sceneDocumentSchema.nullable().default(null),
   semanticSceneSpecSnapshot: semanticSceneSpecSchema.nullable().default(null),

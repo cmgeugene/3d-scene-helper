@@ -85,6 +85,55 @@ afterEach(async () => {
 });
 
 describe('GenerationStore', () => {
+  it('OAuth generation의 원본·영어 스펙·도구 수정문과 실행 metadata를 분리해 저장한다', async () => {
+    const { root, store } = await createStore();
+    const render = await store.importSceneRender('scene-test', onePixelPng);
+    const intent = {
+      revision: 2,
+      sourceTurnId: 'turn-intent-2',
+      userMessage: '비가 갠 새벽으로 해줘.',
+      assistantSummary: '젖은 노면과 차가운 새벽빛을 반영합니다.',
+      sceneRevision: 5,
+      specRevision: 4,
+    };
+    const generation = await store.createGeneration({
+      threadId: 'thread-oauth-metadata',
+      turnId: 'turn-oauth-metadata',
+      prompt: '$imagegen 원본 한국어 장면 계약',
+      provider: 'oauth',
+      responseModel: 'gpt-5.6-sol',
+      imageQuality: 'high',
+      reasoningEffort: 'high',
+      generationIntentSnapshot: intent,
+      layoutSpec: TEST_LAYOUT_SPEC,
+      sceneSnapshot: createSceneSnapshot(),
+      referenceSnapshots: [],
+      layoutRenderId: render.id,
+      referenceIds: [],
+      attachments: [{ type: 'layout', id: render.id, kind: 'layout' }],
+    });
+    const source = path.join(root, 'oauth-result.png');
+    await writeFile(source, onePixelPng);
+
+    const imported = await store.importGenerationResult(
+      generation.turnId,
+      source,
+      'image tool revised prompt',
+      { generationSpec: 'Use case: photorealistic-natural\nEnglish spec body' },
+    );
+
+    expect(imported).toMatchObject({
+      prompt: '$imagegen 원본 한국어 장면 계약',
+      provider: 'oauth',
+      responseModel: 'gpt-5.6-sol',
+      imageQuality: 'high',
+      reasoningEffort: 'high',
+      generationIntentSnapshot: intent,
+      generationSpec: 'Use case: photorealistic-natural\nEnglish spec body',
+      revisedPrompt: 'image tool revised prompt',
+    });
+  });
+
   it('생성 원본을 바꾸지 않고 hash-bound 320px WebP thumbnail을 원자적으로 만들고 재사용한다', async () => {
     const { root, store } = await createStore();
     const render = await store.importSceneRender('scene-test', onePixelPng);

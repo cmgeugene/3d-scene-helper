@@ -413,7 +413,23 @@ describe('KeyframeWorkspace', () => {
 
   it('프로젝트 전체 계보를 표시하고 저장된 선택의 결과와 당시 레이아웃을 비교한다', async () => {
     const user = userEvent.setup();
-    const parent = generation({ id: 'generation-parent' });
+    const parent = generation({
+      id: 'generation-parent',
+      provider: 'oauth',
+      responseModel: 'gpt-5.6-sol',
+      imageQuality: 'high',
+      reasoningEffort: 'high',
+      generationIntentSnapshot: {
+        revision: 2,
+        sourceTurnId: 'turn-intent-2',
+        userMessage: '비가 그친 새벽으로 해줘.',
+        assistantSummary: '젖은 노면과 차가운 새벽빛을 반영합니다.',
+        sceneRevision: 4,
+        specRevision: 3,
+      },
+      generationSpec:
+        'Use case: photorealistic-natural\nPrimary request: a rain-wet alley at dawn',
+    });
     const child = generation({
       id: 'generation-child',
       status: 'failed',
@@ -489,6 +505,15 @@ describe('KeyframeWorkspace', () => {
     ).toBeVisible();
     expect(
       screen.getByText('$imagegen 저녁 치킨집 장면을 만들어줘.'),
+    ).toBeVisible();
+    expect(
+      screen.getByText('OAuth · gpt-5.6-sol · high · reasoning high'),
+    ).toBeVisible();
+    expect(screen.getByText('비가 그친 새벽으로 해줘.')).toBeVisible();
+    expect(
+      screen.getByText(
+        'Use case: photorealistic-natural Primary request: a rain-wet alley at dawn',
+      ),
     ).toBeVisible();
     expect(
       screen.getByText('cinematic chicken restaurant at dusk'),

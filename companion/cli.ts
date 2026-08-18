@@ -52,7 +52,7 @@ export function parseCompanionCliOptions(args: string[]): CompanionCliOptions {
   let oauthUrl: string | null = null;
   let imageModel = 'gpt-5.4-mini';
   let imageQuality: CompanionCliOptions['imageQuality'] = 'medium';
-  let reasoningEffort: CompanionCliOptions['reasoningEffort'] = 'none';
+  let reasoningEffort: CompanionCliOptions['reasoningEffort'] = 'high';
 
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];

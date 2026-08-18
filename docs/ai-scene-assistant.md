@@ -554,9 +554,11 @@ production 편집기 정적 파일, 단일 JavaScript Companion runner와 현재
   -> React/Vite UI
   -> localhost API and event stream
   -> Local Companion
-      -> Codex App Server over stdio
+      -> Codex App Server over stdio (conversation/spec patch and optional $imagegen fallback)
+      -> Managed openai-oauth loopback proxy
+          -> selected Responses model: English Generation Spec planning
+          -> same Responses model + image_generation quality: final image
       -> Project files and binary assets
-      -> Built-in imagegen
   -> Project generation history
 ```
 
@@ -575,7 +577,11 @@ production 편집기 정적 파일, 단일 JavaScript Companion runner와 현재
 S32부터 Local Companion은 프로젝트 루트의 `conversations.json`을 version 1 manifest로 관리한다.
 이 파일은 활성·보관 task의 thread ID, turn 수와 마지막 turn 상태, 크기가 제한된 최근 사용자
 요청·assistant 요약, scene/spec revision과 시각만 저장한다. 전체 prompt나 transcript는 저장하지
-않으며 `sessionStorage`는 구형 Companion·테스트를 위한 탭 단위 캐시에만 사용한다.
+않는다. 정상 완료된 최신 `conversation` turn은 사용자 메시지와 assistant 해석을 bounded
+`generationIntent`로 자동 승격하며 revision과 source turn을 함께 보존한다. 실패·중단 turn,
+spec patch와 generation turn은 기존 intent를 덮어쓰지 않는다. 이 intent는 생성 planner의
+보조 증거이며 현재 SceneDocument, Semantic Scene Spec과 LayoutSpec에 충돌하면 구조화된 현재
+장면이 우선한다. `sessionStorage`는 구형 Companion·테스트를 위한 탭 단위 캐시에만 사용한다.
 
 프로젝트를 다시 열면 저장 task를 자동 재개하지 않는다. 사용자는 저장 task 재개 또는 새 task
 시작을 명시적으로 선택하며, 새 task는 이전 활성 task를 보관 상태로 전환한다. 재개 실패 때는
@@ -599,19 +605,33 @@ SceneDocument, Semantic Scene Spec과 generation record의 영구 원본 지위�
 
 ### 8.2 내장 이미지 생성
 
-MVP의 기본 생성 경로는 별도 OpenAI API 키를 요구하는 직접 API 호출이 아니라 Codex의 내장 `imagegen`이다. 사용자의 Codex 사용량과 워크스페이스 정책 안에서 실행하며, Local Companion이 레이아웃 렌더와 레퍼런스 파일을 Codex turn에 전달한다.
+기본 생성 경로는 Companion이 `127.0.0.1`에 관리하는 `openai-oauth` Responses 프록시다.
+Assistant에서 허용된 Responses 모델과 `image_generation.quality`를 고른다. Companion은 한 번의
+생성 요청을 다음 두 단계로 실행한다.
 
-내장 생성 결과는 Codex 관리 영역에 먼저 생성될 수 있으므로 Local Companion이 최종 선택 결과를 프로젝트의 `assets/generations/`로 복사한 뒤 프로젝트 기록에 등록한다. 프로젝트에서 참조하는 결과를 Codex 관리 경로에만 남겨 두지 않는다.
+1. 선택한 Responses 모델이 SceneDocument, OutputCamera, LayoutSpec, Semantic Scene Spec,
+   레퍼런스 역할, 보정 지시와 최신 generation intent를 카메라·구도·피사체·공간·조명·제약
+   중심의 영어 `Generation Spec`으로 정규화한다. 이 호출에는 이미지 도구를 제공하지 않는다.
+2. 같은 Responses 모델에 영어 스펙과 실제 이미지 입력만 전달하고 `image_generation` 도구를
+   선택한 quality로 호출한다.
+
+영어 스펙은 OutputCamera 레이아웃을 카메라·크롭·배치·포즈·깊이·가림의 권위로 유지하고,
+3D proxy 색·primitive geometry·editor artifact는 최종 외형이 아님을 명시한다. generation
+record는 원본 prompt, 영어 `generationSpec`, 이미지 도구가 반환한 `revisedPrompt`를 서로 다른
+필드로 보존하고 provider, Responses 모델, quality, reasoning과 반영한 intent snapshot을 함께
+기록한다. 프로젝트가 참조하는 최종 이미지는 `assets/generations/`로 편입한다.
+
+`--image-provider codex`는 기존 Codex `$imagegen` App Server 경로를 명시적으로 선택하는
+fallback이다. 앱은 OAuth 준비 상태와 Codex imagegen capability를 선택한 provider에 맞게 각각
+검사한다.
 
 앱은 다음 상태를 구분해서 보여준다.
 
-- Codex 실행 파일과 App Server 시작 가능 여부
-- 로그인 여부와 thread 연결 상태
-- 내장 imagegen 사용 가능 여부
-- 레퍼런스 전달, 생성, 결과 편입 단계별 진행 상태
+- Codex 대화 App Server와 OAuth proxy 준비 상태
+- 로그인과 thread 연결 상태
+- 선택한 Responses 모델과 image quality
+- 영어 스펙 planning, 레퍼런스 전달, 생성, 결과 편입 단계별 진행 상태
 - 취소, 사용 한도, 기능 미지원과 생성 실패 원인
-
-내장 imagegen 호출 방식, 결과 이벤트와 파일 경로 수신 방식, 후속 수정 시 이전 결과를 다시 전달하는 방식은 단계 0 기술 스파이크에서 실제 App Server 버전으로 고정한다.
 
 S36부터 Scene Assistant는 Codex imagegen이 오래 걸리거나 런타임에서 지원되지 않을 때 사용할
 수동 GPT 웹 fallback을 제공한다. `웹으로 내보내기`는 자동 생성과 같은 SceneDocument,
@@ -623,10 +643,12 @@ generation record를 시작하지 않으며 GPT 웹에서 만든 결과도 프�
 ### 8.3 인증 원칙
 
 - 사용자는 Codex가 제공하는 `Sign in with ChatGPT` 흐름으로 로그인한다.
-- 앱과 Local Companion은 `~/.codex/auth.json`이나 OAuth 액세스 토큰을 직접 읽거나 복사하지 않는다.
-- 인증 수명주기와 갱신은 Codex에 맡긴다.
-- Local Companion은 App Server 프로토콜로만 Codex와 통신한다.
-- Codex 로그인 토큰을 일반 OpenAI API 호출용 토큰으로 재사용하지 않는다.
+- Companion 자체는 OAuth 액세스 토큰을 브라우저 API, project manifest, 로그나 generation record에
+  복사하지 않는다. 관리되는 비공식 `openai-oauth` child process만 로컬 Codex 인증 상태를 사용한다.
+- OAuth proxy는 `127.0.0.1`에만 바인딩하며 Companion 종료 때 함께 종료한다.
+- 인증 수명주기와 갱신은 Codex 및 `openai-oauth`에 맡긴다.
+- 기본 OAuth 경로는 공식 OpenAI Platform API가 아니며 endpoint·계정 정책·공급망 변경 위험이
+  있다. `openai-oauth`는 AGPL-3.0이므로 배포 시 소스 제공 의무를 별도로 검토한다.
 - 이미지 생성 사용 가능 여부와 한도는 사용자의 계정, 플랜과 워크스페이스 설정에 따른다.
 
 ### 8.4 연결과 복구 책임
