@@ -1073,10 +1073,16 @@ export function KeyframeWorkspace({
                   )}
                 </section>
                 <section>
-                  <h4>English Generation Spec</h4>
+                  <h4>
+                    {selected.promptCompiler === 'codex-imagegen-skill'
+                      ? 'Imagegen 스킬 최종 전달 프롬프트'
+                      : selected.generationSpec == null
+                        ? 'Generation Spec 계보'
+                        : '구형 Generation Spec · 출처 미확인'}
+                  </h4>
                   <p className="generation-spec">
                     {selected.generationSpec ??
-                      'Codex 또는 구형 기록 · 별도 스펙 없음'}
+                      'Codex 또는 구형 기록 · 별도 스킬 프롬프트 없음'}
                   </p>
                 </section>
                 <section>

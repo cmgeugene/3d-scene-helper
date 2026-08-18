@@ -28,32 +28,24 @@ afterEach(async () => {
 });
 
 describe('generateOAuthImageFromFiles', () => {
-  it('plans an English spec first and sends only that spec to image_generation', async () => {
+  it('sends the exact imagegen skill prompt directly to image_generation', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'oauth-image-runtime-'));
     roots.push(root);
     const reference = path.join(root, 'layout.png');
     await writeFile(reference, Buffer.from('fake-png'));
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        new Response(
-          `event: response.output_text.done\ndata: ${JSON.stringify({ type: 'response.output_text.done', text: spec })}\n\n`,
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          `event: response.output_item.done\ndata: ${JSON.stringify({
-            type: 'response.output_item.done',
-            item: {
-              type: 'image_generation_call',
-              result: Buffer.from('image-result').toString('base64'),
-              revised_prompt: 'tool revised prompt',
-            },
-          })}\n\n`,
-          { status: 200 },
-        ),
-      );
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        `event: response.output_item.done\ndata: ${JSON.stringify({
+          type: 'response.output_item.done',
+          item: {
+            type: 'image_generation_call',
+            result: Buffer.from('image-result').toString('base64'),
+            revised_prompt: 'tool revised prompt',
+          },
+        })}\n\n`,
+        { status: 200 },
+      ),
+    );
 
     const result = await generateOAuthImageFromFiles(
       {
@@ -61,29 +53,20 @@ describe('generateOAuthImageFromFiles', () => {
         model: 'gpt-5.6-sol',
         quality: 'high',
         reasoningEffort: 'high',
-        sourcePrompt: '$imagegen\n긴 한국어 원본 프롬프트',
-        generationIntent: {
-          revision: 2,
-          sourceTurnId: 'turn-2',
-          userMessage: '화해 직전 장면이야.',
-          assistantSummary: '조심스러운 거리감을 반영합니다.',
-          sceneRevision: 4,
-          specRevision: 3,
-        },
+        generationPrompt: spec,
         filePaths: [reference],
       },
       fetchImpl,
     );
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    const second = JSON.parse(
-      (fetchImpl.mock.calls[1]?.[1] as { body: string }).body,
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const request = JSON.parse(
+      (fetchImpl.mock.calls[0]?.[1] as { body: string }).body,
     ) as { input: Array<{ content: Array<{ type: string; text?: string }> }> };
-    const imageText = second.input[0]?.content.find(
+    const imageText = request.input[0]?.content.find(
       (part) => part.type === 'input_text',
     )?.text;
     expect(imageText).toBe(spec);
-    expect(imageText).not.toContain('긴 한국어 원본 프롬프트');
     expect(result.generationSpec).toBe(spec);
     expect(result.revisedPrompt).toBe('tool revised prompt');
     await result.cleanup();

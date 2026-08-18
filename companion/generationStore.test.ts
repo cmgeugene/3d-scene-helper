@@ -119,7 +119,10 @@ describe('GenerationStore', () => {
       generation.turnId,
       source,
       'image tool revised prompt',
-      { generationSpec: 'Use case: photorealistic-natural\nEnglish spec body' },
+      {
+        generationSpec: 'Use case: photorealistic-natural\nEnglish spec body',
+        promptCompiler: 'codex-imagegen-skill',
+      },
     );
 
     expect(imported).toMatchObject({
@@ -130,6 +133,7 @@ describe('GenerationStore', () => {
       reasoningEffort: 'high',
       generationIntentSnapshot: intent,
       generationSpec: 'Use case: photorealistic-natural\nEnglish spec body',
+      promptCompiler: 'codex-imagegen-skill',
       revisedPrompt: 'image tool revised prompt',
     });
   });

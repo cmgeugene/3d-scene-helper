@@ -154,6 +154,7 @@ export const generationRecordSchema = z.object({
     .optional(),
   generationIntentSnapshot: generationIntentSchema.nullable().optional(),
   generationSpec: z.string().min(1).nullable().optional(),
+  promptCompiler: z.literal('codex-imagegen-skill').nullable().optional(),
   layoutSpec: layoutSpecSchema.nullable(),
   sceneSnapshot: sceneDocumentSchema.nullable().default(null),
   semanticSceneSpecSnapshot: semanticSceneSpecSchema.nullable().default(null),

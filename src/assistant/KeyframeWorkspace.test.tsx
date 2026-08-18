@@ -429,6 +429,7 @@ describe('KeyframeWorkspace', () => {
       },
       generationSpec:
         'Use case: photorealistic-natural\nPrimary request: a rain-wet alley at dawn',
+      promptCompiler: 'codex-imagegen-skill',
     });
     const child = generation({
       id: 'generation-child',
@@ -462,6 +463,7 @@ describe('KeyframeWorkspace', () => {
         layoutRenderSceneId: 'scene-test',
       },
       referenceSnapshots: [],
+      generationSpec: 'Legacy locally planned generation spec',
     });
     const storage = createMemoryStorage({
       [KEYFRAME_SELECTION_STORAGE_KEY]: parent.id,
@@ -511,6 +513,11 @@ describe('KeyframeWorkspace', () => {
     ).toBeVisible();
     expect(screen.getByText('비가 그친 새벽으로 해줘.')).toBeVisible();
     expect(
+      screen.getByRole('heading', {
+        name: 'Imagegen 스킬 최종 전달 프롬프트',
+      }),
+    ).toBeVisible();
+    expect(
       screen.getByText(
         'Use case: photorealistic-natural Primary request: a rain-wet alley at dawn',
       ),
@@ -539,6 +546,19 @@ describe('KeyframeWorkspace', () => {
       await screen.findByText('구형 기록 · 3D 장면 복원 제한'),
     ).toBeVisible();
     expect(screen.getByText(/SceneDocument 스냅샷이 없어/)).toBeVisible();
+    expect(
+      screen.getByRole('heading', {
+        name: '구형 Generation Spec · 출처 미확인',
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByText('Legacy locally planned generation spec'),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('heading', {
+        name: 'Imagegen 스킬 최종 전달 프롬프트',
+      }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: '생성 당시 3D 씬 미리보기' }),
     ).toBeDisabled();

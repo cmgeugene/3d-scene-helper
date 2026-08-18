@@ -350,25 +350,82 @@ describe('Companion loopback API', () => {
     );
   });
 
-  it('OAuth 생성은 영어 스펙과 대화 의도를 저장하고 task를 completed로 종료한다', async () => {
+  it('OAuth 생성은 실제 imagegen 스킬 prompt를 최종 전달하고 task를 completed로 종료한다', async () => {
     let generatedPath = '';
+    let runtimeForCompiler: FakeRuntime | null = null;
     const cleanup = vi.fn(async () => undefined);
-    const oauthImageGenerator = vi.fn(async () => ({
-      base64: onePixelPng.toString('base64'),
-      revisedPrompt: 'tool revised prompt',
-      generationSpec:
-        'Use case: photorealistic-natural\nAsset type: cinematic I2V start frame',
-      filePath: generatedPath,
-      cleanup,
-    }));
+    const skillPrompt =
+      'Use case: photorealistic-natural\nPrimary request: finished frame\nInput images and authority: Image 1 controls layout.\nStyle/medium and integration: cohesive cinematic image.\nStrict composition and camera invariants: preserve OutputCamera.\nAvoid: no drift.';
+    const imagegenPromptCompiler = vi.fn(
+      async (input: { onThreadStarted?: (threadId: string) => void }) => {
+        runtimeForCompiler!.emit('notification', {
+          method: 'thread/started',
+          params: {
+            thread: {
+              id: 'thread-compiler',
+              threadSource: 'i2v-3d-scene-helper:imagegen-prompt-compiler:test',
+            },
+          },
+        });
+        input.onThreadStarted?.('thread-compiler');
+        runtimeForCompiler!.emit('serverRequest', {
+          id: 901,
+          method: 'item/commandExecution/requestApproval',
+          params: {
+            threadId: 'thread-compiler',
+            turnId: 'turn-compiler',
+          },
+        });
+        runtimeForCompiler!.emit('notification', {
+          method: 'item/completed',
+          params: {
+            threadId: 'thread-compiler',
+            turnId: 'turn-compiler',
+            item: {
+              type: 'agentMessage',
+              id: 'compiler-message',
+              text: JSON.stringify({ finalPrompt: skillPrompt }),
+            },
+          },
+        });
+        runtimeForCompiler!.emit('notification', {
+          method: 'turn/completed',
+          params: {
+            threadId: 'thread-compiler',
+            turn: {
+              id: 'turn-compiler',
+              status: 'completed',
+              error: null,
+            },
+          },
+        });
+        return {
+          finalPrompt: skillPrompt,
+          compiler: 'codex-imagegen-skill' as const,
+          compilerThreadId: 'thread-compiler',
+          compilerTurnId: 'turn-compiler',
+        };
+      },
+    );
+    const oauthImageGenerator = vi.fn(
+      async (input: { generationPrompt: string }) => ({
+        base64: onePixelPng.toString('base64'),
+        revisedPrompt: 'tool revised prompt',
+        generationSpec: input.generationPrompt,
+        filePath: generatedPath,
+        cleanup,
+      }),
+    );
     const { projectRoot, runtime, server } = await createServer({
       imageProvider: 'oauth',
       oauthUrl: 'http://127.0.0.1:10532',
       imageModel: 'gpt-5.6-sol',
       imageQuality: 'high',
       reasoningEffort: 'high',
+      imagegenPromptCompiler,
       oauthImageGenerator,
     });
+    runtimeForCompiler = runtime;
     generatedPath = path.join(projectRoot, 'oauth-result.png');
     await writeFile(generatedPath, onePixelPng);
     const jsonHeaders = {
@@ -428,6 +485,27 @@ describe('Companion loopback API', () => {
       });
     });
 
+    const eventsController = new AbortController();
+    const eventsResponse = await fetch(`${server.url}/api/events`, {
+      headers: { Authorization: 'Bearer test-token' },
+      signal: eventsController.signal,
+    });
+    const eventsReader = eventsResponse.body!.getReader();
+    const eventsDecoder = new TextDecoder();
+    let events = '';
+    const readEventsUntil = async (needle: string) => {
+      await vi.waitFor(
+        async () => {
+          const next = await eventsReader.read();
+          if (!next.done)
+            events += eventsDecoder.decode(next.value, { stream: true });
+          expect(events).toContain(needle);
+        },
+        { timeout: 2_000 },
+      );
+    };
+    await readEventsUntil(': connected');
+
     const sceneSnapshot = createStarterSceneDocument({
       documentId: 'scene-oauth',
       floorId: 'floor-oauth',
@@ -454,6 +532,45 @@ describe('Companion loopback API', () => {
       }),
     });
     expect(generationResponse.status).toBe(202);
+    await readEventsUntil('"status":"completed"');
+    runtime.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-compiler',
+        turnId: 'turn-compiler',
+        item: {
+          type: 'agentMessage',
+          id: 'late-compiler-message',
+          text: '{"finalPrompt":"late compiler event"}',
+        },
+      },
+    });
+    runtime.emit('serverRequest', {
+      id: 902,
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-compiler',
+        turnId: 'turn-compiler',
+      },
+    });
+    runtime.emit('notification', {
+      method: 'test/marker',
+      params: { threadId: 'thread_1', marker: 'after-compiler-marker' },
+    });
+    await readEventsUntil('after-compiler-marker');
+    expect(events).not.toContain('thread-compiler');
+    expect(events).not.toContain('compiler-message');
+    expect(events).not.toContain('late-compiler-message');
+    expect(runtime.rejectServerRequest).toHaveBeenCalledWith(
+      902,
+      -32600,
+      expect.stringContaining('planning-only'),
+    );
+    const runtimeRequests = (await fetch(`${server.url}/api/runtime-requests`, {
+      headers: { Authorization: 'Bearer test-token' },
+    }).then((response) => response.json())) as { requests: unknown[] };
+    expect(runtimeRequests.requests).toEqual([]);
+    eventsController.abort();
 
     await vi.waitFor(async () => {
       const generations = (await fetch(`${server.url}/api/generations`, {
@@ -468,8 +585,8 @@ describe('Companion loopback API', () => {
           responseModel: 'gpt-5.6-sol',
           imageQuality: 'high',
           reasoningEffort: 'high',
-          generationSpec:
-            'Use case: photorealistic-natural\nAsset type: cinematic I2V start frame',
+          generationSpec: skillPrompt,
+          promptCompiler: 'codex-imagegen-skill',
           revisedPrompt: 'tool revised prompt',
           generationIntentSnapshot: expect.objectContaining({
             sourceTurnId: 'turn-intent',
@@ -487,7 +604,26 @@ describe('Companion loopback API', () => {
         },
       });
     });
+    expect(imagegenPromptCompiler).toHaveBeenCalledOnce();
+    expect(imagegenPromptCompiler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtime,
+        projectRoot,
+        sourcePrompt: '$imagegen current scene evidence',
+        generationIntent: expect.objectContaining({
+          sourceTurnId: 'turn-intent',
+        }),
+        filePaths: [expect.stringContaining('/assets/scene-renders/')],
+      }),
+    );
     expect(oauthImageGenerator).toHaveBeenCalledOnce();
+    expect(oauthImageGenerator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generationPrompt: skillPrompt,
+        model: 'gpt-5.6-sol',
+        quality: 'high',
+      }),
+    );
     expect(cleanup).toHaveBeenCalledOnce();
   });
 

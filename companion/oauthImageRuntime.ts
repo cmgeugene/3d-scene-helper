@@ -1,8 +1,6 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { GenerationIntent } from '../shared/conversationMetadata';
-import { createGenerationSpec } from './generationSpecPlanner';
 import {
   generateOAuthImage,
   type OAuthImageQuality,
@@ -52,26 +50,15 @@ export async function writeOAuthImageResult(base64: string) {
 
 export async function generateOAuthImageFromFiles(
   options: OAuthImageProviderOptions & {
-    sourcePrompt: string;
-    generationIntent: GenerationIntent | null;
+    generationPrompt: string;
     filePaths: string[];
   },
   fetchImpl: typeof fetch = fetch,
 ) {
-  const generationSpec = await createGenerationSpec(
-    {
-      baseUrl: options.baseUrl,
-      model: options.model,
-      reasoningEffort: options.reasoningEffort,
-      sourcePrompt: options.sourcePrompt,
-      generationIntent: options.generationIntent,
-    },
-    fetchImpl,
-  );
   const result = await generateOAuthImage(
     {
       baseUrl: options.baseUrl,
-      prompt: generationSpec,
+      prompt: options.generationPrompt,
       model: options.model,
       quality: options.quality,
       size: options.size ?? 'auto',
@@ -83,7 +70,7 @@ export async function generateOAuthImageFromFiles(
   const saved = await writeOAuthImageResult(result.base64);
   return {
     ...result,
-    generationSpec,
+    generationSpec: options.generationPrompt,
     ...saved,
   };
 }

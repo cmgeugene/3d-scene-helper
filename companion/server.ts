@@ -33,6 +33,10 @@ import { RuntimeRequestStore } from './runtimeRequestStore';
 import { resolveProjectArtifact } from './projectArtifacts';
 import { createStaticEditor } from './staticEditor';
 import { generateOAuthImageFromFiles } from './oauthImageRuntime';
+import {
+  compileImagegenSkillPrompt,
+  IMAGEGEN_PROMPT_COMPILER_THREAD_SOURCE_PREFIX,
+} from './imagegenSkillPromptCompiler';
 import type {
   OAuthImageQuality,
   OAuthReasoningEffort,
@@ -235,6 +239,7 @@ export interface CompanionServerOptions {
   imageQuality?: OAuthImageQuality;
   reasoningEffort?: OAuthReasoningEffort;
   oauthStatus?: OAuthProxyStatus;
+  imagegenPromptCompiler?: typeof compileImagegenSkillPrompt;
   oauthImageGenerator?: typeof generateOAuthImageFromFiles;
 }
 
@@ -333,6 +338,8 @@ export async function startCompanionServer(
   const conversationStore = new ConversationStore(options.projectRoot);
   const oauthImageGenerator =
     options.oauthImageGenerator ?? generateOAuthImageFromFiles;
+  const imagegenPromptCompiler =
+    options.imagegenPromptCompiler ?? compileImagegenSkillPrompt;
   const runtimeRequestStore = new RuntimeRequestStore(options.projectRoot);
   const staticEditor =
     options.editorRoot === undefined
@@ -371,6 +378,7 @@ export async function startCompanionServer(
   >();
   const pendingRuntimeRequests = new Map<string, JsonRpcServerRequest>();
   const resolvingRuntimeRequests = new Set<string>();
+  const suppressedCodexThreadIds = new Set<string>();
 
   const broadcast = (event: string, value: unknown) => {
     for (const client of sseClients) writeSse(client.response, event, value);
@@ -378,6 +386,52 @@ export async function startCompanionServer(
   const handleStatus = (status: AppServerStatus) =>
     broadcast('runtime', status);
   const handleNotification = (notification: JsonRpcNotification) => {
+    const notificationParams =
+      notification.params !== null && typeof notification.params === 'object'
+        ? notification.params
+        : null;
+    const directThreadId =
+      notificationParams !== null &&
+      'threadId' in notificationParams &&
+      typeof notificationParams.threadId === 'string'
+        ? notificationParams.threadId
+        : null;
+    const nestedThread =
+      notificationParams !== null &&
+      'thread' in notificationParams &&
+      notificationParams.thread !== null &&
+      typeof notificationParams.thread === 'object'
+        ? notificationParams.thread
+        : null;
+    const nestedThreadId =
+      nestedThread !== null &&
+      'id' in nestedThread &&
+      typeof nestedThread.id === 'string'
+        ? nestedThread.id
+        : null;
+    const notificationThreadId = directThreadId ?? nestedThreadId;
+    const nestedThreadSource =
+      nestedThread !== null &&
+      'threadSource' in nestedThread &&
+      typeof nestedThread.threadSource === 'string'
+        ? nestedThread.threadSource
+        : null;
+    if (
+      notification.method === 'thread/started' &&
+      notificationThreadId !== null &&
+      nestedThreadSource?.startsWith(
+        `${IMAGEGEN_PROMPT_COMPILER_THREAD_SOURCE_PREFIX}:`,
+      ) === true
+    ) {
+      suppressedCodexThreadIds.add(notificationThreadId);
+      return;
+    }
+    if (
+      notificationThreadId !== null &&
+      suppressedCodexThreadIds.has(notificationThreadId)
+    ) {
+      return;
+    }
     if (notification.method === 'serverRequest/resolved') {
       const resolved = resolvedServerRequestNotificationSchema.safeParse(
         notification.params,
@@ -566,6 +620,37 @@ export async function startCompanionServer(
       });
   };
   const handleServerRequest = (request: JsonRpcServerRequest) => {
+    const requestParams =
+      request.params !== null && typeof request.params === 'object'
+        ? request.params
+        : null;
+    const directThreadId =
+      requestParams !== null &&
+      'threadId' in requestParams &&
+      typeof requestParams.threadId === 'string'
+        ? requestParams.threadId
+        : null;
+    const nestedThreadId =
+      requestParams !== null &&
+      'thread' in requestParams &&
+      requestParams.thread !== null &&
+      typeof requestParams.thread === 'object' &&
+      'id' in requestParams.thread &&
+      typeof requestParams.thread.id === 'string'
+        ? requestParams.thread.id
+        : null;
+    const requestThreadId = directThreadId ?? nestedThreadId;
+    if (
+      requestThreadId !== null &&
+      suppressedCodexThreadIds.has(requestThreadId)
+    ) {
+      options.runtime.rejectServerRequest?.(
+        request.id,
+        -32600,
+        'Imagegen prompt compiler planning-only thread는 server request를 허용하지 않습니다.',
+      );
+      return;
+    }
     void runtimeRequestStore
       .register(request)
       .then((normalized) => {
@@ -1056,6 +1141,16 @@ export async function startCompanionServer(
                       ),
                     )),
                   ];
+                  const compiledPrompt = await imagegenPromptCompiler({
+                    runtime: options.runtime,
+                    projectRoot: options.projectRoot,
+                    sourcePrompt: body.prompt,
+                    generationIntent,
+                    filePaths,
+                    onThreadStarted: (threadId) => {
+                      suppressedCodexThreadIds.add(threadId);
+                    },
+                  });
                   const generated = await oauthImageGenerator({
                     baseUrl:
                       options.oauthUrl ??
@@ -1064,8 +1159,7 @@ export async function startCompanionServer(
                     model: responseModel!,
                     quality: imageQuality!,
                     reasoningEffort: reasoningEffort!,
-                    sourcePrompt: body.prompt,
-                    generationIntent,
+                    generationPrompt: compiledPrompt.finalPrompt,
                     filePaths,
                   });
                   try {
@@ -1073,7 +1167,10 @@ export async function startCompanionServer(
                       turnId,
                       generated.filePath,
                       generated.revisedPrompt,
-                      { generationSpec: generated.generationSpec },
+                      {
+                        generationSpec: generated.generationSpec,
+                        promptCompiler: compiledPrompt.compiler,
+                      },
                     );
                   } finally {
                     await generated.cleanup();

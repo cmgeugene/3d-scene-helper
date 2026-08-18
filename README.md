@@ -76,10 +76,17 @@ Companion은 준비가 끝나면 개발 편집기가 같은 컴퓨터에서 자�
 
 이미지 생성 기본 경로는 내장 `openai-oauth` 프록시입니다. Companion이 Codex 로그인
 상태를 사용하는 로컬 프록시를 켠 뒤, Assistant에서 Responses 모델과 image quality를 고를 수
-있습니다. 선택한 모델은 먼저 현재 SceneDocument·OutputCamera·LayoutSpec·레퍼런스 역할과
-마지막으로 완료된 Companion 대화 의도를 `$imagegen` 스킬식 영어 `Generation Spec`으로
-정규화하고, 두 번째 Responses 호출의 `image_generation` 도구에는 그 영어 스펙과 이미지 입력만
-전달합니다. Codex `$imagegen`으로 되돌리려면 `--image-provider codex`를 씁니다.
+있습니다. OAuth 생성 전에 Codex App Server가 격리된 planning-only turn에서 실제 설치된
+`$imagegen` 스킬과 prompt-shaping 참조를 로드합니다. 이 turn은 현재
+SceneDocument·OutputCamera·LayoutSpec·레퍼런스 역할과 마지막으로 완료된 Companion 대화 의도로
+이미지 도구에 보낼 최종 영어 prompt를 작성할 뿐 이미지를 생성하지 않습니다. compiler thread는
+ephemeral·read-only·approval-never로 열고 passive item만 허용합니다. 다른 tool item이나 server
+request가 나타나면 turn 중단까지 기다린 뒤 fail-closed 처리합니다. 그 스킬 산출물 전체와 이미지
+입력을 선택한 Responses 모델의 `image_generation` 호출에 그대로 전달합니다.
+새 generation은 이 prompt와 함께 `promptCompiler: codex-imagegen-skill` provenance를 저장합니다.
+호환 필드 `generationSpec`만 있고 discriminator가 없는 기존 기록은 실제 installed-skill 출력으로
+간주하지 않고 UI에서 출처 미확인 구형 spec으로 표시합니다.
+Codex가 이미지까지 직접 생성하게 하려면 `--image-provider codex`를 씁니다.
 `openai-oauth`는 비공식 AGPL 패키지이며 ChatGPT/Codex 쿼터를 사용합니다.
 
 프로젝트마다 하나의 Companion만 실행할 수 있습니다. 실행 중인 프로젝트를 다시 시작하면 중복 실행을 거부하고, 비정상 종료로 남은 lock은 자동 복구합니다. `SIGINT`나 `SIGTERM`으로 종료하면 HTTP 서버, App Server와 lock을 함께 정리합니다.
@@ -110,7 +117,7 @@ platform 전용으로 생성되며 `distribution-manifest.json`에 편집기, ru
 
 선택 상태와 매핑도 manifest에 영속화됩니다. Scene Assistant에 메시지를 보낼 때 선택된 레퍼런스의 역할·사용 범위·연결 대상이 prompt에 포함되고, 이미지는 `Layout → Background → Character → Style` 순서로 Codex turn에 첨부됩니다.
 
-WebGL 뷰포트가 준비된 상태에서는 Scene Assistant에 연출 지시를 입력하고 `이미지 생성`을 누를 수 있습니다. 앱이 현재 OutputCamera를 reference PNG로 캡처해 첫 번째 첨부로 고정하고, 선택한 레퍼런스를 역할 순서대로 뒤에 붙입니다. 기본 OAuth 경로에서는 선택한 Responses 모델이 먼저 영어 Generation Spec을 작성하고 같은 모델의 `image_generation` 도구가 선택한 quality로 최종 이미지를 만듭니다. 마지막으로 정상 완료된 Companion 대화 교환은 revision이 있는 generation intent로 자동 승격되며, 실패·중단 turn이나 원시 transcript 전체는 전달하지 않습니다. 진행 상태와 완료 이미지는 패널에 표시됩니다. 구도 캡처는 `assets/scene-renders/`, 생성 결과는 `assets/generations/`에 복사되며 요청·첨부·해시·provider·모델·quality·reasoning·원본 prompt·영어 Generation Spec·도구 revised prompt·반영된 대화 의도는 `generations.json`에 구분해 기록됩니다. 실제 생성은 ChatGPT/Codex 사용량을 소비하므로 자동 테스트에서는 모의 OAuth/Responses 또는 App Server 이벤트만 사용합니다.
+WebGL 뷰포트가 준비된 상태에서는 Scene Assistant에 연출 지시를 입력하고 `이미지 생성`을 누를 수 있습니다. 앱이 현재 OutputCamera를 reference PNG로 캡처해 첫 번째 첨부로 고정하고, 선택한 레퍼런스를 역할 순서대로 뒤에 붙입니다. 기본 OAuth 경로에서는 실제 Codex `$imagegen` 스킬이 이미지 역할·권위, primary request, style/integration과 strict invariants를 포함한 최종 전달 prompt를 먼저 작성합니다. 선택한 Responses 모델은 그 prompt 자체와 같은 이미지 입력을 받아 선택한 quality로 `image_generation`을 실행합니다. prompt compiler는 모든 ordered `Image 1…N` 역할 바인딩을 검증하며, passive item 외의 도구나 승인 요청을 시도하면 중단 완료를 확인하고 생성 요청을 실패 처리합니다. 마지막으로 정상 완료된 Companion 대화 교환은 revision이 있는 generation intent로 자동 승격되며, 실패·중단 turn이나 원시 transcript 전체는 전달하지 않습니다. 진행 상태와 완료 이미지는 패널에 표시됩니다. 구도 캡처는 `assets/scene-renders/`, 생성 결과는 `assets/generations/`에 복사되며 요청·첨부·해시·provider·모델·quality·reasoning·원본 prompt·imagegen 스킬 최종 전달 prompt(`generationSpec`, 호환 필드명)·도구 revised prompt·반영된 대화 의도는 `generations.json`에 구분해 기록됩니다. 실제 생성은 ChatGPT/Codex 사용량을 소비하므로 자동 테스트에서는 모의 OAuth/Responses 또는 App Server 이벤트만 사용합니다.
 
 Codex 이미지 생성이 오래 걸리거나 현재 런타임에서 지원되지 않으면 같은 입력창의 `웹으로 내보내기`를 사용할 수 있습니다. 모달은 현재 장면·LayoutSpec·Semantic Scene Spec·선택 레퍼런스와 보정 지시를 GPT 웹용 프롬프트로 조립하고, 사용자가 맞춰야 할 이미지 첨부 순서를 함께 보여 줍니다. `프롬프트 복사` 후 GPT 웹에 직접 붙여 넣어 생성하며, 이 수동 결과는 프로젝트의 `generations.json`이나 생성 이력에 자동 등록되지 않습니다.
 

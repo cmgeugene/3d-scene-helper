@@ -109,6 +109,7 @@ const generationSchema = z
       .default(null),
     generationIntentSnapshot: generationIntentSchema.nullable().default(null),
     generationSpec: z.string().min(1).nullable().default(null),
+    promptCompiler: z.literal('codex-imagegen-skill').nullable().default(null),
     layoutSpec: layoutSpecSchema.nullable().default(null),
     sceneSnapshot: sceneDocumentSchema.nullable().default(null),
     semanticSceneSpecSnapshot: semanticSceneSpecSchema.nullable().default(null),
@@ -591,7 +592,10 @@ export class GenerationStore {
     turnId: string,
     savedPath: string,
     revisedPrompt: string | null,
-    metadata: { generationSpec?: string | null } = {},
+    metadata: {
+      generationSpec?: string | null;
+      promptCompiler?: 'codex-imagegen-skill' | null;
+    } = {},
   ) {
     return this.mutate(() =>
       this.importGenerationResultInternal(
@@ -920,7 +924,10 @@ export class GenerationStore {
     turnId: string,
     savedPath: string,
     revisedPrompt: string | null,
-    metadata: { generationSpec?: string | null },
+    metadata: {
+      generationSpec?: string | null;
+      promptCompiler?: 'codex-imagegen-skill' | null;
+    },
   ) {
     const manifest = await this.readManifest();
     const index = manifest.generations.findIndex(
@@ -990,6 +997,7 @@ export class GenerationStore {
       ...current,
       result,
       generationSpec: metadata.generationSpec ?? current.generationSpec,
+      promptCompiler: metadata.promptCompiler ?? current.promptCompiler,
       revisedPrompt,
       updatedAt: new Date().toISOString(),
     };

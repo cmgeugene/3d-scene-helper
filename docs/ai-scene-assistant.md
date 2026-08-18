@@ -554,10 +554,12 @@ production 편집기 정적 파일, 단일 JavaScript Companion runner와 현재
   -> React/Vite UI
   -> localhost API and event stream
   -> Local Companion
-      -> Codex App Server over stdio (conversation/spec patch and optional $imagegen fallback)
+      -> Codex App Server over stdio
+          -> conversation/spec patch
+          -> actual $imagegen skill planning-only prompt compilation
+          -> optional direct $imagegen image fallback
       -> Managed openai-oauth loopback proxy
-          -> selected Responses model: English Generation Spec planning
-          -> same Responses model + image_generation quality: final image
+          -> selected Responses model + compiled skill prompt + image_generation quality
       -> Project files and binary assets
   -> Project generation history
 ```
@@ -579,7 +581,7 @@ S32부터 Local Companion은 프로젝트 루트의 `conversations.json`을 vers
 요청·assistant 요약, scene/spec revision과 시각만 저장한다. 전체 prompt나 transcript는 저장하지
 않는다. 정상 완료된 최신 `conversation` turn은 사용자 메시지와 assistant 해석을 bounded
 `generationIntent`로 자동 승격하며 revision과 source turn을 함께 보존한다. 실패·중단 turn,
-spec patch와 generation turn은 기존 intent를 덮어쓰지 않는다. 이 intent는 생성 planner의
+spec patch와 generation turn은 기존 intent를 덮어쓰지 않는다. 이 intent는 imagegen skill prompt compiler의
 보조 증거이며 현재 SceneDocument, Semantic Scene Spec과 LayoutSpec에 충돌하면 구조화된 현재
 장면이 우선한다. `sessionStorage`는 구형 Companion·테스트를 위한 탭 단위 캐시에만 사용한다.
 
@@ -609,17 +611,27 @@ SceneDocument, Semantic Scene Spec과 generation record의 영구 원본 지위�
 Assistant에서 허용된 Responses 모델과 `image_generation.quality`를 고른다. Companion은 한 번의
 생성 요청을 다음 두 단계로 실행한다.
 
-1. 선택한 Responses 모델이 SceneDocument, OutputCamera, LayoutSpec, Semantic Scene Spec,
-   레퍼런스 역할, 보정 지시와 최신 generation intent를 카메라·구도·피사체·공간·조명·제약
-   중심의 영어 `Generation Spec`으로 정규화한다. 이 호출에는 이미지 도구를 제공하지 않는다.
-2. 같은 Responses 모델에 영어 스펙과 실제 이미지 입력만 전달하고 `image_generation` 도구를
-   선택한 quality로 호출한다.
+1. Codex App Server가 별도의 ephemeral·read-only·approval-never thread에서 실제 설치된
+   `$imagegen` 스킬과 그 prompt-shaping 참조를 로드한다. SceneDocument, OutputCamera, LayoutSpec,
+   Semantic Scene Spec, ordered image roles, 보정 지시와 최신 generation intent를 입력으로 받아 이미지
+   도구에 보낼 완전한 영어 production prompt를 구조화 응답 `finalPrompt`로 반환한다. Companion은
+   passive item만 허용하며 다른 현재·미래 tool item 또는 server request가 나타나면 turn 중단 완료까지
+   기다린 뒤 fail-closed 처리한다. thread 생성, turn 시작과 최종 응답은 하나의 전체 deadline을
+   공유한다.
+2. 선택한 Responses 모델에는 1단계의 `finalPrompt`를 수정·요약하지 않고 실제 이미지 입력과 함께
+   전달하며 `image_generation` 도구를 선택한 quality로 호출한다.
 
-영어 스펙은 OutputCamera 레이아웃을 카메라·크롭·배치·포즈·깊이·가림의 권위로 유지하고,
+스킬 최종 prompt는 `Use case`, `Primary request`, ordered image roles/authority,
+`Style/medium and integration`, strict composition/camera invariants와 `Avoid`를 포함한다. OutputCamera
+레이아웃을 카메라·크롭·배치·포즈·깊이·가림의 권위로 유지하고,
 3D proxy 색·primitive geometry·editor artifact는 최종 외형이 아님을 명시한다. generation
-record는 원본 prompt, 영어 `generationSpec`, 이미지 도구가 반환한 `revisedPrompt`를 서로 다른
+record는 원본 prompt, 스킬 최종 전달 prompt인 `generationSpec`(호환 필드명), 이미지 도구가 반환한 `revisedPrompt`를 서로 다른
 필드로 보존하고 provider, Responses 모델, quality, reasoning과 반영한 intent snapshot을 함께
-기록한다. 프로젝트가 참조하는 최종 이미지는 `assets/generations/`로 편입한다.
+기록한다. 실제 installed-skill compiler를 거친 새 기록에는
+`promptCompiler: "codex-imagegen-skill"`을 함께 저장한다. 이 discriminator 없이
+`generationSpec`만 존재하는 기존 자체-planner 기록은 복원하되 실제 스킬 출력으로 승격하지 않고
+UI에서 출처 미확인 구형 spec으로 중립 표시한다. 프로젝트가 참조하는 최종 이미지는
+`assets/generations/`로 편입한다.
 
 `--image-provider codex`는 기존 Codex `$imagegen` App Server 경로를 명시적으로 선택하는
 fallback이다. 앱은 OAuth 준비 상태와 Codex imagegen capability를 선택한 provider에 맞게 각각
@@ -630,7 +642,7 @@ fallback이다. 앱은 OAuth 준비 상태와 Codex imagegen capability를 선�
 - Codex 대화 App Server와 OAuth proxy 준비 상태
 - 로그인과 thread 연결 상태
 - 선택한 Responses 모델과 image quality
-- 영어 스펙 planning, 레퍼런스 전달, 생성, 결과 편입 단계별 진행 상태
+- imagegen 스킬 prompt compilation, 레퍼런스 전달, 생성, 결과 편입 단계별 진행 상태
 - 취소, 사용 한도, 기능 미지원과 생성 실패 원인
 
 S36부터 Scene Assistant는 Codex imagegen이 오래 걸리거나 런타임에서 지원되지 않을 때 사용할
