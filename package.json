@@ -32,6 +32,7 @@
     "@openai/codex": "0.146.0",
     "@react-three/drei": "10.7.7",
     "@react-three/fiber": "9.6.1",
+    "openai-oauth": "^1.0.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "sharp": "0.34.4",

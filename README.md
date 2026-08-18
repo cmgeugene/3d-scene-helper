@@ -74,6 +74,11 @@ Companion은 준비가 끝나면 개발 편집기가 같은 컴퓨터에서 자�
 포트로 한 번 전환하며, 고정 포트가 반드시 필요하면 `--strict-port`를 추가합니다. 연결 정보는
 탭의 `sessionStorage`에 보관됩니다.
 
+이미지 생성 기본 경로는 내장 `openai-oauth` 프록시입니다. Companion이 Codex 로그인
+파일을 보고 로컬 프록시를 켠 뒤, Assistant에서 모델과 quality를 고를 수 있습니다.
+Codex `$imagegen`으로 되돌리려면 `--image-provider codex`를 씁니다. `openai-oauth`는
+비공식 AGPL 패키지이며 ChatGPT/Codex 쿼터를 사용합니다.
+
 프로젝트마다 하나의 Companion만 실행할 수 있습니다. 실행 중인 프로젝트를 다시 시작하면 중복 실행을 거부하고, 비정상 종료로 남은 lock은 자동 복구합니다. `SIGINT`나 `SIGTERM`으로 종료하면 HTTP 서버, App Server와 lock을 함께 정리합니다.
 
 개발 서버 없이 production 편집기와 Companion을 같은 loopback origin에서 실행하려면 다음을

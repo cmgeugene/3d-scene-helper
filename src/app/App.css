@@ -1266,6 +1266,13 @@ p {
   gap: 0.4rem;
 }
 
+.assistant-image-settings {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
 .assistant-composer .assistant-generate {
   border-color: #546ca2;
   color: #e4ecff;

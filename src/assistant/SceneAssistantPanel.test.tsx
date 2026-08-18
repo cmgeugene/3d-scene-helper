@@ -1459,6 +1459,8 @@ describe('SceneAssistantPanel', () => {
       refinementDirective: null,
       generationMode: 'fresh',
       acknowledgedPreflightWarningIds: [],
+      imageModel: 'gpt-5.4-mini',
+      imageQuality: 'medium',
     });
     expect(startGeneration.mock.calls[0]?.[0].prompt).toContain(
       '"attachmentIndex":2',
@@ -1783,6 +1785,8 @@ describe('SceneAssistantPanel', () => {
       },
       generationMode: 'edit',
       acknowledgedPreflightWarningIds: [],
+      imageModel: 'gpt-5.4-mini',
+      imageQuality: 'medium',
     });
   });
 });

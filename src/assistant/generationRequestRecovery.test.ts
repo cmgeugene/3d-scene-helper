@@ -42,6 +42,8 @@ function input() {
     refinementDirective: null,
     generationMode: 'fresh' as const,
     acknowledgedPreflightWarningIds: [],
+    imageModel: 'gpt-5.4-mini',
+    imageQuality: 'medium' as const,
   };
 }
 

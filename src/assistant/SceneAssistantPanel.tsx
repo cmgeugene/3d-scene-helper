@@ -34,6 +34,15 @@ import {
   createWebImageRefinementPrompt,
 } from './sceneAssistantPrompt';
 import { WebPromptExportDialog } from './WebPromptExportDialog';
+import {
+  DEFAULT_OAUTH_IMAGE_SETTINGS,
+  readOAuthImageSettings,
+  writeOAuthImageSettings,
+} from './oauthImageSettings';
+import {
+  OAUTH_IMAGE_MODELS,
+  OAUTH_IMAGE_QUALITIES,
+} from '../../shared/oauthImageOptions';
 import { parseGenerationUpdate } from './generationEvents';
 import { parseSpecPatchProposalUpdate } from './specPatchProposalEvents';
 import { RuntimeRequestCard } from './RuntimeRequestCard';
@@ -246,6 +255,11 @@ function ConnectedSceneAssistant({
   const [reconnectDelayMs, setReconnectDelayMs] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [imageSettings, setImageSettings] = useState(() =>
+    typeof localStorage === 'undefined'
+      ? DEFAULT_OAUTH_IMAGE_SETTINGS
+      : readOAuthImageSettings(localStorage),
+  );
   const [refinementPreserveDraft, setRefinementPreserveDraft] = useState('');
   const [activeView, setActiveView] = useState<AssistantView>('conversation');
   const restoredThreadId = useMemo(() => readSceneAssistantThread(), []);
@@ -950,7 +964,9 @@ function ConnectedSceneAssistant({
         conversationDecisionRequired ||
         conversationSessionLoading ||
         generationLaunchInFlightRef.current ||
-        runtime?.capabilities?.imageGeneration === false
+        (runtime?.imageProvider === 'oauth'
+          ? runtime.oauth?.state !== 'ready'
+          : runtime?.capabilities?.imageGeneration === false)
       ) {
         return;
       }
@@ -1062,6 +1078,8 @@ function ConnectedSceneAssistant({
             acknowledgedPreflightWarningIds: preflight.warnings.map(
               ({ id }) => id,
             ),
+            imageModel: imageSettings.model,
+            imageQuality: imageSettings.quality,
           });
         storeGenerationRequestRecovery(storage, generationInput);
         const started = await client.startGeneration(generationInput);
@@ -1099,7 +1117,8 @@ function ConnectedSceneAssistant({
       phase,
       refinementPreserveDraft,
       refinementSource,
-      runtime?.capabilities?.imageGeneration,
+      runtime,
+      imageSettings,
       revokeObjectUrl,
       storage,
       displayGeneration,
@@ -1911,6 +1930,54 @@ function ConnectedSceneAssistant({
               </button>
             ) : (
               <div className="assistant-actions">
+                <div className="assistant-image-settings">
+                  <label className="camera-field">
+                    <span>모델</span>
+                    <select
+                      aria-label="이미지 모델"
+                      value={imageSettings.model}
+                      onChange={(event) => {
+                        const next = {
+                          ...imageSettings,
+                          model: event.currentTarget.value,
+                        };
+                        setImageSettings(next);
+                        writeOAuthImageSettings(localStorage, next);
+                      }}
+                    >
+                      {(runtime?.oauth?.models.length
+                        ? runtime.oauth.models
+                        : OAUTH_IMAGE_MODELS
+                      ).map((model) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="camera-field">
+                    <span>품질</span>
+                    <select
+                      aria-label="이미지 품질"
+                      value={imageSettings.quality}
+                      onChange={(event) => {
+                        const next = {
+                          ...imageSettings,
+                          quality: event.currentTarget
+                            .value as (typeof OAUTH_IMAGE_QUALITIES)[number],
+                        };
+                        setImageSettings(next);
+                        writeOAuthImageSettings(localStorage, next);
+                      }}
+                    >
+                      {OAUTH_IMAGE_QUALITIES.map((quality) => (
+                        <option key={quality} value={quality}>
+                          {quality}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
                 <button type="submit" disabled={draft.trim() === ''}>
                   보내기
                 </button>
@@ -1931,17 +1998,23 @@ function ConnectedSceneAssistant({
                   disabled={
                     draft.trim() === '' ||
                     captureLayout === null ||
-                    runtime?.capabilities?.imageGeneration === false ||
+                    (runtime?.imageProvider === 'oauth'
+                      ? runtime.oauth?.state !== 'ready'
+                      : runtime?.capabilities?.imageGeneration === false) ||
                     referenceSelectionOverLimit
                   }
                   title={
                     captureLayout === null
                       ? 'WebGL 뷰포트가 준비되면 사용할 수 있습니다.'
-                      : runtime?.capabilities?.imageGeneration === false
-                        ? '현재 Codex 런타임이 이미지 생성을 지원하지 않습니다.'
-                        : referenceSelectionOverLimit
-                          ? `레퍼런스를 ${maximumReferences}장 이하로 줄여 주세요.`
-                          : undefined
+                      : runtime?.imageProvider === 'oauth' &&
+                          runtime.oauth?.state !== 'ready'
+                        ? (runtime.oauth?.error ??
+                          'OAuth 이미지 프록시가 아직 준비되지 않았습니다.')
+                        : runtime?.capabilities?.imageGeneration === false
+                          ? '현재 Codex 런타임이 이미지 생성을 지원하지 않습니다.'
+                          : referenceSelectionOverLimit
+                            ? `레퍼런스를 ${maximumReferences}장 이하로 줄여 주세요.`
+                            : undefined
                   }
                 >
                   {refinementSource === null ? '이미지 생성' : '보정 생성'}

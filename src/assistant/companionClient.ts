@@ -52,6 +52,15 @@ export const companionRuntimeSchema = z.object({
     })
     .nullable()
     .optional(),
+  imageProvider: z.enum(['codex', 'oauth']).optional(),
+  oauth: z
+    .object({
+      state: z.enum(['stopped', 'starting', 'ready', 'failed']),
+      url: z.string().nullable(),
+      error: z.string().nullable(),
+      models: z.array(z.string()),
+    })
+    .optional(),
 });
 
 export type CompanionRuntimeStatus = z.infer<typeof companionRuntimeSchema>;
@@ -219,6 +228,8 @@ export const startGenerationInputSchema = z.object({
     .array(z.string().trim().min(1).max(300))
     .max(32)
     .default([]),
+  imageModel: z.string().trim().min(1).max(80).default('gpt-5.4-mini'),
+  imageQuality: z.enum(['low', 'medium', 'high', 'auto']).default('medium'),
 });
 
 export type StartGenerationInput = z.input<typeof startGenerationInputSchema>;

@@ -616,6 +616,8 @@ describe('CompanionClient', () => {
         refinementDirective: null,
         generationMode: 'fresh',
         acknowledgedPreflightWarningIds: [],
+        imageModel: 'gpt-5.4-mini',
+        imageQuality: 'medium',
       }),
     });
     expect(fetchCalls.at(-2)?.input).toBe(

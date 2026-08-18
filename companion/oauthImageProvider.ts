@@ -1,5 +1,15 @@
-export type OAuthImageQuality = 'low' | 'medium' | 'high' | 'auto';
+import type { OAuthImageQuality } from '../shared/oauthImageOptions';
+export type { OAuthImageQuality } from '../shared/oauthImageOptions';
 export type OAuthReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh';
+export {
+  DEFAULT_OAUTH_IMAGE_MODEL,
+  DEFAULT_OAUTH_IMAGE_QUALITY,
+  DEFAULT_OAUTH_PROXY_PORT,
+  OAUTH_IMAGE_MODELS,
+  OAUTH_IMAGE_QUALITIES,
+  filterOAuthImageModels,
+  parseOAuthReadyUrl,
+} from '../shared/oauthImageOptions';
 
 export interface OAuthImageReference {
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp';

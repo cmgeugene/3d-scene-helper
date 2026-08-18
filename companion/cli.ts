@@ -10,7 +10,7 @@ export interface CompanionCliOptions {
   editorRoot: string | null;
   showHelp: boolean;
   imageProvider: 'codex' | 'oauth';
-  oauthUrl: string;
+  oauthUrl: string | null;
   imageModel: string;
   imageQuality: 'low' | 'medium' | 'high' | 'auto';
   reasoningEffort: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
@@ -30,8 +30,8 @@ export function companionCliHelp() {
   --origin <url>         추가로 허용할 브라우저 Origin
   --no-open              기본 브라우저를 자동으로 열지 않음
   --strict-port          지정 포트 충돌 시 빈 포트로 전환하지 않음
-  --image-provider <id>  생성 경로: codex(기본) 또는 oauth
-  --oauth-url <url>      ima2-gen과 같은 openai-oauth 프록시 (기본값: http://127.0.0.1:10531)
+  --image-provider <id>  생성 경로: oauth(기본) 또는 codex
+  --oauth-url <url>      이미 켜진 openai-oauth 주소. 없으면 Companion이 직접 기동
   --image-model <id>     OAuth Responses 모델 (기본값: gpt-5.4-mini)
   --image-quality <id>   OAuth image_generation quality (low|medium|high|auto)
   --reasoning-effort <id> OAuth reasoning.effort (none|low|medium|high|xhigh)
@@ -48,8 +48,8 @@ export function parseCompanionCliOptions(args: string[]): CompanionCliOptions {
   let fallbackOnPortConflict = true;
   let editorRoot: string | null = null;
   let showHelp = false;
-  let imageProvider: CompanionCliOptions['imageProvider'] = 'codex';
-  let oauthUrl = 'http://127.0.0.1:10531';
+  let imageProvider: CompanionCliOptions['imageProvider'] = 'oauth';
+  let oauthUrl: string | null = null;
   let imageModel = 'gpt-5.4-mini';
   let imageQuality: CompanionCliOptions['imageQuality'] = 'medium';
   let reasoningEffort: CompanionCliOptions['reasoningEffort'] = 'none';

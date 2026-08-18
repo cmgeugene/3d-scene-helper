@@ -14,6 +14,7 @@ import {
   clearCompanionDevSession,
   writeCompanionDevSession,
 } from './devSession';
+import { startManagedOAuthProxy } from './oauthProxy';
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -30,6 +31,8 @@ if (options.showHelp) {
 async function runCompanion(options: CompanionCliOptions) {
   const instanceLock = await acquireCompanionInstanceLock(options.projectRoot);
   const runtime = new CodexAppServerClient({ cwd: options.projectRoot });
+  let oauthProxy: Awaited<ReturnType<typeof startManagedOAuthProxy>> | null =
+    null;
   let shuttingDown = false;
   let server:
     | Awaited<ReturnType<typeof startCompanionServerWithPortFallback>>['server']
@@ -39,6 +42,7 @@ async function runCompanion(options: CompanionCliOptions) {
     if (shuttingDown) return;
     shuttingDown = true;
     await server?.close();
+    await oauthProxy?.stop();
     await runtime.stop();
     await clearCompanionDevSession(repoRoot);
     await instanceLock.release();
@@ -46,6 +50,12 @@ async function runCompanion(options: CompanionCliOptions) {
 
   try {
     await runtime.start();
+    if (options.imageProvider === 'oauth') {
+      oauthProxy = await startManagedOAuthProxy({
+        repoRoot,
+        requestedUrl: options.oauthUrl,
+      });
+    }
     const started = await startCompanionServerWithPortFallback({
       runtime,
       projectRoot: options.projectRoot,
@@ -53,7 +63,8 @@ async function runCompanion(options: CompanionCliOptions) {
       port: options.port,
       fallbackOnPortConflict: options.fallbackOnPortConflict,
       imageProvider: options.imageProvider,
-      oauthUrl: options.oauthUrl,
+      oauthUrl: oauthProxy?.status.url ?? options.oauthUrl ?? undefined,
+      oauthStatus: oauthProxy?.status,
       imageModel: options.imageModel,
       imageQuality: options.imageQuality,
       reasoningEffort: options.reasoningEffort,

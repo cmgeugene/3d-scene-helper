@@ -37,6 +37,7 @@ import type {
   OAuthImageQuality,
   OAuthReasoningEffort,
 } from './oauthImageProvider';
+import type { OAuthProxyStatus } from './oauthProxy';
 import {
   ReferenceInputError,
   ReferenceNotFoundError,
@@ -139,6 +140,8 @@ const generationBodySchema = z
       .array(z.string().trim().min(1).max(300))
       .max(32)
       .default([]),
+    imageModel: z.string().trim().min(1).max(80).optional(),
+    imageQuality: z.enum(['low', 'medium', 'high', 'auto']).optional(),
   })
   .superRefine((body, context) => {
     const editing = body.generationMode === 'edit';
@@ -231,6 +234,7 @@ export interface CompanionServerOptions {
   imageModel?: string;
   imageQuality?: OAuthImageQuality;
   reasoningEffort?: OAuthReasoningEffort;
+  oauthStatus?: OAuthProxyStatus;
 }
 
 export interface CompanionServerHandle {
@@ -642,7 +646,16 @@ export async function startCompanionServer(
 
     try {
       if (request.method === 'GET' && requestUrl.pathname === '/api/runtime') {
-        sendJson(response, 200, options.runtime.status);
+        sendJson(response, 200, {
+          ...options.runtime.status,
+          imageProvider: options.imageProvider ?? 'codex',
+          oauth: options.oauthStatus ?? {
+            state: 'stopped',
+            url: null,
+            error: null,
+            models: [],
+          },
+        });
         return;
       }
 
@@ -1020,9 +1033,14 @@ export async function startCompanionServer(
                     )),
                   ];
                   const generated = await generateOAuthImageFromFiles({
-                    baseUrl: options.oauthUrl ?? 'http://127.0.0.1:10531',
-                    model: options.imageModel ?? 'gpt-5.4-mini',
-                    quality: options.imageQuality ?? 'medium',
+                    baseUrl:
+                      options.oauthUrl ??
+                      options.oauthStatus?.url ??
+                      'http://127.0.0.1:10532',
+                    model:
+                      body.imageModel ?? options.imageModel ?? 'gpt-5.4-mini',
+                    quality:
+                      body.imageQuality ?? options.imageQuality ?? 'medium',
                     reasoningEffort: options.reasoningEffort ?? 'none',
                     prompt: body.prompt,
                     filePaths,
