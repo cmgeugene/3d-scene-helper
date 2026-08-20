@@ -8,6 +8,7 @@ import {
 } from './sceneAssistantPrompt';
 import { TEST_LAYOUT_SPEC } from '../../shared/layoutSpecTestFixture';
 import { createStarterSceneDocument } from '../editor/persistence/sceneSchema';
+import { createLayoutSpec } from './layoutSpec';
 
 describe('createSceneAssistantPrompt', () => {
   it('사용자 메시지와 현재 SceneDocument를 분리해 전달한다', () => {
@@ -71,6 +72,31 @@ describe('createSceneAssistantPrompt', () => {
     );
     expect(prompt).toContain('"targetObjectId":"blue-mannequin"');
     expect(prompt).toContain('"exclude":["pose","text"]');
+  });
+
+  it('현재 3D 렌더와 카메라 기준 방향값을 일반 대화의 근거로 전달한다', () => {
+    const scene = createStarterSceneDocument({
+      documentId: 'scene-conversation-layout',
+      floorId: 'floor-conversation-layout',
+      mannequinId: 'actor-conversation-layout',
+    });
+    scene.outputCamera.position = { x: -2, y: 3, z: -5 };
+    const layoutSpec = createLayoutSpec(scene);
+
+    const prompt = createSceneAssistantPrompt(
+      '한나 몸이 화면에서 ↙ 방향이어야 해.',
+      scene,
+      [],
+      { layoutSpec, layoutRenderAttached: true },
+    );
+
+    expect(prompt).toContain('첨부 이미지 1은 이 SceneDocument와 같은 시점');
+    expect(prompt).toContain('[LayoutSpec / 현재 카메라 기준 파생 구도]');
+    expect(prompt).toContain('"cameraAzimuthFromForwardDeg"');
+    expect(prompt).toContain('"screenDirectionLabel":"down-left"');
+    expect(prompt).toContain(
+      '대각선으로 보인다는 이유만으로 월드 Y 회전이 잘못됐다고 단정하지 않는다',
+    );
   });
 });
 

@@ -728,6 +728,83 @@ describe('SceneAssistantPanel', () => {
     expect(startThread).toHaveBeenCalledWith('thread-existing');
   });
 
+  it('일반 대화에 현재 3D 렌더를 먼저 첨부하고 카메라 기준 LayoutSpec을 함께 보낸다', async () => {
+    const user = userEvent.setup();
+    const scene = createStarterSceneDocument({
+      documentId: 'scene-grounded-conversation',
+      floorId: 'floor-grounded-conversation',
+      mannequinId: 'mannequin-grounded-conversation',
+    });
+    scene.outputCamera.position = { x: -2, y: 3, z: -5 };
+    const layoutBlob = new Blob(['layout'], { type: 'image/png' });
+    const captureLayout = vi.fn(async () => layoutBlob);
+    const createSceneRender = vi.fn(async () => ({
+      id: 'render-grounded-conversation',
+      sceneId: scene.id,
+      artifactId: 'artifact-grounded-conversation',
+      contentHash: `sha256:${'f'.repeat(64)}`,
+      mimeType: 'image/png' as const,
+      width: 1920,
+      height: 1080,
+      byteLength: 6,
+      createdAt: '2026-08-20T00:00:00.000Z',
+    }));
+    const startConversationTurn = vi.fn(async () => 'turn-grounded');
+    const client: CompanionBrowserClient = {
+      ...conversationMethods,
+      getRuntime: async () => ({
+        state: 'ready',
+        version: 'codex-test',
+        account: { type: 'chatgpt', email: null, planType: 'plus' },
+        requiresOpenaiAuth: true,
+        error: null,
+      }),
+      createSceneRender,
+      startConversationTurn,
+      subscribe: () => () => undefined,
+    };
+
+    render(
+      <SceneAssistantPanel
+        connection={connection}
+        getSceneContext={() => scene}
+        getSelectedReferences={() => [characterReference]}
+        captureLayout={captureLayout}
+        clientFactory={() => client}
+      />,
+    );
+
+    await user.type(
+      await screen.findByLabelText('장면에 대해 말하기'),
+      '한나 몸이 화면에서 ↙ 방향인지 확인해줘.',
+    );
+    await user.click(screen.getByRole('button', { name: '보내기' }));
+
+    await waitFor(() => expect(startConversationTurn).toHaveBeenCalledOnce());
+    expect(captureLayout).toHaveBeenCalledOnce();
+    expect(createSceneRender).toHaveBeenCalledWith(layoutBlob, scene.id);
+    expect(startConversationTurn).toHaveBeenCalledWith(
+      'thread-test',
+      expect.stringMatching(
+        /첨부 이미지 1은 이 SceneDocument.+"screenDirectionLabel":"down-left"/s,
+      ),
+      ['ref-character'],
+      expect.objectContaining({
+        userMessage: '한나 몸이 화면에서 ↙ 방향인지 확인해줘.',
+        referenceBindings: [
+          expect.objectContaining({
+            conversationAttachmentIndex: 2,
+            id: 'ref-character',
+          }),
+        ],
+      }),
+      {
+        layoutRenderId: 'render-grounded-conversation',
+        sceneId: scene.id,
+      },
+    );
+  });
+
   it('프로젝트에 저장된 task의 요약을 보여주고 재개 또는 새 task를 명시적으로 선택한다', async () => {
     const user = userEvent.setup();
     const scene = createStarterSceneDocument({

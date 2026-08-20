@@ -8,8 +8,11 @@ import {
 } from '../../shared/generationPromptEvidence';
 
 const SCENE_ASSISTANT_INSTRUCTIONS = `너는 I2V 3D Scene Helper의 Scene Assistant다.
-현재 요청에서는 파일을 수정하거나 명령을 실행하지 말고, 제공된 SceneDocument와 사용자의 설명을 바탕으로 장면을 해석하고 필요한 확인 질문이나 연출 제안을 한국어로 간결하게 답한다.
+현재 요청에서는 파일을 수정하거나 명령을 실행하지 말고, 제공된 현재 3D 레이아웃 렌더, LayoutSpec, SceneDocument와 사용자의 설명을 바탕으로 장면을 해석하고 필요한 확인 질문이나 연출 제안을 한국어로 간결하게 답한다.
 SceneDocument의 위치, 카메라, 가림 관계는 구도 기준이며 색상만으로 오브젝트의 실제 의미를 단정하지 않는다.
+SceneDocument의 transform.rotationDeg는 월드 좌표의 실제 회전이다. 화면에서 보이는 방향이나 카메라 기준 회전으로 바꿔 해석하거나, 대각선으로 보인다는 이유만으로 월드 Y 회전이 잘못됐다고 단정하지 않는다.
+마네킹 방향을 말할 때는 월드 진행 방향(worldDirection), 카메라 상대 시점(cameraAzimuthFromForwardDeg와 viewClassification), 화면 투영 방향(screenDirection과 screenDirectionLabel)을 구분한다. cameraAzimuthFromForwardDeg의 양수는 카메라가 마네킹의 왼쪽, 음수는 오른쪽에 있다는 뜻이다. screenDirection은 x가 오른쪽, y가 아래쪽인 출력 화면 좌표이며 ↙는 down-left다.
+화면상 방향 질문에는 LayoutSpec의 파생 방향값과 현재 3D 레이아웃 렌더를 우선 확인하고, 사용자가 월드 회전을 바꾸라고 명시하지 않았다면 오브젝트 transform과 카메라 중 무엇을 바꿀지 임의로 결론내리지 않는다.
 첨부 레퍼런스를 답변에서 지칭할 때는 이미지 번호를 사용하지 말고 매니페스트의 name, id와 role을 사용한다. attachmentIndex는 현재 대화에서만 유효하며 이후 이미지 생성의 첨부 번호가 아니다.
 확실하지 않은 의미 정보는 추측을 사실처럼 말하지 말고 사용자에게 확인한다.`;
 
@@ -26,12 +29,35 @@ function referenceManifest(
 
 export { serializeSemanticSceneSpecPrompt };
 
+export interface SceneAssistantLayoutContext {
+  layoutSpec: LayoutSpec;
+  layoutRenderAttached: boolean;
+}
+
 export function createSceneAssistantPrompt(
   userMessage: string,
   sceneDocument: unknown,
   references: ReferenceArtifact[] = [],
+  layoutContext: SceneAssistantLayoutContext | null = null,
 ) {
-  const referenceBlock = referenceManifest(references, 0);
+  const referenceBlock = referenceManifest(
+    references,
+    layoutContext?.layoutRenderAttached === true ? 1 : 0,
+  );
+  const layoutBlock =
+    layoutContext === null
+      ? ''
+      : `
+
+[현재 3D 레이아웃 렌더]
+${
+  layoutContext.layoutRenderAttached
+    ? '첨부 이미지 1은 이 SceneDocument와 같은 시점의 현재 OutputCamera 3D 렌더다. 화면 구도와 보이는 방향을 판단하는 시각 증거로 사용한다.'
+    : '렌더 이미지는 이번 대화에 첨부되지 않았다. 아래 LayoutSpec의 파생값과 SceneDocument를 사용하고 보이지 않는 시각 정보를 추측하지 않는다.'
+}
+
+[LayoutSpec / 현재 카메라 기준 파생 구도]
+${JSON.stringify(layoutContext.layoutSpec)}`;
   const serializedReferences =
     referenceBlock.length === 0
       ? ''
@@ -46,7 +72,7 @@ ${JSON.stringify(referenceBlock)}`;
 ${userMessage}
 
 [현재 SceneDocument]
-${JSON.stringify(sceneDocument)}${serializedReferences}`;
+${JSON.stringify(sceneDocument)}${layoutBlock}${serializedReferences}`;
 }
 
 export function createImageGenerationPrompt(

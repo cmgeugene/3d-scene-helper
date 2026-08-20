@@ -88,6 +88,39 @@ export const layoutSpecSchema = z.object({
             'screen-left',
             'screen-right',
           ]),
+          cameraAzimuthFromForwardDeg: z
+            .number()
+            .min(-180)
+            .max(180)
+            .nullable()
+            .optional(),
+          viewClassification: z
+            .enum([
+              'front',
+              'front-left-three-quarter',
+              'left-profile',
+              'back-left-three-quarter',
+              'back',
+              'back-right-three-quarter',
+              'right-profile',
+              'front-right-three-quarter',
+            ])
+            .nullable()
+            .optional(),
+          screenDirection: screenPointSchema.nullable().optional(),
+          screenDirectionLabel: z
+            .enum([
+              'up',
+              'up-right',
+              'right',
+              'down-right',
+              'down',
+              'down-left',
+              'left',
+              'up-left',
+            ])
+            .nullable()
+            .optional(),
         })
         .nullable(),
       poseId: z.string().nullable(),

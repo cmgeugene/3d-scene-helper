@@ -53,6 +53,39 @@ function roleForObject(object: SceneObject): LayoutObject['role'] {
   return 'proxy';
 }
 
+type Facing = NonNullable<LayoutObject['facing']>;
+
+function viewClassification(
+  cameraAzimuthFromForwardDeg: number,
+): NonNullable<Facing['viewClassification']> {
+  const magnitude = Math.abs(cameraAzimuthFromForwardDeg);
+  const side = cameraAzimuthFromForwardDeg >= 0 ? 'left' : 'right';
+  if (magnitude <= 22.5) return 'front';
+  if (magnitude <= 67.5) return `front-${side}-three-quarter`;
+  if (magnitude <= 112.5) return `${side}-profile`;
+  if (magnitude <= 157.5) return `back-${side}-three-quarter`;
+  return 'back';
+}
+
+function screenDirectionLabel(
+  x: number,
+  y: number,
+): NonNullable<Facing['screenDirectionLabel']> {
+  const sector = Math.round(Math.atan2(y, x) / (Math.PI / 4));
+  return (
+    [
+      'right',
+      'down-right',
+      'down',
+      'down-left',
+      'left',
+      'up-left',
+      'up',
+      'up-right',
+    ] as const
+  )[(sector + 8) % 8]!;
+}
+
 function mannequinFacing(
   object: SceneObject,
   centerWorld: Vector3,
@@ -71,7 +104,7 @@ function mannequinFacing(
     .normalize();
   const toCamera = camera.position.clone().sub(centerWorld).normalize();
   const alignment = direction.dot(toCamera);
-  let relativeToCamera: NonNullable<LayoutObject['facing']>['relativeToCamera'];
+  let relativeToCamera: Facing['relativeToCamera'];
   if (alignment >= 0.6) {
     relativeToCamera = 'toward-camera';
   } else if (alignment <= -0.6) {
@@ -82,6 +115,42 @@ function mannequinFacing(
     relativeToCamera =
       forwardScreen.x < centerScreen.x ? 'screen-left' : 'screen-right';
   }
+
+  const horizontalForward = direction.clone().setY(0);
+  const horizontalToCamera = camera.position.clone().sub(centerWorld).setY(0);
+  const canMeasureCameraAzimuth =
+    horizontalForward.lengthSq() > 1e-8 && horizontalToCamera.lengthSq() > 1e-8;
+  const cameraAzimuthFromForwardDeg = canMeasureCameraAzimuth
+    ? round(
+        MathUtils.radToDeg(
+          Math.atan2(
+            horizontalForward
+              .clone()
+              .normalize()
+              .cross(horizontalToCamera.clone().normalize()).y,
+            horizontalForward
+              .clone()
+              .normalize()
+              .dot(horizontalToCamera.clone().normalize()),
+          ),
+        ),
+      )
+    : null;
+
+  const centerScreen = centerWorld.clone().project(camera);
+  const forwardScreen = centerWorld.clone().add(direction).project(camera);
+  const screenDelta = {
+    x: forwardScreen.x - centerScreen.x,
+    y: centerScreen.y - forwardScreen.y,
+  };
+  const screenDeltaLength = Math.hypot(screenDelta.x, screenDelta.y);
+  const screenDirection =
+    !Number.isFinite(screenDeltaLength) || screenDeltaLength <= 1e-8
+      ? null
+      : {
+          x: round(screenDelta.x / screenDeltaLength),
+          y: round(screenDelta.y / screenDeltaLength),
+        };
   return {
     worldDirection: {
       x: round(direction.x),
@@ -89,6 +158,16 @@ function mannequinFacing(
       z: round(direction.z),
     },
     relativeToCamera,
+    cameraAzimuthFromForwardDeg,
+    viewClassification:
+      cameraAzimuthFromForwardDeg === null
+        ? null
+        : viewClassification(cameraAzimuthFromForwardDeg),
+    screenDirection,
+    screenDirectionLabel:
+      screenDirection === null
+        ? null
+        : screenDirectionLabel(screenDirection.x, screenDirection.y),
   };
 }
 

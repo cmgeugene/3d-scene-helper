@@ -180,6 +180,10 @@ describe('CompanionClient', () => {
           sceneRevision: 5,
           specRevision: 3,
         },
+        {
+          layoutRenderId: 'render-conversation-1',
+          sceneId: 'scene-1',
+        },
       ),
     ).resolves.toBe('turn-3');
 
@@ -198,6 +202,8 @@ describe('CompanionClient', () => {
             sceneRevision: 5,
             specRevision: 3,
           },
+          layoutRenderId: 'render-conversation-1',
+          sceneId: 'scene-1',
         }),
         headers: expect.objectContaining({
           Authorization: `Bearer ${connection.token}`,

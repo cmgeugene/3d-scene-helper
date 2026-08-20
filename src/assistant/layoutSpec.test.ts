@@ -94,6 +94,35 @@ describe('createLayoutSpec', () => {
     ).toBe('screen-right');
   });
 
+  it('월드 Y 회전과 카메라 상대 시점·화면 8방향을 분리한다', () => {
+    const scene = createScene();
+    const mannequin = scene.objects.find(({ id }) => id === 'person-far');
+    if (!mannequin) throw new Error('Expected mannequin fixture');
+    scene.outputCamera = {
+      ...scene.outputCamera,
+      position: { x: -2, y: 3, z: -5 },
+      target: { x: 0, y: 1.6, z: 0 },
+    };
+    mannequin.transform.rotationDeg = { x: 0, y: 0, z: 0 };
+
+    const spec = createLayoutSpec(scene);
+    const person = spec.objects.find(
+      ({ objectId }) => objectId === 'person-far',
+    );
+
+    expect(person).toMatchObject({
+      yawDeg: 0,
+      facing: {
+        worldDirection: { x: 0, y: 0, z: -1 },
+        viewClassification: 'front',
+        screenDirectionLabel: 'down-left',
+      },
+    });
+    expect(person?.facing?.cameraAzimuthFromForwardDeg).toBeGreaterThan(0);
+    expect(person?.facing?.screenDirection?.x).toBeLessThan(0);
+    expect(person?.facing?.screenDirection?.y).toBeGreaterThan(0);
+  });
+
   it('오브젝트에 저장한 실제 의미와 생성 메모를 계약에 포함한다', () => {
     const scene = createScene();
     const pole = scene.objects.find(({ id }) => id === 'pole-near');

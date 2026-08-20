@@ -872,6 +872,67 @@ describe('Companion loopback API', () => {
     ]);
   });
 
+  it('일반 대화의 현재 3D 렌더를 레퍼런스보다 앞선 시각 입력으로 검증해 전달한다', async () => {
+    const { runtime, server } = await createServer();
+    const renderResponse = await fetch(
+      `${server.url}/api/scene-renders?sceneId=scene-conversation`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-token',
+          'Content-Type': 'image/png',
+        },
+        body: onePixelPng,
+      },
+    );
+    const render = (await renderResponse.json()) as { render: { id: string } };
+
+    const response = await fetch(`${server.url}/api/turns`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        threadId: 'thread_1',
+        prompt: '현재 3D 렌더를 보고 화면상 방향을 확인해줘.',
+        layoutRenderId: render.render.id,
+        sceneId: 'scene-conversation',
+      }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(runtime.startTurn).toHaveBeenCalledWith('thread_1', [
+      {
+        type: 'text',
+        text: '현재 3D 렌더를 보고 화면상 방향을 확인해줘.',
+      },
+      {
+        type: 'localImage',
+        path: expect.stringMatching(
+          /[\\/]assets[\\/]scene-renders[\\/]artifact_.+\.png$/,
+        ),
+        detail: 'original',
+      },
+    ]);
+
+    const mismatch = await fetch(`${server.url}/api/turns`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        threadId: 'thread_1',
+        prompt: '잘못 연결된 렌더',
+        layoutRenderId: render.render.id,
+        sceneId: 'scene-other',
+      }),
+    });
+    expect(mismatch.status).toBe(400);
+    expect(runtime.startTurn).toHaveBeenCalledOnce();
+  });
+
   it('레퍼런스 이미지를 가져오고 인증된 content API로 제공한다', async () => {
     const { server, runtime } = await createServer();
     const query = new URLSearchParams({

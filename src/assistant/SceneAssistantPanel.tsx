@@ -332,6 +332,10 @@ function ConnectedSceneAssistant({
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const conversationActivatedRef = useRef(false);
+  const conversationLayoutRenderCacheRef = useRef<{
+    sceneSnapshot: string;
+    visualContext: { layoutRenderId: string; sceneId: string };
+  } | null>(null);
 
   const changeRefinementSource = useCallback(
     (next: GenerationRecord | null) => {
@@ -817,56 +821,104 @@ function ConnectedSceneAssistant({
       try {
         const currentThreadId = await ensureThread();
         const selectedReferences = getSelectedReferences();
+        const sceneContext = getSceneContext();
+        const scene = sceneDocumentSchema.safeParse(sceneContext);
+        const layoutSpec = scene.success
+          ? createLayoutSpec(scene.data, selectedReferences)
+          : null;
+        let conversationLayoutRender:
+          { layoutRenderId: string; sceneId: string } | undefined;
+        if (
+          scene.success &&
+          captureLayout !== null &&
+          client.startConversationTurn !== undefined
+        ) {
+          const sceneSnapshot = JSON.stringify(scene.data);
+          const cached = conversationLayoutRenderCacheRef.current;
+          if (cached?.sceneSnapshot === sceneSnapshot) {
+            conversationLayoutRender = cached.visualContext;
+          } else {
+            try {
+              const layout = await captureLayout();
+              const render = await client.createSceneRender(
+                layout,
+                scene.data.id,
+              );
+              conversationLayoutRender = {
+                layoutRenderId: render.id,
+                sceneId: scene.data.id,
+              };
+              conversationLayoutRenderCacheRef.current = {
+                sceneSnapshot,
+                visualContext: conversationLayoutRender,
+              };
+            } catch {
+              conversationLayoutRender = undefined;
+            }
+          }
+        }
         const prompt = createSceneAssistantPrompt(
           message,
-          getSceneContext(),
+          sceneContext,
           selectedReferences,
+          layoutSpec === null
+            ? null
+            : {
+                layoutSpec,
+                layoutRenderAttached: conversationLayoutRender !== undefined,
+              },
         );
         const conversationReferenceManifest = referencePromptManifest(
           selectedReferences,
-          0,
+          conversationLayoutRender === undefined ? 0 : 1,
         );
         const referenceIds = conversationReferenceManifest.map(({ id }) => id);
-        const scene = sceneDocumentSchema.safeParse(getSceneContext());
+        const metadata = {
+          kind: 'conversation' as const,
+          userMessage: message,
+          sceneRevision: scene.success ? scene.data.sceneRevision : null,
+          specRevision: scene.success ? scene.data.specRevision : null,
+          ...(conversationReferenceManifest.length === 0
+            ? {}
+            : {
+                referenceBindings: conversationReferenceManifest.map(
+                  ({
+                    attachmentIndex,
+                    id,
+                    name,
+                    role,
+                    targetObjectId,
+                    use,
+                    exclude,
+                  }) => ({
+                    conversationAttachmentIndex: attachmentIndex,
+                    id,
+                    name,
+                    role,
+                    targetObjectId,
+                    use,
+                    exclude,
+                  }),
+                ),
+              }),
+        };
         const turnId =
           client.startConversationTurn === undefined
             ? await client.startTurn(currentThreadId, prompt, referenceIds)
-            : await client.startConversationTurn(
-                currentThreadId,
-                prompt,
-                referenceIds,
-                {
-                  kind: 'conversation',
-                  userMessage: message,
-                  sceneRevision: scene.success
-                    ? scene.data.sceneRevision
-                    : null,
-                  specRevision: scene.success ? scene.data.specRevision : null,
-                  ...(conversationReferenceManifest.length === 0
-                    ? {}
-                    : {
-                        referenceBindings: conversationReferenceManifest.map(
-                          ({
-                            attachmentIndex,
-                            id,
-                            name,
-                            role,
-                            targetObjectId,
-                            use,
-                            exclude,
-                          }) => ({
-                            conversationAttachmentIndex: attachmentIndex,
-                            id,
-                            name,
-                            role,
-                            targetObjectId,
-                            use,
-                            exclude,
-                          }),
-                        ),
-                      }),
-                },
-              );
+            : conversationLayoutRender === undefined
+              ? await client.startConversationTurn(
+                  currentThreadId,
+                  prompt,
+                  referenceIds,
+                  metadata,
+                )
+              : await client.startConversationTurn(
+                  currentThreadId,
+                  prompt,
+                  referenceIds,
+                  metadata,
+                  conversationLayoutRender,
+                );
         trackStartedTurn(turnId);
       } catch (reason) {
         setConversationError(
@@ -879,6 +931,7 @@ function ConnectedSceneAssistant({
     },
     [
       client,
+      captureLayout,
       draft,
       getSceneContext,
       getSelectedReferences,

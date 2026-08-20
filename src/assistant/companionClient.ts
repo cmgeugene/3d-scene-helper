@@ -103,6 +103,11 @@ export type ReferenceMetadataInput = Pick<
   'targetObjectId' | 'use' | 'exclude' | 'enabled'
 >;
 
+export interface ConversationVisualContext {
+  layoutRenderId: string;
+  sceneId: string;
+}
+
 export const sceneRenderArtifactSchema = z.object({
   id: z.string().min(1),
   sceneId: z.string().min(1),
@@ -283,6 +288,7 @@ export interface CompanionBrowserClient {
     prompt: string,
     referenceIds: string[],
     metadata: ConversationTurnMetadataInput,
+    visualContext?: ConversationVisualContext,
     signal?: AbortSignal,
   ): Promise<string>;
   startSpecPatchProposal?(
@@ -461,6 +467,7 @@ export class CompanionClient implements CompanionBrowserClient {
     prompt: string,
     referenceIds: string[],
     metadata: ConversationTurnMetadataInput,
+    visualContext?: ConversationVisualContext,
     signal?: AbortSignal,
   ) {
     const value = await this.postJson(
@@ -471,6 +478,7 @@ export class CompanionClient implements CompanionBrowserClient {
         attachments: [],
         referenceIds,
         metadata: conversationTurnMetadataInputSchema.parse(metadata),
+        ...(visualContext === undefined ? {} : visualContext),
       },
       signal,
     );

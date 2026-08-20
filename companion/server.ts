@@ -80,13 +80,25 @@ const threadBodySchema = z
     }
   });
 
-const turnBodySchema = z.object({
-  threadId: z.string().min(1),
-  prompt: z.string().min(1).max(100_000),
-  attachments: z.array(z.string().min(1)).max(16).default([]),
-  referenceIds: z.array(z.string().min(1)).max(16).default([]),
-  metadata: conversationTurnMetadataInputSchema.optional(),
-});
+const turnBodySchema = z
+  .object({
+    threadId: z.string().min(1),
+    prompt: z.string().min(1).max(100_000),
+    attachments: z.array(z.string().min(1)).max(16).default([]),
+    referenceIds: z.array(z.string().min(1)).max(16).default([]),
+    layoutRenderId: z.string().min(1).optional(),
+    sceneId: z.string().min(1).optional(),
+    metadata: conversationTurnMetadataInputSchema.optional(),
+  })
+  .superRefine((body, context) => {
+    if ((body.layoutRenderId === undefined) !== (body.sceneId === undefined)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['layoutRenderId'],
+        message: '대화용 레이아웃 렌더와 장면 ID는 함께 지정해야 합니다.',
+      });
+    }
+  });
 
 const specPatchProposalRequestSchema = z.strictObject({
   threadId: z.string().min(1),
@@ -1382,10 +1394,20 @@ export async function startCompanionServer(
       if (request.method === 'POST' && requestUrl.pathname === '/api/turns') {
         const body = turnBodySchema.parse(await readJson(request));
         const input: TurnInput[] = [{ type: 'text', text: body.prompt }];
+        const layout =
+          body.layoutRenderId === undefined
+            ? null
+            : await generationStore.resolveSceneRender(body.layoutRenderId);
+        if (layout !== null && layout.render.sceneId !== body.sceneId) {
+          throw new ReferenceInputError(
+            '대화용 레이아웃 렌더와 SceneDocument의 장면 ID가 일치하지 않습니다.',
+          );
+        }
         const references = await referenceStore.resolveReferenceAttachments(
           body.referenceIds,
         );
         const artifactPaths = [
+          ...(layout === null ? [] : [layout.assetPath]),
           ...body.attachments,
           ...references.map(({ assetPath }) => assetPath),
         ];
