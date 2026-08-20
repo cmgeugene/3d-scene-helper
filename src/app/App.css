@@ -2556,6 +2556,29 @@ p {
   font-size: 0.64rem;
 }
 
+.field-help {
+  color: #7f8ba0;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.containment-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.containment-list li {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  justify-content: space-between;
+  color: #aebbd0;
+  font-size: 0.7rem;
+}
+
 .outliner-item {
   display: flex;
   width: 100%;

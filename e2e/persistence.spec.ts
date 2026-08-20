@@ -112,6 +112,80 @@ test('persistence refresh restores the latest autosaved scene', async ({
   ).toBe(serializedBeforeReload);
 });
 
+test('proxy visualization, final surface intent, and containment survive refresh', async ({
+  page,
+}) => {
+  await openPersistence(page);
+  await page.getByRole('button', { name: '큐브 추가', exact: true }).click();
+  await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
+
+  const proxyOpacity = page.getByLabel('프록시 불투명도');
+  await proxyOpacity.fill('0.3');
+  await proxyOpacity.blur();
+  await page.getByLabel('최종 표면 타입').selectOption('transparent');
+  await page.getByLabel('최종 재질 메모').fill('맑은 아크릴 외피');
+  await page.getByLabel('최종 재질 메모').blur();
+  await page
+    .getByLabel('내부 오브젝트', { exact: true })
+    .selectOption({ label: 'Cube' });
+  await page.getByLabel('내부 오브젝트 가시성').selectOption('cutaway');
+  await page.getByRole('button', { name: '내부 관계 추가' }).click();
+
+  await expect
+    .poll(() =>
+      page.evaluate((key) => {
+        const serialized = (
+          globalThis as unknown as BrowserStorageGlobal
+        ).localStorage.getItem(key);
+        if (serialized === null) return null;
+        const document = JSON.parse(serialized) as {
+          objects: Array<{
+            kind: string;
+            visualization: { proxyOpacity: number };
+            appearanceIntent: { surfaceType: string; materialNotes: string };
+          }>;
+          spatialRelations: Array<{ type: string; visibility?: string }>;
+        };
+        const mannequin = document.objects.find(
+          ({ kind }) => kind === 'mannequin',
+        );
+        return {
+          proxyOpacity: mannequin?.visualization.proxyOpacity,
+          appearanceIntent: mannequin?.appearanceIntent,
+          containment: document.spatialRelations.find(
+            ({ type }) => type === 'contains',
+          ),
+        };
+      }, STORAGE_KEY),
+    )
+    .toEqual({
+      proxyOpacity: 0.3,
+      appearanceIntent: {
+        surfaceType: 'transparent',
+        materialNotes: '맑은 아크릴 외피',
+      },
+      containment: expect.objectContaining({
+        type: 'contains',
+        visibility: 'cutaway',
+      }),
+    });
+
+  await page.reload();
+  await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
+    'data-webgl-state',
+    'available',
+  );
+  await page.getByRole('button', { name: 'Mannequin', exact: true }).click();
+  await expect(page.getByLabel('프록시 불투명도')).toHaveValue('0.3');
+  await expect(page.getByLabel('최종 표면 타입')).toHaveValue('transparent');
+  await expect(page.getByLabel('최종 재질 메모')).toHaveValue(
+    '맑은 아크릴 외피',
+  );
+  await expect(
+    page.getByRole('list', { name: '내부 관계 목록' }),
+  ).toContainText('Cube · cutaway');
+});
+
 test('restored autosave is not reused by new scene or starter reset', async ({
   page,
 }) => {

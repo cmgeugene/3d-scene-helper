@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
-import type { SceneObject } from '../persistence/sceneSchema';
+import type { SceneObject, SpatialRelation } from '../persistence/sceneSchema';
 import { MANNEQUIN_BODY_TYPE_PRESETS } from '../mannequin/mannequinBodyType';
 import {
   MAX_GENERATION_NOTES_LENGTH,
@@ -627,10 +627,17 @@ function createTransformDraft(object: SceneObject | undefined) {
     name: object.name,
     'semantic.meaning': object.semantic?.meaning ?? '',
     'semantic.generationNotes': object.semantic?.generationNotes ?? '',
+    'visualization.proxyOpacity': String(object.visualization.proxyOpacity),
+    'appearanceIntent.materialNotes': object.appearanceIntent.materialNotes,
   };
 }
 
 export function Inspector({ store }: InspectorProps) {
+  const objects = useStore(store, (state) => state.document.objects);
+  const spatialRelations = useStore(
+    store,
+    (state) => state.document.spatialRelations,
+  );
   const selectedObject = useStore(store, (state) =>
     state.document.objects.find(({ id }) => id === state.selectedObjectId),
   );
@@ -642,11 +649,19 @@ export function Inspector({ store }: InspectorProps) {
     createTransformDraft(selectedObject),
   );
   const [invalidFields, setInvalidFields] = useState<Set<string>>(new Set());
+  const [containedObjectId, setContainedObjectId] = useState('');
+  const [containmentVisibility, setContainmentVisibility] = useState<
+    'occluded' | 'through-opening' | 'through-transparent-surface' | 'cutaway'
+  >('occluded');
+  const [containmentError, setContainmentError] = useState(false);
 
   if (draftObject !== selectedObject) {
     setDraftObject(selectedObject);
     setDraft(createTransformDraft(selectedObject));
     setInvalidFields(new Set());
+    setContainedObjectId('');
+    setContainmentVisibility('occluded');
+    setContainmentError(false);
   }
 
   const commitDraft = (
@@ -701,6 +716,43 @@ export function Inspector({ store }: InspectorProps) {
           : { meaning, generationNotes },
       );
   };
+
+  const commitProxyOpacity = () => {
+    if (selectedObject === undefined) return;
+    const field = 'visualization.proxyOpacity';
+    const value = Number(draft[field]);
+    if (!Number.isFinite(value) || value < 0.05 || value > 1) {
+      setDraft((current) => ({
+        ...current,
+        [field]: String(selectedObject.visualization.proxyOpacity),
+      }));
+      setInvalidFields((current) => new Set(current).add(field));
+      return;
+    }
+    store.getState().setObjectProxyOpacity(selectedObject.id, value);
+  };
+
+  const commitMaterialNotes = () => {
+    if (selectedObject === undefined) return;
+    store.getState().setObjectAppearanceIntent(selectedObject.id, {
+      ...selectedObject.appearanceIntent,
+      materialNotes: (draft['appearanceIntent.materialNotes'] ?? '').trim(),
+    });
+  };
+
+  const containmentRelations = spatialRelations.filter(
+    (relation): relation is Extract<SpatialRelation, { type: 'contains' }> =>
+      relation.type === 'contains' &&
+      relation.containerObjectId === selectedObject?.id,
+  );
+  const containmentCandidates = objects.filter(
+    ({ id }) => id !== selectedObject?.id,
+  );
+  const effectiveContainedObjectId = containmentCandidates.some(
+    ({ id }) => id === containedObjectId,
+  )
+    ? containedObjectId
+    : (containmentCandidates[0]?.id ?? '');
 
   return (
     <section className="inspector" aria-labelledby="inspector-title">
@@ -904,6 +956,182 @@ export function Inspector({ store }: InspectorProps) {
                   onBlur={commitSemantic}
                 />
               </label>
+            </fieldset>
+            <fieldset className="object-controls">
+              <legend>프록시 표시와 최종 표면</legend>
+              <label className="object-text-field">
+                <span>프록시 불투명도</span>
+                <input
+                  aria-label="프록시 불투명도"
+                  type="number"
+                  min="0.05"
+                  max="1"
+                  step="0.05"
+                  value={draft['visualization.proxyOpacity'] ?? ''}
+                  disabled={selectedObject === undefined}
+                  aria-invalid={invalidFields.has('visualization.proxyOpacity')}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setInvalidFields((current) => {
+                      const next = new Set(current);
+                      next.delete('visualization.proxyOpacity');
+                      return next;
+                    });
+                    setDraft((current) => ({
+                      ...current,
+                      'visualization.proxyOpacity': value,
+                    }));
+                  }}
+                  onBlur={commitProxyOpacity}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                  }}
+                />
+              </label>
+              <span className="field-help">
+                편집과 내부 배치 확인용 표시입니다. 최종 이미지의 투명 재질을
+                의미하지 않습니다.
+              </span>
+              <label className="object-text-field">
+                <span>최종 표면 타입</span>
+                <select
+                  aria-label="최종 표면 타입"
+                  value={
+                    selectedObject?.appearanceIntent.surfaceType ?? 'opaque'
+                  }
+                  disabled={selectedObject === undefined}
+                  onChange={(event) => {
+                    if (selectedObject === undefined) return;
+                    store
+                      .getState()
+                      .setObjectAppearanceIntent(selectedObject.id, {
+                        ...selectedObject.appearanceIntent,
+                        surfaceType: event.currentTarget.value as
+                          'opaque' | 'transparent' | 'translucent' | 'mirror',
+                      });
+                  }}
+                >
+                  <option value="opaque">불투명</option>
+                  <option value="transparent">투명</option>
+                  <option value="translucent">반투명</option>
+                  <option value="mirror" disabled>
+                    거울 (다음 단계)
+                  </option>
+                </select>
+              </label>
+              <label className="object-text-field">
+                <span>최종 재질 메모</span>
+                <textarea
+                  aria-label="최종 재질 메모"
+                  value={draft['appearanceIntent.materialNotes'] ?? ''}
+                  maxLength={MAX_GENERATION_NOTES_LENGTH}
+                  rows={2}
+                  disabled={selectedObject === undefined}
+                  onChange={(event) => {
+                    const materialNotes = event.currentTarget.value;
+                    setDraft((current) => ({
+                      ...current,
+                      'appearanceIntent.materialNotes': materialNotes,
+                    }));
+                  }}
+                  onBlur={commitMaterialNotes}
+                />
+              </label>
+            </fieldset>
+            <fieldset className="object-controls">
+              <legend>내부 오브젝트 관계</legend>
+              <label className="object-text-field">
+                <span>내부 오브젝트</span>
+                <select
+                  aria-label="내부 오브젝트"
+                  value={effectiveContainedObjectId}
+                  disabled={
+                    selectedObject === undefined ||
+                    containmentCandidates.length === 0
+                  }
+                  onChange={(event) => {
+                    setContainedObjectId(event.currentTarget.value);
+                    setContainmentError(false);
+                  }}
+                >
+                  {containmentCandidates.map((object) => (
+                    <option key={object.id} value={object.id}>
+                      {object.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="object-text-field">
+                <span>최종 가시성</span>
+                <select
+                  aria-label="내부 오브젝트 가시성"
+                  value={containmentVisibility}
+                  disabled={selectedObject === undefined}
+                  onChange={(event) => {
+                    setContainmentVisibility(
+                      event.currentTarget.value as typeof containmentVisibility,
+                    );
+                    setContainmentError(false);
+                  }}
+                >
+                  <option value="occluded">외부에서 보이지 않음</option>
+                  <option value="through-opening">열린 부분을 통해 보임</option>
+                  <option value="through-transparent-surface">
+                    투명 표면을 통해 보임
+                  </option>
+                  <option value="cutaway">컷어웨이로 내부 표시</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={
+                  selectedObject === undefined ||
+                  effectiveContainedObjectId === ''
+                }
+                onClick={() => {
+                  if (selectedObject === undefined) return;
+                  const created = store
+                    .getState()
+                    .addContainmentRelation(
+                      selectedObject.id,
+                      effectiveContainedObjectId,
+                      containmentVisibility,
+                    );
+                  setContainmentError(created === null);
+                }}
+              >
+                내부 관계 추가
+              </button>
+              {containmentError ? (
+                <span role="alert">
+                  중복, 순환 또는 유효하지 않은 내부 관계는 추가할 수 없습니다.
+                </span>
+              ) : null}
+              {containmentRelations.length === 0 ? (
+                <span className="field-help">등록된 내부 관계가 없습니다.</span>
+              ) : (
+                <ul className="containment-list" aria-label="내부 관계 목록">
+                  {containmentRelations.map((relation) => (
+                    <li key={relation.id}>
+                      <span>
+                        {objects.find(
+                          ({ id }) => id === relation.containedObjectId,
+                        )?.name ?? relation.containedObjectId}{' '}
+                        · {relation.visibility}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`${relation.id} 내부 관계 삭제`}
+                        onClick={() => {
+                          store.getState().removeSpatialRelation(relation.id);
+                        }}
+                      >
+                        삭제
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </fieldset>
             {selectedObject?.kind === 'mannequin' ? (
               <>

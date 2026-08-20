@@ -370,6 +370,78 @@ describe('editorStore', () => {
     expect(store.getState().document.groups).toEqual([]);
   });
 
+  it('proxy opacity와 최종 표면 의도를 서로 다른 document mutation으로 저장한다', () => {
+    store.getState().setObjectProxyOpacity(STARTER_IDS.mannequinId, 0.35);
+    store.getState().setObjectAppearanceIntent(STARTER_IDS.mannequinId, {
+      surfaceType: 'transparent',
+      materialNotes: '맑은 아크릴 외피',
+    });
+
+    const mannequin = store
+      .getState()
+      .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId);
+    expect(mannequin).toMatchObject({
+      visualization: { proxyOpacity: 0.35 },
+      appearanceIntent: {
+        surfaceType: 'transparent',
+        materialNotes: '맑은 아크릴 외피',
+      },
+    });
+    expect(store.getState().history.past.at(-2)?.mutationKind).toBe(
+      'update-object-visualization',
+    );
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'update-object-appearance',
+    );
+  });
+
+  it('typed containment를 추가·삭제하고 중복과 cycle을 fail-closed한다', () => {
+    store = makeStore(['relation-1', 'relation-duplicate', 'relation-cycle']);
+
+    const relationId = store
+      .getState()
+      .addContainmentRelation(
+        STARTER_IDS.floorId,
+        STARTER_IDS.mannequinId,
+        'cutaway',
+      );
+    expect(relationId).toBe('relation-1');
+    expect(store.getState().document.spatialRelations).toEqual([
+      {
+        id: 'relation-1',
+        type: 'contains',
+        containerObjectId: STARTER_IDS.floorId,
+        containedObjectId: STARTER_IDS.mannequinId,
+        visibility: 'cutaway',
+      },
+    ]);
+    expect(
+      store
+        .getState()
+        .addContainmentRelation(
+          STARTER_IDS.floorId,
+          STARTER_IDS.mannequinId,
+          'occluded',
+        ),
+    ).toBeNull();
+    expect(
+      store
+        .getState()
+        .addContainmentRelation(
+          STARTER_IDS.mannequinId,
+          STARTER_IDS.floorId,
+          'occluded',
+        ),
+    ).toBeNull();
+    expect(store.getState().document.spatialRelations).toHaveLength(1);
+
+    store.getState().removeSpatialRelation('relation-1');
+    expect(store.getState().document.spatialRelations).toEqual([]);
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'delete-spatial-relation',
+    );
+  });
+
   it('검증된 spec patch와 object transform command를 단일 원자 mutation으로 적용하고 stale/double apply를 거부하며 undo/redo한다', () => {
     const original = structuredClone(
       store.getState().document.semanticSceneSpec,
@@ -1017,6 +1089,10 @@ describe('editorStore', () => {
       'create-object-group',
       'delete-object-group',
       'translate-object-group',
+      'update-object-visualization',
+      'update-object-appearance',
+      'create-spatial-relation',
+      'delete-spatial-relation',
       'commit-camera',
       'update-lighting-background',
       'update-output',

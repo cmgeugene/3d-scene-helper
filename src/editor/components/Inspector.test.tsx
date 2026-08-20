@@ -163,6 +163,77 @@ describe('Inspector', () => {
     expect(screen.getByText('정민')).toBeVisible();
   });
 
+  it('proxy opacity와 최종 표면을 분리하고 typed containment를 편집한다', async () => {
+    const user = userEvent.setup();
+    store = createTestStore([
+      'cube-contained',
+      'relation-contained',
+      'relation-duplicate',
+    ]);
+    store.getState().addObject({ kind: 'cube', name: 'Contained prop' });
+    store.getState().selectObject(MANNEQUIN_ID);
+    render(<Inspector store={store} />);
+
+    const opacity = screen.getByLabelText('프록시 불투명도');
+    await user.clear(opacity);
+    await user.type(opacity, '0.3');
+    fireEvent.blur(opacity);
+    await user.selectOptions(
+      screen.getByLabelText('최종 표면 타입'),
+      'transparent',
+    );
+    await user.type(
+      screen.getByLabelText('최종 재질 메모'),
+      '맑은 아크릴 외피',
+    );
+    fireEvent.blur(screen.getByLabelText('최종 재질 메모'));
+
+    await user.selectOptions(
+      screen.getByLabelText('내부 오브젝트'),
+      'cube-contained',
+    );
+    await user.selectOptions(
+      screen.getByLabelText('내부 오브젝트 가시성'),
+      'cutaway',
+    );
+    await user.click(screen.getByRole('button', { name: '내부 관계 추가' }));
+
+    expect(
+      store.getState().document.objects.find(({ id }) => id === MANNEQUIN_ID),
+    ).toMatchObject({
+      visualization: { proxyOpacity: 0.3 },
+      appearanceIntent: {
+        surfaceType: 'transparent',
+        materialNotes: '맑은 아크릴 외피',
+      },
+    });
+    expect(store.getState().document.spatialRelations).toEqual([
+      {
+        id: 'relation-contained',
+        type: 'contains',
+        containerObjectId: MANNEQUIN_ID,
+        containedObjectId: 'cube-contained',
+        visibility: 'cutaway',
+      },
+    ]);
+    expect(
+      screen.getByRole('list', { name: '내부 관계 목록' }),
+    ).toHaveTextContent('Contained prop');
+
+    await user.selectOptions(
+      screen.getByLabelText('내부 오브젝트'),
+      'cube-contained',
+    );
+    await user.click(screen.getByRole('button', { name: '내부 관계 추가' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('중복, 순환');
+    await user.click(
+      screen.getByRole('button', {
+        name: 'relation-contained 내부 관계 삭제',
+      }),
+    );
+    expect(store.getState().document.spatialRelations).toEqual([]);
+  });
+
   it('연출 탭에서 장면 전체 spec을 구조화해 한 번 적용하고 history/undo 복원한다', async () => {
     const user = userEvent.setup();
     render(<Inspector store={store} />);

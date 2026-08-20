@@ -150,6 +150,13 @@ describe('createImageGenerationPrompt', () => {
     );
     expect(prompt).toContain('"targetDistanceMeters":5');
     expect(prompt).toContain('semanticMeaning과 generationNotes');
+    expect(prompt).toContain(
+      'proxyVisualization.opacity는 내부 배치를 확인하기 위한 3D 편집 표시값',
+    );
+    expect(prompt).toContain(
+      '최종 표면은 appearanceIntent.surfaceType과 materialNotes만',
+    );
+    expect(prompt).toContain('containment는 실제 포함 관계');
     expect(prompt).toContain('"attachmentIndex":2');
     expect(prompt).not.toContain('[사용자 연출]');
     expect(prompt).toContain('[장면 의도]');
@@ -220,6 +227,10 @@ describe('createImageRefinementPrompt', () => {
     expect(prompt).toContain('첨부 이미지 2는 보정의 기준');
     expect(prompt).toContain('외형 기준으로 사용');
     expect(prompt).toContain('한 번의 완성 이미지 재생성');
+    expect(prompt).toContain(
+      'proxyVisualization.opacity는 내부 배치를 확인하기 위한 3D 편집 표시값',
+    );
+    expect(prompt).toContain('containment는 실제 포함 관계');
     expect(prompt).toContain('[보정 지시 / RefinementDirective]');
     expect(prompt).toContain('"preserve":["전체 구도","인물 정체성"]');
     expect(prompt).toContain('"change":["전봇대가 가리는 비율만 줄여줘."]');

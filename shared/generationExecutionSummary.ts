@@ -19,7 +19,7 @@ export const generationExecutionSummarySchema = z.object({
     version: z.literal(1),
   }),
   layoutSpec: hashedSnapshotSchema.extend({
-    version: z.literal(1),
+    version: z.union([z.literal(1), z.literal(2)]),
     sceneId: z.string().min(1),
   }),
   layoutRender: hashedSnapshotSchema.extend({

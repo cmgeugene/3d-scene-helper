@@ -22,7 +22,7 @@ function createScene() {
 
 function createLayout(scene = createScene()): LayoutSpec {
   return {
-    version: 1,
+    version: 2,
     sceneId: scene.id,
     output: {
       width: scene.output.width,
@@ -47,6 +47,12 @@ function createLayout(scene = createScene()): LayoutSpec {
             : ('environment' as const),
         guideColor: object.color,
         guideColorOnly: true as const,
+        proxyVisualization: { opacity: 1 },
+        appearanceIntent: {
+          surfaceType: 'opaque' as const,
+          materialNotes: '',
+        },
+        groupId: null,
         semanticMeaning: null,
         generationNotes: null,
         worldBounds: {
@@ -76,6 +82,7 @@ function createLayout(scene = createScene()): LayoutSpec {
         reinterpret: ['appearance'],
       })),
     potentialOcclusions: [],
+    containment: [],
     omittedObjectIds: [],
   };
 }

@@ -115,6 +115,55 @@ describe('createLayoutSpec', () => {
     });
   });
 
+  it('v2 proxy 표시·최종 표면·group provenance와 containment를 분리해 기록한다', () => {
+    const scene = createScene();
+    const pole = scene.objects.find(({ id }) => id === 'pole-near');
+    if (!pole) throw new Error('Expected pole fixture');
+    pole.visualization.proxyOpacity = 0.25;
+    pole.appearanceIntent = {
+      surfaceType: 'opaque',
+      materialNotes: '도색된 금속 외피',
+    };
+    scene.groups = [
+      {
+        id: 'group-layout',
+        name: 'Foreground and actor',
+        memberObjectIds: ['pole-near', 'person-far'],
+      },
+    ];
+    scene.spatialRelations = [
+      {
+        id: 'contains-layout',
+        type: 'contains',
+        containerObjectId: 'pole-near',
+        containedObjectId: 'person-far',
+        visibility: 'cutaway',
+      },
+    ];
+
+    const spec = createLayoutSpec(scene);
+
+    expect(spec.version).toBe(2);
+    expect(
+      spec.objects.find(({ objectId }) => objectId === 'pole-near'),
+    ).toMatchObject({
+      proxyVisualization: { opacity: 0.25 },
+      appearanceIntent: {
+        surfaceType: 'opaque',
+        materialNotes: '도색된 금속 외피',
+      },
+      groupId: 'group-layout',
+    });
+    expect(spec.containment).toEqual([
+      {
+        relationId: 'contains-layout',
+        containerObjectId: 'pole-near',
+        containedObjectId: 'person-far',
+        visibility: 'cutaway',
+      },
+    ]);
+  });
+
   it('마네킹 레퍼런스 결합과 잠재 가림을 기록한다', () => {
     const spec = createLayoutSpec(createScene(), [
       {

@@ -27,6 +27,7 @@ import {
 import { RoomSet } from './RoomSet';
 import { SurfaceGrid } from './SurfaceGrid';
 import { getSceneObjectModel } from './sceneObjectModel';
+import { applyProxyOpacityToMaterial } from './proxyVisualization';
 import { consumeObjectSelectionSuppression } from './objectSelectionGuard';
 import {
   createBentPlaneGeometry,
@@ -330,12 +331,36 @@ export function SceneObject({
 }: SceneObjectProps) {
   const model = getSceneObjectModel(object);
   const { position, rotationDeg, scale } = object.transform;
+  const visualizationRootRef = useRef<Group>(null);
   const rootRef = useCallback(
     (root: Group | null) => {
       onRootReady(object.id, root);
     },
     [object.id, onRootReady],
   );
+
+  useLayoutEffect(() => {
+    const root = visualizationRootRef.current;
+    if (root === null) return;
+    root.traverse((child) => {
+      const candidate = child as typeof child & {
+        isMesh?: boolean;
+        material?:
+          | Parameters<typeof applyProxyOpacityToMaterial>[0]
+          | Array<Parameters<typeof applyProxyOpacityToMaterial>[0]>;
+      };
+      if (!candidate.isMesh || candidate.material === undefined) return;
+      const materials = Array.isArray(candidate.material)
+        ? candidate.material
+        : [candidate.material];
+      materials.forEach((material) => {
+        applyProxyOpacityToMaterial(
+          material,
+          object.visualization.proxyOpacity,
+        );
+      });
+    });
+  }, [object.visualization.proxyOpacity]);
 
   return (
     <group
@@ -361,14 +386,19 @@ export function SceneObject({
         onSelect(object.id);
       }}
     >
-      <Primitive
-        object={object}
-        selected={selected}
-        runtimeMannequinPose={runtimeMannequinPose}
-        castShadow={model.castShadow}
-        receiveShadow={model.receiveShadow}
-        focusContoursEnabled={focusContoursEnabled}
-      />
+      <group
+        ref={visualizationRootRef}
+        name={`proxy-visualization:${object.id}`}
+      >
+        <Primitive
+          object={object}
+          selected={selected}
+          runtimeMannequinPose={runtimeMannequinPose}
+          castShadow={model.castShadow}
+          receiveShadow={model.receiveShadow}
+          focusContoursEnabled={focusContoursEnabled}
+        />
+      </group>
       {object.kind === 'mannequin' && mannequinIK !== undefined ? (
         <MannequinIKControls object={object} {...mannequinIK} />
       ) : null}

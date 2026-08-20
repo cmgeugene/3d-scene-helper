@@ -1,7 +1,7 @@
 import type { LayoutSpec } from './layoutSpecSchema';
 
 export const TEST_LAYOUT_SPEC: LayoutSpec = {
-  version: 1,
+  version: 2,
   sceneId: 'scene-test',
   output: { width: 1920, height: 1080, aspectRatioId: '16:9' },
   camera: {
@@ -18,5 +18,6 @@ export const TEST_LAYOUT_SPEC: LayoutSpec = {
   },
   objects: [],
   potentialOcclusions: [],
+  containment: [],
   omittedObjectIds: [],
 };

@@ -8,6 +8,7 @@ import {
   type MannequinPose,
   type SceneDocument,
   type SceneObject,
+  type SpatialRelation,
 } from '../persistence/sceneSchema';
 import type { SemanticSceneSpec } from '../persistence/semanticSceneSpec';
 import {
@@ -71,6 +72,10 @@ export const DOCUMENT_MUTATION_KINDS = [
   'create-object-group',
   'delete-object-group',
   'translate-object-group',
+  'update-object-visualization',
+  'update-object-appearance',
+  'create-spatial-relation',
+  'delete-spatial-relation',
   'commit-camera',
   'update-lighting-background',
   'update-output',
@@ -131,6 +136,17 @@ export interface EditorStore {
   setObjectColor: (id: string, color: string) => void;
   setObjectVisibility: (id: string, visible: boolean) => void;
   setObjectViewportSelectionLocked: (id: string, locked: boolean) => void;
+  setObjectProxyOpacity: (id: string, opacity: number) => void;
+  setObjectAppearanceIntent: (
+    id: string,
+    appearanceIntent: SceneObject['appearanceIntent'],
+  ) => void;
+  addContainmentRelation: (
+    containerObjectId: string,
+    containedObjectId: string,
+    visibility: Extract<SpatialRelation, { type: 'contains' }>['visibility'],
+  ) => string | null;
+  removeSpatialRelation: (relationId: string) => void;
   createObjectGroup: (objectIds: string[], name?: string) => string | null;
   ungroupObjects: (groupId: string) => void;
   translateObjectGroup: (
@@ -432,6 +448,69 @@ export function createEditorStore(options: EditorStoreOptions) {
         { viewportSelectionLocked: locked },
         'update-object-selection-lock',
       );
+    },
+    setObjectProxyOpacity: (id, opacity) => {
+      if (!Number.isFinite(opacity)) {
+        throw new RangeError('Proxy opacity must be finite');
+      }
+      updateObject(
+        set,
+        id,
+        { visualization: { proxyOpacity: opacity } },
+        'update-object-visualization',
+      );
+    },
+    setObjectAppearanceIntent: (id, appearanceIntent) => {
+      updateObject(set, id, { appearanceIntent }, 'update-object-appearance');
+    },
+    addContainmentRelation: (
+      containerObjectId,
+      containedObjectId,
+      visibility,
+    ) => {
+      const relationId = options.idFactory();
+      let created = false;
+      set((state) => {
+        const parsed = sceneDocumentSchema.safeParse({
+          ...state.document,
+          spatialRelations: [
+            ...state.document.spatialRelations,
+            {
+              id: relationId,
+              type: 'contains',
+              containerObjectId,
+              containedObjectId,
+              visibility,
+            },
+          ],
+        });
+        if (!parsed.success) return state;
+        created = true;
+        return {
+          ...recordMutation(state, parsed.data, 'create-spatial-relation'),
+          statusMessage: null,
+        };
+      });
+      return created ? relationId : null;
+    },
+    removeSpatialRelation: (relationId) => {
+      set((state) => {
+        if (
+          !state.document.spatialRelations.some(({ id }) => id === relationId)
+        ) {
+          return state;
+        }
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          spatialRelations: state.document.spatialRelations.filter(
+            ({ id }) => id !== relationId,
+          ),
+        });
+        return {
+          ...recordMutation(state, nextDocument, 'delete-spatial-relation'),
+          statusMessage: null,
+        };
+      });
     },
     createObjectGroup: (objectIds, name) => {
       const uniqueObjectIds = [...new Set(objectIds)];

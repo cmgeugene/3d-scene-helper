@@ -12,6 +12,9 @@ const SCENE_ASSISTANT_INSTRUCTIONS = `너는 I2V 3D Scene Helper의 Scene Assist
 SceneDocument의 위치, 카메라, 가림 관계는 구도 기준이며 색상만으로 오브젝트의 실제 의미를 단정하지 않는다.
 확실하지 않은 의미 정보는 추측을 사실처럼 말하지 말고 사용자에게 확인한다.`;
 
+const OBJECT_SURFACE_INSTRUCTIONS = `LayoutSpec v2의 proxyVisualization.opacity는 내부 배치를 확인하기 위한 3D 편집 표시값일 뿐 최종 재질의 투명도를 뜻하지 않습니다. 최종 표면은 appearanceIntent.surfaceType과 materialNotes만 따르세요.
+containment는 실제 포함 관계와 내부 오브젝트의 최종 가시성 계약입니다. occluded는 외부에서 숨기고, through-opening은 열린 부분으로, through-transparent-surface는 실제 투명 표면을 통해, cutaway는 의도적인 단면/컷어웨이로 표현하세요.`;
+
 function referenceManifest(
   references: ReferenceArtifact[],
   attachmentIndexOffset: number,
@@ -66,6 +69,7 @@ export function createImageGenerationPrompt(
 이어지는 이미지는 아래 매니페스트의 순서와 역할에만 사용하세요. 캐릭터 레퍼런스는 연결된 마네킹의 얼굴, 체형, 헤어와 의상에만 사용하고 포즈와 위치는 3D 레이아웃을 따릅니다. 캐릭터 시트의 글자나 패널 구성은 결과에 포함하지 마세요.
 저장된 Semantic Scene Spec은 장소, 시간대, 분위기, 화풍 의도, 생성 전용 소품, 엑스트라, 관계와 제약의 권위 있는 현재 상태입니다. 채팅 기록을 장면 원본으로 사용하지 마세요. 명시적 지시가 없는 한 LayoutSpec의 preserve 항목을 변경하지 말고 한 장의 완성 이미지만 생성하세요. 파일 수정이나 명령 실행은 하지 마세요.
 LayoutSpec 각 오브젝트의 semanticMeaning과 generationNotes는 해당 오브젝트에만 권위가 있는 의미 데이터입니다. 장면 전체 spec과 중복 추론하지 말고 일반적인 primitive 이름이나 guideColor보다 우선해 실제 사물로 교체하세요.${semanticSection}
+${OBJECT_SURFACE_INSTRUCTIONS}
 
 [LayoutSpec / 3D 레이아웃과 최종 키프레임의 변환 계약]
 ${JSON.stringify(layoutSpec)}
@@ -113,6 +117,7 @@ export function createImageRefinementPrompt(
 첨부 이미지 2는 보정의 기준이 되는 기존 완성 키프레임입니다. 인물 정체성, 의상, 재질, 색감과 이미 완성된 디테일의 외형 기준으로 사용하되, 카메라, 크롭, 배치, 크기, 포즈, 방향, 깊이와 가림은 첨부 이미지 1과 LayoutSpec을 따르세요.
 첨부 이미지 3 이후는 역할별 외형 레퍼런스입니다. 매니페스트의 use 항목만 사용하고 exclude 항목은 가져오지 마세요.
 이 요청은 기존 파일을 픽셀 단위로 수정하는 작업이 아니라, 기존 키프레임을 고충실도 입력으로 사용하는 한 번의 완성 이미지 재생성입니다. 요청하지 않은 부분을 임의로 바꾸거나 새로운 요소를 추가하지 마세요. 이미지 한 장만 생성하고 파일 수정이나 명령 실행은 하지 마세요.
+${OBJECT_SURFACE_INSTRUCTIONS}
 
 [보정 지시 / RefinementDirective]
 ${JSON.stringify(directive)}

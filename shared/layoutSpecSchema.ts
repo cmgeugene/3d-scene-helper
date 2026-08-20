@@ -19,7 +19,7 @@ const screenBoundsSchema = z.object({
 });
 
 export const layoutSpecSchema = z.object({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   sceneId: z.string().min(1),
   output: z.object({
     width: z.number().int().positive(),
@@ -57,6 +57,21 @@ export const layoutSpecSchema = z.object({
       role: z.enum(['subject', 'proxy', 'environment']),
       guideColor: z.string(),
       guideColorOnly: z.literal(true),
+      proxyVisualization: z
+        .object({ opacity: z.number().min(0.05).max(1) })
+        .default({ opacity: 1 }),
+      appearanceIntent: z
+        .object({
+          surfaceType: z.enum([
+            'opaque',
+            'transparent',
+            'translucent',
+            'mirror',
+          ]),
+          materialNotes: z.string(),
+        })
+        .default({ surfaceType: 'opaque', materialNotes: '' }),
+      groupId: z.string().min(1).nullable().default(null),
       semanticMeaning: z.string().nullable().default(null),
       generationNotes: z.string().nullable().default(null),
       worldBounds: z.object({
@@ -103,6 +118,21 @@ export const layoutSpecSchema = z.object({
       farObjectOverlap: z.number().min(0).max(1),
     }),
   ),
+  containment: z
+    .array(
+      z.object({
+        relationId: z.string().min(1),
+        containerObjectId: z.string().min(1),
+        containedObjectId: z.string().min(1),
+        visibility: z.enum([
+          'occluded',
+          'through-opening',
+          'through-transparent-surface',
+          'cutaway',
+        ]),
+      }),
+    )
+    .default([]),
   omittedObjectIds: z.array(z.string().min(1)),
 });
 

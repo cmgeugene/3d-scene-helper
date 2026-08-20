@@ -130,6 +130,7 @@ function projectObject(
   camera: PerspectiveCamera,
   targetDistanceMeters: number,
   references: ReferenceArtifact[],
+  groupId: string | null,
 ): LayoutObject {
   const worldBounds = getSceneObjectBounds(object);
   const centerWorld = new Vector3(
@@ -207,6 +208,11 @@ function projectObject(
     role,
     guideColor: object.color,
     guideColorOnly: true,
+    proxyVisualization: {
+      opacity: object.visualization.proxyOpacity,
+    },
+    appearanceIntent: object.appearanceIntent,
+    groupId,
     semanticMeaning: object.semantic?.meaning || null,
     generationNotes: object.semantic?.generationNotes || null,
     worldBounds: {
@@ -313,12 +319,22 @@ export function createLayoutSpec(
   const included = document.objects.filter(
     ({ visible, exportable }) => visible && exportable,
   );
-  const objects = included.map((object) =>
-    projectObject(object, camera, targetDistanceMeters, references),
-  );
+  const objects = included.map((object) => {
+    const groupId =
+      document.groups.find(({ memberObjectIds }) =>
+        memberObjectIds.includes(object.id),
+      )?.id ?? null;
+    return projectObject(
+      object,
+      camera,
+      targetDistanceMeters,
+      references,
+      groupId,
+    );
+  });
 
   return layoutSpecSchema.parse({
-    version: 1,
+    version: 2,
     sceneId: document.id,
     output: {
       width: document.output.width,
@@ -353,6 +369,18 @@ export function createLayoutSpec(
     },
     objects,
     potentialOcclusions: potentialOcclusions(objects),
+    containment: document.spatialRelations.flatMap((relation) =>
+      relation.type === 'contains'
+        ? [
+            {
+              relationId: relation.id,
+              containerObjectId: relation.containerObjectId,
+              containedObjectId: relation.containedObjectId,
+              visibility: relation.visibility,
+            },
+          ]
+        : [],
+    ),
     omittedObjectIds: document.objects
       .filter(({ visible, exportable }) => !visible || !exportable)
       .map(({ id }) => id),

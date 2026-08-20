@@ -231,6 +231,25 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 4. 그룹 해제는 멤버 오브젝트와 각자의 월드 transform을 변경하지 않는다.
 5. 저장·새로고침 후 그룹 멤버십과 이동된 개별 위치가 그대로 복원된다.
 
+### P11. 프록시 표시·최종 표면 의도·오브젝트 포함 관계 — 완료 (S41)
+
+- [x] 프록시 불투명도와 최종 표면 타입을 서로 독립적인 Inspector 필드로 편집
+- [x] 프록시 material의 원래 opacity/depth-write를 보존하는 가역적 뷰포트 표시
+- [x] 최종 표면의 opaque/transparent/translucent 의도와 재질 메모 저장
+- [x] 내부 오브젝트와 occluded/opening/transparent/cutaway 가시성 관계 authoring
+- [x] 누락 참조·자기 포함·중복·cycle을 schema 검증으로 fail-closed 처리
+- [x] 포함 관계 생성·삭제와 표면 편집의 undo/redo·autosave·JSON 보존
+- [x] LayoutSpec v2에 proxy visualization, appearance intent, group ID와 containment 투영
+- [x] 생성 prompt에서 프록시 opacity의 비권위성과 최종 표면/포함 관계의 권위 명시
+
+완료 기준:
+
+1. 프록시 opacity는 내부 배치를 보기 위한 편집 표시만 바꾸며 최종 투명 재질을 암시하지 않는다.
+2. 최종 표면 타입과 재질 메모는 프록시 표시값과 독립적으로 저장·복원된다.
+3. 포함 관계는 내부 대상과 최종 가시성 모드를 구조화해 저장하며 중복과 cycle을 허용하지 않는다.
+4. LayoutSpec v2와 생성 prompt가 프록시 표시와 최종 이미지 의도를 명확히 구분한다.
+5. 실제 Chromium에서 편집한 세 속성이 자동 저장 후 새로고침을 왕복한다.
+
 ## 3. 장기 보류
 
 다음 항목은 위 단계가 안정화된 뒤 검토한다.
@@ -253,7 +272,8 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 
 ## 5. 바로 다음 작업
 
-S41에서는 v4 `visualization`, `appearanceIntent`와 `spatialRelations.contains`를 UI와 LayoutSpec v2에
-연결한다. proxy opacity는 편집용 cutaway 표시로만 사용하고 최종 표면 타입과 분리한다. containment
-관계는 누락 참조·중복·cycle을 차단하며 opaque/transparent/cutaway 의도를 prompt evidence까지
-구조적으로 전달해야 한다. mirror reflection은 그 다음 S42에서 별도로 구현한다.
+S42에서는 첫 거울 범위를 평면 거울로 제한한다. `plane`의 최종 표면을 mirror로 지정하고 반사 대상
+오브젝트를 구조화된 `spatialRelations.reflects`로 편집하며, 뷰포트와 clean export에서 같은 반사
+평면·방향을 사용해야 한다. LayoutSpec에는 거울 화면 bounds, 평면 방향과 반사 대상 ID를 기록하고,
+생성 prompt에는 반사상을 별도 실물 복제로 만들지 않는 규칙을 추가한다. 곡면·재귀·거울 속 거울은
+이번 단계에 포함하지 않는다.
