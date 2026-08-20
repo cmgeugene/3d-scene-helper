@@ -1178,6 +1178,28 @@ export function KeyframeWorkspace({
                           </dd>
                         </div>
                       </dl>
+                      {selected.attachmentContractVersion ===
+                      undefined ? null : (
+                        <p>
+                          이미지 첨부 계약 v{selected.attachmentContractVersion}
+                        </p>
+                      )}
+                      {selected.imageBindings === undefined ||
+                      selected.imageBindings === null ? null : (
+                        <>
+                          <h5>검증된 이미지 권위</h5>
+                          <ol aria-label="검증된 이미지 권위">
+                            {selected.imageBindings.map((binding) => (
+                              <li
+                                key={`${binding.attachmentIndex}-${binding.role}`}
+                              >
+                                {binding.attachmentIndex} · {binding.role} ·{' '}
+                                {binding.authority.join(', ')}
+                              </li>
+                            ))}
+                          </ol>
+                        </>
+                      )}
                       <h5>실제 첨부 순서</h5>
                       <ol>
                         {selected.executionSummary.attachments.map(

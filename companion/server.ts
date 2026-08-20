@@ -22,6 +22,12 @@ import { evaluateGenerationPreflight } from '../shared/generationPreflight';
 import { refinementDirectiveSchema } from '../shared/refinementDirective';
 import { conversationTurnMetadataInputSchema } from '../shared/conversationMetadata';
 import { runtimeRequestResponseSchema } from '../shared/runtimeRequest';
+import {
+  createGenerationImageDescriptor,
+  expectedGenerationImageBindings,
+  GENERATION_IMAGE_CONTRACT_VERSION,
+  generationImageRoleForReferenceKind,
+} from '../shared/generationImageContract';
 import { sceneDocumentSchema } from '../src/editor/persistence/sceneSchema';
 import {
   SPEC_PATCH_PROPOSAL_JSON_SCHEMA,
@@ -1019,35 +1025,65 @@ export async function startCompanionServer(
                 `생성 전 경고 확인이 필요합니다: ${unacknowledgedWarnings.map(({ id, message }) => `[${id}] ${message}`).join(' ')}`,
               );
             }
-            const input: TurnInput[] = [{ type: 'text', text: body.prompt }];
-            if (sourceGeneration !== null) {
-              input.push({
-                type: 'localImage',
-                path: await resolveProjectArtifact(
-                  options.projectRoot,
-                  sourceGeneration.assetPath,
-                ),
-                detail: 'original',
-              });
-            }
-            input.push({
-              type: 'localImage',
-              path: await resolveProjectArtifact(
-                options.projectRoot,
-                layout.assetPath,
-              ),
-              detail: 'original',
-            });
-            for (const reference of references) {
-              input.push({
-                type: 'localImage',
-                path: await resolveProjectArtifact(
+            const layoutPath = await resolveProjectArtifact(
+              options.projectRoot,
+              layout.assetPath,
+            );
+            const sourceGenerationPath =
+              sourceGeneration === null
+                ? null
+                : await resolveProjectArtifact(
+                    options.projectRoot,
+                    sourceGeneration.assetPath,
+                  );
+            const referencePaths = await Promise.all(
+              references.map((reference) =>
+                resolveProjectArtifact(
                   options.projectRoot,
                   reference.assetPath,
                 ),
-                detail: 'original',
-              });
-            }
+              ),
+            );
+            const generationImages = [
+              {
+                ...createGenerationImageDescriptor({
+                  attachmentIndex: 1,
+                  role: 'layout',
+                  artifactId: layout.render.artifactId,
+                }),
+                path: layoutPath,
+              },
+              ...(sourceGeneration === null || sourceGenerationPath === null
+                ? []
+                : [
+                    {
+                      ...createGenerationImageDescriptor({
+                        attachmentIndex: 2,
+                        role: 'sourceGeneration',
+                        artifactId:
+                          sourceGeneration.generation.result!.artifactId,
+                      }),
+                      path: sourceGenerationPath,
+                    },
+                  ]),
+              ...references.map((reference, index) => ({
+                ...createGenerationImageDescriptor({
+                  attachmentIndex: index + (sourceGeneration === null ? 2 : 3),
+                  role: generationImageRoleForReferenceKind(reference.kind),
+                  artifactId: reference.artifactId,
+                  targetObjectId: reference.targetObjectId,
+                }),
+                path: referencePaths[index]!,
+              })),
+            ];
+            const input: TurnInput[] = [
+              { type: 'text', text: body.prompt },
+              ...generationImages.map(({ path }) => ({
+                type: 'localImage' as const,
+                path,
+                detail: 'original' as const,
+              })),
+            ];
             const responseModel = useOAuthImageProvider
               ? (body.imageModel ?? options.imageModel ?? 'gpt-5.4-mini')
               : null;
@@ -1085,6 +1121,9 @@ export async function startCompanionServer(
                 imageQuality,
                 reasoningEffort,
                 generationIntentSnapshot: generationIntent,
+                attachmentContractVersion: GENERATION_IMAGE_CONTRACT_VERSION,
+                imageBindings:
+                  expectedGenerationImageBindings(generationImages),
                 layoutSpec: body.layoutSpec,
                 sceneSnapshot: body.sceneSnapshot,
                 referenceSnapshots: references.map(toPublicReference),
@@ -1096,6 +1135,7 @@ export async function startCompanionServer(
                 layoutRenderId: body.layoutRenderId,
                 referenceIds: references.map(({ id }) => id),
                 attachments: [
+                  { type: 'layout', id: body.layoutRenderId, kind: 'layout' },
                   ...(sourceGeneration === null
                     ? []
                     : [
@@ -1105,7 +1145,6 @@ export async function startCompanionServer(
                           kind: null,
                         },
                       ]),
-                  { type: 'layout', id: body.layoutRenderId, kind: 'layout' },
                   ...references.map(({ id, kind }) => ({
                     type: 'reference' as const,
                     id,
@@ -1131,34 +1170,13 @@ export async function startCompanionServer(
             if (useOAuthImageProvider) {
               void (async () => {
                 try {
-                  const filePaths = [
-                    ...(sourceGeneration === null
-                      ? []
-                      : [
-                          await resolveProjectArtifact(
-                            options.projectRoot,
-                            sourceGeneration.assetPath,
-                          ),
-                        ]),
-                    await resolveProjectArtifact(
-                      options.projectRoot,
-                      layout.assetPath,
-                    ),
-                    ...(await Promise.all(
-                      references.map((reference) =>
-                        resolveProjectArtifact(
-                          options.projectRoot,
-                          reference.assetPath,
-                        ),
-                      ),
-                    )),
-                  ];
+                  const filePaths = generationImages.map(({ path }) => path);
                   const compiledPrompt = await imagegenPromptCompiler({
                     runtime: options.runtime,
                     projectRoot: options.projectRoot,
                     sourcePrompt: body.prompt,
                     generationIntent,
-                    filePaths,
+                    images: generationImages,
                     onThreadStarted: (threadId) => {
                       suppressedCodexThreadIds.add(threadId);
                     },

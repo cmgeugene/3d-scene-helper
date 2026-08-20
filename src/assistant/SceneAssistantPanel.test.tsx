@@ -137,7 +137,9 @@ describe('SceneAssistantPanel', () => {
     expect(prompt).toContain('[LayoutSpec /');
     expect(prompt).not.toContain('$imagegen');
     expect(
-      screen.getByText('현재 OutputCamera의 3D 레이아웃 렌더'),
+      screen.getByText(
+        '현재 OutputCamera의 3D 레이아웃 렌더 · 공간 기준 · 고정',
+      ),
     ).toBeVisible();
     expect(captureLayout).not.toHaveBeenCalled();
     expect(startGeneration).not.toHaveBeenCalled();
@@ -1873,7 +1875,9 @@ describe('SceneAssistantPanel', () => {
     expect(await screen.findByText('키프레임 보정 모드')).toBeVisible();
     expect(
       screen.getByRole('status', { name: '이미지 생성 계보' }),
-    ).toHaveTextContent('edit 보정 · 기존 결과 이미지 generation-source 기반');
+    ).toHaveTextContent(
+      'edit 보정 · 현재 3D 레이아웃 공간 기준 고정 · 기존 결과 이미지 generation-source 외형 기준',
+    );
     expect(
       screen.queryByRole('button', { name: '이 결과를 기반으로 보정' }),
     ).not.toBeInTheDocument();
@@ -1902,7 +1906,9 @@ describe('SceneAssistantPanel', () => {
     expect(startGeneration).toHaveBeenCalledWith({
       requestId: expect.stringMatching(/^generation-scene-1-/),
       threadId: 'thread-test',
-      prompt: expect.stringContaining('첨부 이미지 1은 보정의 기준'),
+      prompt: expect.stringContaining(
+        '첨부 이미지 1은 현재 OutputCamera의 3D 레이아웃',
+      ),
       layoutRenderId: 'render-refined',
       layoutSpec: expect.objectContaining({ sceneId: 'scene-1' }),
       sceneSnapshot: expect.objectContaining({ id: 'scene-1' }),

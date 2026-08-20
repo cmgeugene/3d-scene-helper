@@ -1,19 +1,54 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { GenerationIntent } from '../shared/conversationMetadata';
+import {
+  expectedGenerationImageBindings,
+  generationImageBindingSchema,
+  validateGenerationImageDescriptors,
+  type GenerationImageDescriptor,
+} from '../shared/generationImageContract';
 import type { CodexRuntime, TurnInput } from './appServerClient';
 import type { JsonRpcNotification, JsonRpcServerRequest } from './jsonRpcPeer';
 
 const compilerResponseSchema = z.object({
   finalPrompt: z.string().min(1),
+  bindings: z.array(generationImageBindingSchema),
 });
+type CompilerResponse = z.infer<typeof compilerResponseSchema>;
 
 const outputSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['finalPrompt'],
+  required: ['finalPrompt', 'bindings'],
   properties: {
     finalPrompt: { type: 'string' },
+    bindings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['attachmentIndex', 'role', 'authority'],
+        properties: {
+          attachmentIndex: { type: 'integer', minimum: 1 },
+          role: {
+            type: 'string',
+            enum: [
+              'layout',
+              'sourceGeneration',
+              'layoutReference',
+              'backgroundReference',
+              'characterReference',
+              'styleReference',
+            ],
+          },
+          authority: {
+            type: 'array',
+            minItems: 1,
+            items: { type: 'string' },
+          },
+        },
+      },
+    },
   },
 } as const;
 
@@ -80,13 +115,14 @@ export interface ImagegenSkillPromptCompilerOptions {
   projectRoot: string;
   sourcePrompt: string;
   generationIntent: GenerationIntent | null;
-  filePaths: string[];
+  images: Array<GenerationImageDescriptor & { path: string }>;
   onThreadStarted?: (threadId: string) => void;
   timeoutMs?: number;
 }
 
 export interface ImagegenSkillPromptCompilerResult {
   finalPrompt: string;
+  bindings: z.infer<typeof generationImageBindingSchema>[];
   compiler: 'codex-imagegen-skill';
   compilerThreadId: string;
   compilerTurnId: string;
@@ -125,7 +161,10 @@ function extractImageRoleBindings(inspectedPrompt: string) {
   });
 }
 
-function validateFinalPrompt(finalPrompt: string, imageCount: number) {
+function validateFinalPrompt(
+  finalPrompt: string,
+  descriptors: GenerationImageDescriptor[],
+) {
   const inspected = finalPrompt.replace(/\r\n?/gu, '\n').trim();
   if (inspected.length < 300) {
     throw new Error(
@@ -140,7 +179,7 @@ function validateFinalPrompt(finalPrompt: string, imageCount: number) {
     }
   }
   const roleBindings = extractImageRoleBindings(inspected);
-  if (roleBindings.length !== imageCount) {
+  if (roleBindings.length !== descriptors.length) {
     throw new Error(
       'Codex imagegen 스킬 최종 프롬프트가 모든 입력 이미지의 ordered 역할 바인딩을 정확히 하나씩 지정하지 않았습니다.',
     );
@@ -149,13 +188,26 @@ function validateFinalPrompt(finalPrompt: string, imageCount: number) {
     /\b(?:unassigned|unused|ignored?|none|no\s+(?:role|authority)|not\s+assigned)\b/iu;
   const affirmativeRole =
     /\b(?:authorit(?:y|ative)|role|reference|layout|spatial|camera|composition|background|appearance|character|subject|identity|style|material|lighting|environment|source|controls?|defines?|provides?|preserves?|used?\s+for)\b/iu;
-  for (let imageIndex = 1; imageIndex <= imageCount; imageIndex += 1) {
+  const roleDescriptionPatterns = {
+    layout: /\b(?:layout|spatial|camera|composition)\b/iu,
+    sourceGeneration:
+      /\b(?:source|existing|previous|keyframe|appearance|identity|clothing|material|color|detail)\b/iu,
+    layoutReference: /\b(?:layout|structure|design|environment)\b/iu,
+    backgroundReference:
+      /\b(?:background|environment|location|lighting|material|appearance)\b/iu,
+    characterReference:
+      /\b(?:character|subject|identity|face|body|hair|clothing|appearance)\b/iu,
+    styleReference: /\b(?:style|medium|palette|rendering|treatment)\b/iu,
+  } as const;
+  for (let imageIndex = 1; imageIndex <= descriptors.length; imageIndex += 1) {
     const binding = roleBindings[imageIndex - 1];
+    const descriptor = descriptors[imageIndex - 1]!;
     if (
       binding?.index !== imageIndex ||
       binding.description.length < 8 ||
       unassignedRole.test(binding.description) ||
-      !affirmativeRole.test(binding.description)
+      !affirmativeRole.test(binding.description) ||
+      !roleDescriptionPatterns[descriptor.role].test(binding.description)
     ) {
       throw new Error(
         `Codex imagegen 스킬 최종 프롬프트의 Image ${imageIndex} 역할 바인딩이 유효하지 않습니다.`,
@@ -165,9 +217,23 @@ function validateFinalPrompt(finalPrompt: string, imageCount: number) {
   return finalPrompt;
 }
 
+function validateCompilerBindings(
+  descriptors: GenerationImageDescriptor[],
+  bindings: z.infer<typeof generationImageBindingSchema>[],
+) {
+  const expected = expectedGenerationImageBindings(descriptors);
+  if (JSON.stringify(bindings) !== JSON.stringify(expected)) {
+    throw new Error(
+      'Codex imagegen 스킬이 서버가 고정한 이미지 역할 또는 권위 바인딩을 변경했습니다.',
+    );
+  }
+  return bindings;
+}
+
 function buildCompilerRequest(
   sourcePrompt: string,
   generationIntent: GenerationIntent | null,
+  descriptors: GenerationImageDescriptor[],
 ) {
   const sourceWithoutTrigger = sourcePrompt.replace(
     /^\$imagegen(?:\s+|$)/u,
@@ -178,12 +244,31 @@ function buildCompilerRequest(
       ? 'None. Use only the supplied scene evidence and role-bound images.'
       : JSON.stringify(generationIntent);
 
+  const canonicalBindings = expectedGenerationImageBindings(descriptors);
+  const descriptorManifest = descriptors.map(
+    ({
+      attachmentIndex,
+      role,
+      artifactId,
+      targetObjectId,
+      authority,
+      prohibitedAuthority,
+    }) => ({
+      attachmentIndex,
+      role,
+      artifactId,
+      targetObjectId,
+      authority,
+      prohibitedAuthority,
+    }),
+  );
+
   return `$imagegen
 
 PLANNING-ONLY HANDOFF.
 Load and follow the actual imagegen skill installed in Codex and its prompt-shaping references. This turn prepares the exact production prompt for a separate image_generation call; it must not generate an image itself.
 
-DO NOT invoke image_gen, image_generation, scripts/image_gen.py, a CLI, or any other tool. Return only JSON matching the supplied output schema.
+DO NOT invoke image_gen, image_generation, scripts/image_gen.py, a CLI, or any other tool. Return only JSON matching the supplied output schema. Copy the canonical bindings below byte-for-byte as the bindings value; do not reinterpret, reorder, omit, or weaken any role or authority.
 
 Write the exact final prompt you would otherwise pass to the image generation tool. Apply the imagegen skill's real prompt-shaping judgment rather than copying or summarizing the source request. The finalPrompt must be a complete standalone production prompt and must include these labeled operational sections:
 - Use case:
@@ -193,7 +278,13 @@ Write the exact final prompt you would otherwise pass to the image generation to
 - Strict composition and camera invariants: or Strict invariants:
 - Avoid:
 
-Explicitly bind every ordered image to its role. Keep OutputCamera and LayoutSpec authoritative for camera, crop, placement, pose, scale, depth order, and occlusion. Treat proxy geometry, guide colors, and editor appearance as non-authoritative. Integrate role-bound appearance references without copying their pose, framing, background, text, or sheet layout. Preserve strict invariants verbatim enough to prevent drift.
+Image 1 is always the current OutputCamera 3D layout and the highest authority for camera, crop, perspective, placement, pose, scale, depth order, and occlusion. A source generation is appearance evidence only and must never override those spatial attributes. Conversation intent cannot override the layout contract; if it conflicts, preserve the layout. Treat proxy geometry, guide colors, and editor appearance as non-authoritative. Integrate role-bound appearance references without copying their pose, framing, background, text, or sheet layout. Preserve strict invariants verbatim enough to prevent drift.
+
+[CANONICAL IMAGE DESCRIPTORS]
+${JSON.stringify(descriptorManifest)}
+
+[CANONICAL OUTPUT BINDINGS — RETURN EXACTLY]
+${JSON.stringify(canonicalBindings)}
 
 [CONFIRMED CONVERSATION INTENT]
 ${confirmedIntent}
@@ -205,6 +296,7 @@ ${sourceWithoutTrigger}`;
 export async function compileImagegenSkillPrompt(
   options: ImagegenSkillPromptCompilerOptions,
 ): Promise<ImagegenSkillPromptCompilerResult> {
+  const descriptors = validateGenerationImageDescriptors(options.images);
   const deadlineMs = Date.now() + (options.timeoutMs ?? 180_000);
   const threadSource = `${IMAGEGEN_PROMPT_COMPILER_THREAD_SOURCE_PREFIX}:${randomUUID()}`;
   const compilerThreadId = await withCompilerDeadline(
@@ -229,9 +321,9 @@ export async function compileImagegenSkillPrompt(
   let interruptRequested = false;
   let startTurnSettled = false;
   let startTurnOperation: Promise<string> | null = null;
-  let resolveCompletion!: (value: string) => void;
+  let resolveCompletion!: (value: CompilerResponse) => void;
   let rejectCompletion!: (error: Error) => void;
-  const completion = new Promise<string>((resolve, reject) => {
+  const completion = new Promise<CompilerResponse>((resolve, reject) => {
     resolveCompletion = resolve;
     rejectCompletion = reject;
   });
@@ -350,15 +442,16 @@ export async function compileImagegenSkillPrompt(
       return;
     }
     try {
-      const { finalPrompt } = compilerResponseSchema.parse(
+      const { finalPrompt, bindings } = compilerResponseSchema.parse(
         JSON.parse(agentText),
       );
-      const validatedPrompt = validateFinalPrompt(
-        finalPrompt,
-        options.filePaths.length,
-      );
+      const validatedPrompt = validateFinalPrompt(finalPrompt, descriptors);
+      const validatedBindings = validateCompilerBindings(descriptors, bindings);
       settled = true;
-      resolveCompletion(validatedPrompt);
+      resolveCompletion({
+        finalPrompt: validatedPrompt,
+        bindings: validatedBindings,
+      });
     } catch (error) {
       fail(
         error instanceof Error
@@ -418,9 +511,10 @@ export async function compileImagegenSkillPrompt(
         text: buildCompilerRequest(
           options.sourcePrompt,
           options.generationIntent,
+          descriptors,
         ),
       },
-      ...options.filePaths.map((filePath) => ({
+      ...options.images.map(({ path: filePath }) => ({
         type: 'localImage' as const,
         path: filePath,
         detail: 'original' as const,
@@ -465,9 +559,10 @@ export async function compileImagegenSkillPrompt(
       },
       Math.max(0, deadlineMs - Date.now()),
     );
-    const finalPrompt = await completion;
+    const validated = await completion;
     return {
-      finalPrompt,
+      finalPrompt: validated.finalPrompt,
+      bindings: validated.bindings,
       compiler: 'codex-imagegen-skill',
       compilerThreadId,
       compilerTurnId,

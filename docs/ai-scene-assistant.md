@@ -443,7 +443,9 @@ Scene Graph
 `SceneDocument`, 별도 Semantic Scene Spec snapshot과 `LayoutSpec`의 SHA-256, 레이아웃 렌더 ID와
 파일 해시, 원본 키프레임 ID·결과 해시, 정렬된 레퍼런스 ID·해시를 포함한다. 실제 Codex turn에
 전달한 이미지 배열은 1부터 시작하는 attachment index와 `sourceGeneration`/`layout`/`reference`
-역할로 그대로 기록한다.
+역할로 그대로 기록한다. attachment contract v2부터 fresh/edit 모두 현재 OutputCamera 레이아웃이
+Image 1이며, edit의 source generation은 Image 2다. 별도 `imageBindings`는 각 index의 canonical
+역할과 권위 목록을 저장한다.
 
 Companion은 generation 목록과 콘텐츠 응답을 만들 때 manifest의 현재 저장값으로 요약을 다시
 계산한다. 저장 요약과의 차이 외에도 다음 근거를 독립적으로 검사한다.
@@ -614,7 +616,7 @@ Assistant에서 허용된 Responses 모델과 `image_generation.quality`를 고�
 1. Codex App Server가 별도의 ephemeral·read-only·approval-never thread에서 실제 설치된
    `$imagegen` 스킬과 그 prompt-shaping 참조를 로드한다. SceneDocument, OutputCamera, LayoutSpec,
    Semantic Scene Spec, ordered image roles, 보정 지시와 최신 generation intent를 입력으로 받아 이미지
-   도구에 보낼 완전한 영어 production prompt를 구조화 응답 `finalPrompt`로 반환한다. Companion은
+   도구에 보낼 완전한 영어 production prompt와 canonical image bindings를 구조화 응답으로 반환한다. Companion은
    passive item만 허용하며 다른 현재·미래 tool item 또는 server request가 나타나면 turn 중단 완료까지
    기다린 뒤 fail-closed 처리한다. thread 생성, turn 시작과 최종 응답은 하나의 전체 deadline을
    공유한다.
@@ -623,7 +625,8 @@ Assistant에서 허용된 Responses 모델과 `image_generation.quality`를 고�
 
 스킬 최종 prompt는 `Use case`, `Primary request`, ordered image roles/authority,
 `Style/medium and integration`, strict composition/camera invariants와 `Avoid`를 포함한다. OutputCamera
-레이아웃을 카메라·크롭·배치·포즈·깊이·가림의 권위로 유지하고,
+레이아웃을 항상 Image 1로 두고 카메라·크롭·원근·배치·크기·포즈·깊이·가림의 최상위 권위로 유지한다.
+edit source generation은 정체성·의상·재질·색감과 렌더 디테일의 외형 권위만 가지며,
 3D proxy 색·primitive geometry·editor artifact는 최종 외형이 아님을 명시한다. generation
 record는 원본 prompt, 스킬 최종 전달 prompt인 `generationSpec`(호환 필드명), 이미지 도구가 반환한 `revisedPrompt`를 서로 다른
 필드로 보존하고 provider, Responses 모델, quality, reasoning과 반영한 intent snapshot을 함께

@@ -26,6 +26,11 @@ import {
   type GenerationExecutionIntegrity,
   type GenerationExecutionSummary,
 } from '../shared/generationExecutionSummary';
+import {
+  generationImageBindingSchema,
+  GENERATION_IMAGE_CONTRACT_VERSION,
+  type GenerationImageBinding,
+} from '../shared/generationImageContract';
 import { generationPromptEvidence } from '../shared/generationPromptEvidence';
 import {
   generationIntentSchema,
@@ -110,6 +115,13 @@ const generationSchema = z
     generationIntentSnapshot: generationIntentSchema.nullable().default(null),
     generationSpec: z.string().min(1).nullable().default(null),
     promptCompiler: z.literal('codex-imagegen-skill').nullable().default(null),
+    attachmentContractVersion: z
+      .union([z.literal(1), z.literal(GENERATION_IMAGE_CONTRACT_VERSION)])
+      .default(1),
+    imageBindings: z
+      .array(generationImageBindingSchema)
+      .nullable()
+      .default(null),
     layoutSpec: layoutSpecSchema.nullable().default(null),
     sceneSnapshot: sceneDocumentSchema.nullable().default(null),
     semanticSceneSpecSnapshot: semanticSceneSpecSchema.nullable().default(null),
@@ -171,6 +183,8 @@ export interface CreateGenerationInput {
   imageQuality?: 'low' | 'medium' | 'high' | 'auto' | null;
   reasoningEffort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | null;
   generationIntentSnapshot?: GenerationIntent | null;
+  attachmentContractVersion?: 1 | typeof GENERATION_IMAGE_CONTRACT_VERSION;
+  imageBindings?: GenerationImageBinding[] | null;
   layoutSpec: LayoutSpec;
   sceneSnapshot: SceneDocument;
   referenceSnapshots: PublicReference[];

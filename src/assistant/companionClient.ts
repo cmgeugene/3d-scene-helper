@@ -11,6 +11,10 @@ import {
   generationExecutionSummarySchema,
 } from '../../shared/generationExecutionSummary';
 import {
+  generationImageBindingSchema,
+  GENERATION_IMAGE_CONTRACT_VERSION,
+} from '../../shared/generationImageContract';
+import {
   conversationSessionSchema,
   conversationTurnMetadataInputSchema,
   generationIntentSchema,
@@ -155,6 +159,10 @@ export const generationRecordSchema = z.object({
   generationIntentSnapshot: generationIntentSchema.nullable().optional(),
   generationSpec: z.string().min(1).nullable().optional(),
   promptCompiler: z.literal('codex-imagegen-skill').nullable().optional(),
+  attachmentContractVersion: z
+    .union([z.literal(1), z.literal(GENERATION_IMAGE_CONTRACT_VERSION)])
+    .optional(),
+  imageBindings: z.array(generationImageBindingSchema).nullable().optional(),
   layoutSpec: layoutSpecSchema.nullable(),
   sceneSnapshot: sceneDocumentSchema.nullable().default(null),
   semanticSceneSpecSnapshot: semanticSceneSpecSchema.nullable().default(null),

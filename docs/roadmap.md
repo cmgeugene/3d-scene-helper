@@ -2,7 +2,7 @@
 
 > 기준일: 2026-08-04
 >
-> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료; S36 P6 완료; S37 P7 완료
+> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료; S36 P6 완료; S37 P7 완료; S38 P8 완료
 >
 > 이 문서는 앞으로의 구현 순서와 완료 기준을 관리하는 단일 로드맵이다. 세부 설계는
 > `ai-scene-assistant.md`, 완료된 작업의 검증 기록은 `session-handoffs/`를 따른다.
@@ -35,9 +35,10 @@
 | 브라우저 배포  | 동일-origin 정적 편집기, platform Codex bundle, 크기 manifest와 배포 결정   | S35     |
 | 수동 웹 생성   | GPT 웹용 동일 의미 프롬프트, 첨부 순서 안내, 모달 복사와 무부작용 fallback  | S36     |
 | 생성 자원 수명 | 불변 원본·hash-bound thumbnail, bounded URL/Canvas와 restart 복구           | S37     |
+| 레이아웃 권위  | Image 1 고정, attachment contract v2와 역할·권위 binding fail-closed 검증   | S38     |
 
-현재 기본 생성은 `3D 레이아웃 1장 + 레퍼런스 최대 4장`, 보정 생성은
-`원본 키프레임 1장 + 현재 3D 레이아웃 1장 + 레퍼런스 최대 3장`을 사용한다.
+현재 기본 생성은 `Image 1 현재 3D 레이아웃 + 레퍼런스 최대 4장`, 보정 생성은
+`Image 1 현재 3D 레이아웃 + Image 2 원본 키프레임 + 레퍼런스 최대 3장`을 사용한다.
 보정을 반복할 때는 직전 결과를 연쇄 편집하지 않고 사용자가 처음 선택한 원본에서 형제
 버전을 만든다.
 
@@ -173,6 +174,23 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
    원본/thumbnail 해시 불일치는 manifest와 원본을 변경하지 않은 채 차단된다.
 5. e2e 전용 자원 진단은 일반 production build에 존재하지 않는다.
 
+### P8. 3D 레이아웃 첨부와 공간 권위 고정 — 완료 (S38)
+
+- [x] fresh/edit 모두 현재 OutputCamera 레이아웃을 Image 1로 고정
+- [x] edit source generation을 Image 2의 외형 권위로 제한
+- [x] canonical image descriptor와 역할별 허용/금지 권위 계약
+- [x] imagegen compiler의 구조화 binding과 readable prompt 역할을 이중 검증
+- [x] 역할 재분류, 권위 약화와 text/binding 모순을 provider 호출 전에 차단
+- [x] generation record와 키프레임 실행 상세에 contract version과 binding 저장
+- [x] Codex/OAuth/웹 내보내기의 순서와 보정 권위 문구 통일
+
+완료 기준:
+
+1. fresh/edit의 실제 provider 입력과 저장 attachment에서 layout이 항상 첫 번째다.
+2. source generation, reference와 conversation intent는 layout의 공간 권위를 덮어쓸 수 없다.
+3. compiler가 canonical index, role 또는 authority를 바꾸면 생성이 fail-closed 된다.
+4. legacy generation은 기존 attachment 순서와 필드 누락 상태로 계속 읽을 수 있다.
+
 ## 3. 장기 보류
 
 다음 항목은 위 단계가 안정화된 뒤 검토한다.
@@ -195,7 +213,7 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 
 ## 5. 바로 다음 작업
 
-S37에서는 생성 asset의 장시간 사용 수명주기를 구현한다. 프로젝트에 원본은 유지하되 generation
-목록은 Companion이 만든 제한 크기 thumbnail을 사용하고, 선택하지 않은 전체 해상도 이미지와
-읽기 전용 3D preview의 브라우저·GPU 자원을 해제한다. 원본/thumbnail 무결성, reload 복구와 많은
-generation에서의 메모리 상한을 자동 검증한다.
+S39에서는 `SceneDocument v4`의 additive migration 기반과 뷰포트 선택 잠금을 구현한다. 기존
+v1~v3 장면에는 잠금 해제, 빈 group/spatial relation, 기본 visualization/appearance 값을 넣고,
+첫 vertical slice는 `viewportSelectionLocked`만 UI에 노출한다. 잠긴 오브젝트는 Outliner에서
+선택·편집할 수 있지만 뷰포트 hit target에서는 제외되어 뒤쪽 오브젝트 선택을 방해하지 않아야 한다.

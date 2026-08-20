@@ -438,6 +438,7 @@ describe('Companion loopback API', () => {
         });
         return {
           finalPrompt: skillPrompt,
+          bindings: [],
           compiler: 'codex-imagegen-skill' as const,
           compilerThreadId: 'thread-compiler',
           compilerTurnId: 'turn-compiler',
@@ -650,7 +651,13 @@ describe('Companion loopback API', () => {
         generationIntent: expect.objectContaining({
           sourceTurnId: 'turn-intent',
         }),
-        filePaths: [expect.stringContaining('/assets/scene-renders/')],
+        images: [
+          expect.objectContaining({
+            attachmentIndex: 1,
+            role: 'layout',
+            path: expect.stringMatching(/[\\/]assets[\\/]scene-renders[\\/]/),
+          }),
+        ],
       }),
     );
     expect(oauthImageGenerator).toHaveBeenCalledOnce();
@@ -1217,6 +1224,11 @@ describe('Companion loopback API', () => {
         sourceGenerationId: started.generation.id,
         versionNumber: 1,
         generationMode: 'fresh',
+        attachmentContractVersion: 2,
+        imageBindings: [
+          { attachmentIndex: 1, role: 'layout' },
+          { attachmentIndex: 2, role: 'characterReference' },
+        ],
         attachments: [
           { type: 'layout', id: render.render.id, kind: 'layout' },
           {
@@ -1263,13 +1275,19 @@ describe('Companion loopback API', () => {
           change: ['전봇대가 가리는 비율만 줄여 주세요.'],
         },
         generationMode: 'edit',
+        attachmentContractVersion: 2,
+        imageBindings: [
+          { attachmentIndex: 1, role: 'layout' },
+          { attachmentIndex: 2, role: 'sourceGeneration' },
+          { attachmentIndex: 3, role: 'characterReference' },
+        ],
         attachments: [
+          { type: 'layout', id: render.render.id, kind: 'layout' },
           {
             type: 'sourceGeneration',
             id: started.generation.id,
             kind: null,
           },
-          { type: 'layout', id: render.render.id, kind: 'layout' },
           {
             type: 'reference',
             id: importedReference.reference.id,
@@ -1286,14 +1304,14 @@ describe('Companion loopback API', () => {
       {
         type: 'localImage',
         path: expect.stringMatching(
-          /[\\/]assets[\\/]generations[\\/]artifact_.+\.png$/,
+          /[\\/]assets[\\/]scene-renders[\\/]artifact_.+\.png$/,
         ),
         detail: 'original',
       },
       {
         type: 'localImage',
         path: expect.stringMatching(
-          /[\\/]assets[\\/]scene-renders[\\/]artifact_.+\.png$/,
+          /[\\/]assets[\\/]generations[\\/]artifact_.+\.png$/,
         ),
         detail: 'original',
       },

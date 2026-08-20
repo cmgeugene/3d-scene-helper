@@ -183,7 +183,7 @@ describe('createImageGenerationPrompt', () => {
 });
 
 describe('createImageRefinementPrompt', () => {
-  it('기존 키프레임과 3D 캡처 뒤에 레퍼런스를 배치한다', () => {
+  it('3D 캡처를 최상위 공간 기준으로 두고 기존 키프레임과 레퍼런스를 뒤에 배치한다', () => {
     const prompt = createImageRefinementPrompt(
       {
         version: 1,
@@ -215,13 +215,20 @@ describe('createImageRefinementPrompt', () => {
     );
 
     expect(prompt.startsWith('$imagegen')).toBe(true);
-    expect(prompt).toContain('첨부 이미지 1은 보정의 기준');
-    expect(prompt).toContain('첨부 이미지 2는 현재 OutputCamera');
+    expect(prompt).toContain('첨부 이미지 1은 현재 OutputCamera');
+    expect(prompt).toContain('최상위 공간 설계도');
+    expect(prompt).toContain('첨부 이미지 2는 보정의 기준');
+    expect(prompt).toContain('외형 기준으로 사용');
     expect(prompt).toContain('한 번의 완성 이미지 재생성');
     expect(prompt).toContain('[보정 지시 / RefinementDirective]');
     expect(prompt).toContain('"preserve":["전체 구도","인물 정체성"]');
     expect(prompt).toContain('"change":["전봇대가 가리는 비율만 줄여줘."]');
-    expect(prompt).toContain('두 목록에 없는 요소도 기존 키프레임을 우선 보존');
+    expect(prompt).toContain(
+      '두 목록에 없는 외형 요소도 기존 키프레임을 우선 보존',
+    );
+    expect(prompt).toContain(
+      '현재 3D 레이아웃과 LayoutSpec이 항상 최상위 권위',
+    );
     expect(prompt).toContain('"attachmentIndex":3');
     expect(prompt).toContain('"id":"generation-1"');
   });
@@ -264,8 +271,8 @@ describe('GPT 웹용 이미지 프롬프트', () => {
     );
 
     expect(prompt).not.toContain('$imagegen');
-    expect(prompt).toContain('첨부 이미지 1은 보정의 기준');
-    expect(prompt).toContain('첨부 이미지 2는 현재 OutputCamera');
+    expect(prompt).toContain('첨부 이미지 1은 현재 OutputCamera');
+    expect(prompt).toContain('첨부 이미지 2는 보정의 기준');
     expect(prompt).toContain('"change":["전봇대 가림만 줄이기"]');
     expect(prompt).toContain('"id":"generation-web-source"');
   });

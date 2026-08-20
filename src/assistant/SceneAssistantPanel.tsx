@@ -1216,12 +1216,12 @@ function ConnectedSceneAssistant({
               selectedReferences,
             ),
       attachmentLabels: [
+        '현재 OutputCamera의 3D 레이아웃 렌더 · 공간 기준 · 고정',
         ...(editing
           ? [
-              `보정 원본 키프레임 v${sourceGeneration.versionNumber} (${sourceGeneration.id})`,
+              `보정 원본 키프레임 v${sourceGeneration.versionNumber} (${sourceGeneration.id}) · 외형 기준`,
             ]
           : []),
-        '현재 OutputCamera의 3D 레이아웃 렌더',
         ...referenceManifest.map(
           ({ name, role }) => `레퍼런스 · ${name} (${role})`,
         ),
@@ -1823,7 +1823,7 @@ function ConnectedSceneAssistant({
                 currentScene.data.generationSource !== undefined
                 ? `fresh 새 생성 · 3D 출처 ${currentScene.data.generationSource.generationId} · 기존 결과 이미지 미사용`
                 : 'fresh 새 생성 · 현재 3D 레이아웃 · 기존 결과 이미지 미사용'
-              : `edit 보정 · 기존 결과 이미지 ${refinementSource.id} 기반`}
+              : `edit 보정 · 현재 3D 레이아웃 공간 기준 고정 · 기존 결과 이미지 ${refinementSource.id} 외형 기준`}
           </p>
 
           {refinementSource === null ? null : (
@@ -1831,8 +1831,9 @@ function ConnectedSceneAssistant({
               <div>
                 <strong>키프레임 보정 모드</strong>
                 <span>
-                  v{refinementSource.versionNumber} · {refinementSource.id} 결과
-                  + 현재 3D 레이아웃 · 레퍼런스 최대 {maximumReferences}장
+                  Image 1 현재 3D 레이아웃(공간 기준) · Image 2 v
+                  {refinementSource.versionNumber} {refinementSource.id}
+                  (외형 기준) · 레퍼런스 최대 {maximumReferences}장
                 </span>
               </div>
               <button

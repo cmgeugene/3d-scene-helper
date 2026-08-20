@@ -3,6 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { createStarterSceneDocument } from '../editor/persistence/sceneSchema';
 import { TEST_LAYOUT_SPEC } from '../../shared/layoutSpecTestFixture';
+import {
+  createGenerationImageDescriptor,
+  expectedGenerationImageBindings,
+} from '../../shared/generationImageContract';
 import type {
   CompanionBrowserClient,
   GenerationRecord,
@@ -862,8 +866,27 @@ describe('KeyframeWorkspace', () => {
   });
 
   it('실행 요약의 스냅샷 해시와 실제 첨부 순서 및 검증 오류를 표시한다', async () => {
+    const imageBindings = expectedGenerationImageBindings([
+      createGenerationImageDescriptor({
+        attachmentIndex: 1,
+        role: 'layout',
+        artifactId: 'layout-artifact',
+      }),
+      createGenerationImageDescriptor({
+        attachmentIndex: 2,
+        role: 'sourceGeneration',
+        artifactId: 'source-artifact',
+      }),
+      createGenerationImageDescriptor({
+        attachmentIndex: 3,
+        role: 'characterReference',
+        artifactId: 'character-artifact',
+      }),
+    ]);
     const selected = generation({
       id: 'generation-execution-summary',
+      attachmentContractVersion: 2,
+      imageBindings,
       executionSummary: {
         version: 1,
         requestId: 'request-execution-summary',
@@ -903,17 +926,17 @@ describe('KeyframeWorkspace', () => {
         attachments: [
           {
             attachmentIndex: 1,
-            type: 'sourceGeneration',
-            id: 'generation-source',
-            kind: null,
-            contentHash: `sha256:${'6'.repeat(64)}`,
-          },
-          {
-            attachmentIndex: 2,
             type: 'layout',
             id: 'render-summary',
             kind: 'layout',
             contentHash: `sha256:${'5'.repeat(64)}`,
+          },
+          {
+            attachmentIndex: 2,
+            type: 'sourceGeneration',
+            id: 'generation-source',
+            kind: null,
+            contentHash: `sha256:${'6'.repeat(64)}`,
           },
           {
             attachmentIndex: 3,
@@ -950,9 +973,21 @@ describe('KeyframeWorkspace', () => {
       within(summary!).getByText(/입력 무결성 · 불일치 발견/),
     ).toBeVisible();
     expect(within(summary!).getByText(/scene r3 · spec r2/)).toBeVisible();
-    const attachments = within(summary!).getAllByRole('listitem');
-    expect(attachments[0]).toHaveTextContent('1 · sourceGeneration');
-    expect(attachments[1]).toHaveTextContent('2 · layout');
+    expect(within(summary!).getByText('이미지 첨부 계약 v2')).toBeVisible();
+    const authority = within(summary!).getByRole('list', {
+      name: '검증된 이미지 권위',
+    });
+    expect(within(authority).getAllByRole('listitem')[0]).toHaveTextContent(
+      '1 · layout · camera viewpoint and perspective',
+    );
+    const attachmentsHeading = within(summary!).getByRole('heading', {
+      name: '실제 첨부 순서',
+    });
+    const attachments = within(
+      attachmentsHeading.nextElementSibling as HTMLElement,
+    ).getAllByRole('listitem');
+    expect(attachments[0]).toHaveTextContent('1 · layout');
+    expect(attachments[1]).toHaveTextContent('2 · sourceGeneration');
     expect(attachments[2]).toHaveTextContent('3 · reference');
     expect(within(summary!).getByRole('alert')).toHaveTextContent(
       'prompt의 LayoutSpec 입력이 저장 스냅샷과 일치하지 않습니다.',

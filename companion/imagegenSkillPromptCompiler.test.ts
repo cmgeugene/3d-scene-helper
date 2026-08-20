@@ -8,6 +8,10 @@ import type {
   TurnInput,
   TurnOptions,
 } from './appServerClient';
+import {
+  createGenerationImageDescriptor,
+  expectedGenerationImageBindings,
+} from '../shared/generationImageContract';
 import { compileImagegenSkillPrompt } from './imagegenSkillPromptCompiler';
 
 const compiledPrompt = `Use case: photorealistic-natural
@@ -67,6 +71,11 @@ class FakeRuntime extends EventEmitter implements CodexRuntime {
 function emitCompletedPrompt(
   runtime: FakeRuntime,
   finalPrompt = compiledPrompt,
+  images = compilerImages([
+    '/project-data/layout.png',
+    '/project-data/background.png',
+  ]),
+  bindings = expectedGenerationImageBindings(images),
 ) {
   setTimeout(() => {
     runtime.emit('notification', {
@@ -77,7 +86,10 @@ function emitCompletedPrompt(
         item: {
           type: 'agentMessage',
           id: 'message-compiler',
-          text: JSON.stringify({ finalPrompt }),
+          text: JSON.stringify({
+            finalPrompt,
+            bindings,
+          }),
         },
       },
     });
@@ -89,6 +101,17 @@ function emitCompletedPrompt(
       },
     });
   }, 0);
+}
+
+function compilerImages(paths: string[]) {
+  return paths.map((path, index) => ({
+    ...createGenerationImageDescriptor({
+      attachmentIndex: index + 1,
+      role: index === 0 ? 'layout' : 'backgroundReference',
+      artifactId: `artifact-${index + 1}`,
+    }),
+    path,
+  }));
 }
 
 describe('compileImagegenSkillPrompt', () => {
@@ -110,7 +133,10 @@ describe('compileImagegenSkillPrompt', () => {
           sceneRevision: 12,
           specRevision: 5,
         },
-        filePaths: ['/project-data/layout.png', '/project-data/style.png'],
+        images: compilerImages([
+          '/project-data/layout.png',
+          '/project-data/background.png',
+        ]),
         onThreadStarted,
         timeoutMs: 1_000,
       }),
@@ -149,13 +175,13 @@ describe('compileImagegenSkillPrompt', () => {
       },
       {
         type: 'localImage',
-        path: '/project-data/style.png',
+        path: '/project-data/background.png',
         detail: 'original',
       },
     ]);
     expect(options).toMatchObject({
       outputSchema: {
-        required: ['finalPrompt'],
+        required: ['finalPrompt', 'bindings'],
       },
     });
     expect(runtime.interruptTurn).not.toHaveBeenCalled();
@@ -180,7 +206,7 @@ describe('compileImagegenSkillPrompt', () => {
         projectRoot: '/project-data',
         sourcePrompt: '$imagegen scene evidence',
         generationIntent: null,
-        filePaths: ['/project-data/layout.png'],
+        images: compilerImages(['/project-data/layout.png']),
         timeoutMs: 1_000,
       }),
     ).rejects.toThrow('이미지 도구를 호출하려 했습니다');
@@ -215,7 +241,7 @@ describe('compileImagegenSkillPrompt', () => {
       projectRoot: '/project-data',
       sourcePrompt: '$imagegen scene evidence',
       generationIntent: null,
-      filePaths: ['/project-data/layout.png'],
+      images: compilerImages(['/project-data/layout.png']),
       timeoutMs: 1_000,
     });
     const observed = compilation.then(
@@ -263,7 +289,7 @@ describe('compileImagegenSkillPrompt', () => {
         projectRoot: '/project-data',
         sourcePrompt: '$imagegen scene evidence',
         generationIntent: null,
-        filePaths: ['/project-data/layout.png'],
+        images: compilerImages(['/project-data/layout.png']),
         timeoutMs: 1_000,
       }),
     ).rejects.toThrow('interrupt RPC failed');
@@ -288,7 +314,7 @@ describe('compileImagegenSkillPrompt', () => {
         projectRoot: '/project-data',
         sourcePrompt: '$imagegen scene evidence',
         generationIntent: null,
-        filePaths: ['/project-data/layout.png'],
+        images: compilerImages(['/project-data/layout.png']),
         timeoutMs: 50,
       }),
     ).rejects.toThrow('도구 실행을 시도했습니다');
@@ -317,7 +343,7 @@ describe('compileImagegenSkillPrompt', () => {
         projectRoot: '/project-data',
         sourcePrompt: '$imagegen scene evidence',
         generationIntent: null,
-        filePaths: ['/project-data/layout.png'],
+        images: compilerImages(['/project-data/layout.png']),
         timeoutMs: 50,
       }),
     ).rejects.toThrow('server request');
@@ -342,7 +368,7 @@ describe('compileImagegenSkillPrompt', () => {
       projectRoot: '/project-data',
       sourcePrompt: '$imagegen scene evidence',
       generationIntent: null,
-      filePaths: ['/project-data/layout.png'],
+      images: compilerImages(['/project-data/layout.png']),
       timeoutMs: 1_000,
     });
     const observed = compilation.then(
@@ -394,7 +420,7 @@ describe('compileImagegenSkillPrompt', () => {
       projectRoot: '/project-data',
       sourcePrompt: '$imagegen scene evidence',
       generationIntent: null,
-      filePaths: ['/project-data/layout.png'],
+      images: compilerImages(['/project-data/layout.png']),
       timeoutMs: 20,
     }).then(
       () => 'resolved',
@@ -422,7 +448,7 @@ describe('compileImagegenSkillPrompt', () => {
       projectRoot: '/project-data',
       sourcePrompt: '$imagegen scene evidence',
       generationIntent: null,
-      filePaths: ['/project-data/layout.png'],
+      images: compilerImages(['/project-data/layout.png']),
       timeoutMs: 20,
     }).then(
       () => 'resolved',
@@ -456,7 +482,7 @@ describe('compileImagegenSkillPrompt', () => {
         projectRoot: '/project-data',
         sourcePrompt: '$imagegen scene evidence',
         generationIntent: null,
-        filePaths: ['/project-data/layout.png'],
+        images: compilerImages(['/project-data/layout.png']),
         timeoutMs: 20,
       }),
     ).rejects.toThrow('응답 시간이 초과되었습니다');
@@ -490,7 +516,7 @@ describe('compileImagegenSkillPrompt', () => {
         projectRoot: '/project-data',
         sourcePrompt: '$imagegen scene evidence',
         generationIntent: null,
-        filePaths: ['/project-data/layout.png'],
+        images: compilerImages(['/project-data/layout.png']),
         timeoutMs: 20,
       }),
     ).rejects.toThrow('응답 시간이 초과되었습니다');
@@ -532,7 +558,10 @@ describe('compileImagegenSkillPrompt', () => {
         projectRoot: '/project-data',
         sourcePrompt: '$imagegen scene evidence',
         generationIntent: null,
-        filePaths: ['/project-data/layout.png', '/project-data/background.png'],
+        images: compilerImages([
+          '/project-data/layout.png',
+          '/project-data/background.png',
+        ]),
         timeoutMs: 1_000,
       }),
     ).rejects.toThrow('모든 입력 이미지');
@@ -554,10 +583,94 @@ describe('compileImagegenSkillPrompt', () => {
         projectRoot: '/project-data',
         sourcePrompt: '$imagegen scene evidence',
         generationIntent: null,
-        filePaths: ['/project-data/layout.png', '/project-data/background.png'],
+        images: compilerImages([
+          '/project-data/layout.png',
+          '/project-data/background.png',
+        ]),
         timeoutMs: 1_000,
       }),
     ).rejects.toThrow('역할 바인딩');
+  });
+
+  it('rejects a compiler response that reclassifies a canonical image role', async () => {
+    const runtime = new FakeRuntime();
+    const images = compilerImages([
+      '/project-data/layout.png',
+      '/project-data/background.png',
+    ]);
+    const bindings = expectedGenerationImageBindings(images);
+    bindings[1] = { ...bindings[1]!, role: 'styleReference' };
+    emitCompletedPrompt(runtime, compiledPrompt, images, bindings);
+
+    await expect(
+      compileImagegenSkillPrompt({
+        runtime,
+        projectRoot: '/project-data',
+        sourcePrompt: '$imagegen scene evidence',
+        generationIntent: null,
+        images,
+        timeoutMs: 1_000,
+      }),
+    ).rejects.toThrow('역할 또는 권위 바인딩을 변경했습니다');
+  });
+
+  it('rejects final prompt text that contradicts the structured layout binding', async () => {
+    const runtime = new FakeRuntime();
+    emitCompletedPrompt(
+      runtime,
+      compiledPrompt.replace(
+        'Image 1 is the spatial layout authority.',
+        'Image 1 is the style appearance reference.',
+      ),
+    );
+
+    await expect(
+      compileImagegenSkillPrompt({
+        runtime,
+        projectRoot: '/project-data',
+        sourcePrompt: '$imagegen scene evidence',
+        generationIntent: null,
+        images: compilerImages([
+          '/project-data/layout.png',
+          '/project-data/background.png',
+        ]),
+        timeoutMs: 1_000,
+      }),
+    ).rejects.toThrow('Image 1 역할 바인딩이 유효하지 않습니다');
+  });
+
+  it('rejects input before thread creation when Image 1 is not the 3D layout', async () => {
+    const runtime = new FakeRuntime();
+    const images = [
+      {
+        ...createGenerationImageDescriptor({
+          attachmentIndex: 1,
+          role: 'sourceGeneration',
+          artifactId: 'artifact-source',
+        }),
+        path: '/project-data/source.png',
+      },
+      {
+        ...createGenerationImageDescriptor({
+          attachmentIndex: 2,
+          role: 'layout',
+          artifactId: 'artifact-layout',
+        }),
+        path: '/project-data/layout.png',
+      },
+    ];
+
+    await expect(
+      compileImagegenSkillPrompt({
+        runtime,
+        projectRoot: '/project-data',
+        sourcePrompt: '$imagegen scene evidence',
+        generationIntent: null,
+        images,
+        timeoutMs: 1_000,
+      }),
+    ).rejects.toThrow('Image 1이어야 합니다');
+    expect(runtime.startThread).not.toHaveBeenCalled();
   });
 
   it('returns the validated skill prompt byte-for-byte unchanged', async () => {
@@ -571,7 +684,10 @@ describe('compileImagegenSkillPrompt', () => {
         projectRoot: '/project-data',
         sourcePrompt: '$imagegen scene evidence',
         generationIntent: null,
-        filePaths: ['/project-data/layout.png', '/project-data/background.png'],
+        images: compilerImages([
+          '/project-data/layout.png',
+          '/project-data/background.png',
+        ]),
         timeoutMs: 1_000,
       }),
     ).resolves.toMatchObject({ finalPrompt: promptWithBoundaryWhitespace });
@@ -594,7 +710,7 @@ Avoid: No proxy geometry, camera drift, pose drift, extra subjects, typography, 
         projectRoot: '/project-data',
         sourcePrompt: '$imagegen scene evidence',
         generationIntent: null,
-        filePaths: ['/project-data/layout.png'],
+        images: compilerImages(['/project-data/layout.png']),
         timeoutMs: 1_000,
       }),
     ).rejects.toThrow('Strict');

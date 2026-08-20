@@ -367,7 +367,9 @@ describe('EditorShell', () => {
     );
     expect(screen.getByRole('region', { name: '장면 뷰포트' })).toBeVisible();
     expect(await screen.findByText('키프레임 보정 모드')).toBeVisible();
-    expect(screen.getByText(/v1.*generation-selected.*결과/)).toBeVisible();
+    expect(
+      screen.getByText(/Image 1.*Image 2.*v1.*generation-selected.*외형 기준/),
+    ).toBeVisible();
   });
 
   it('키프레임 탭을 다녀와도 활성화된 장면 대화와 메시지를 유지하고 이어하기를 다시 묻지 않는다', async () => {

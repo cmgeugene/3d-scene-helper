@@ -357,7 +357,10 @@ test('보정 유지·변경 계약이 prompt와 generation history까지 왕복�
       JSON.stringify(generationRequest!.refinementDirective),
     );
     expect(generationRequest!.prompt).toContain(
-      '두 목록에 없는 요소도 기존 키프레임을 우선 보존',
+      '두 목록에 없는 외형 요소도 기존 키프레임을 우선 보존',
+    );
+    expect(generationRequest!.prompt).toContain(
+      '현재 3D 레이아웃과 LayoutSpec이 항상 최상위 권위',
     );
 
     await expect(change).toBeEnabled();
