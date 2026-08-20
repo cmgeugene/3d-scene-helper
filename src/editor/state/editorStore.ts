@@ -68,6 +68,9 @@ export const DOCUMENT_MUTATION_KINDS = [
   'commit-transform',
   'update-object-property',
   'update-object-selection-lock',
+  'create-object-group',
+  'delete-object-group',
+  'translate-object-group',
   'commit-camera',
   'update-lighting-background',
   'update-output',
@@ -101,6 +104,8 @@ export interface EditorStore {
   canUndo: boolean;
   canRedo: boolean;
   selectedObjectId: string | null;
+  selectedObjectIds: string[];
+  selectedGroupId: string | null;
   hoveredObjectId: string | null;
   transformMode: TransformMode;
   mannequinTool: MannequinTool;
@@ -118,12 +123,20 @@ export interface EditorStore {
   statusMessage: string | null;
   addObject: (input: AddSceneObjectInput) => string;
   selectObject: (id: string | null) => void;
+  toggleObjectSelection: (id: string) => void;
+  selectGroup: (id: string | null) => void;
   setHoveredObject: (id: string | null) => void;
   renameObject: (id: string, name: string) => void;
   setObjectSemantic: (id: string, semantic: SceneObject['semantic']) => void;
   setObjectColor: (id: string, color: string) => void;
   setObjectVisibility: (id: string, visible: boolean) => void;
   setObjectViewportSelectionLocked: (id: string, locked: boolean) => void;
+  createObjectGroup: (objectIds: string[], name?: string) => string | null;
+  ungroupObjects: (groupId: string) => void;
+  translateObjectGroup: (
+    groupId: string,
+    delta: SceneObject['transform']['position'],
+  ) => void;
   applyMannequinBodyTypePreset: (bodyType: MannequinBodyTypeId) => void;
   applyMannequinPosePreset: (presetId: MannequinPosePresetId) => void;
   beginMannequinPose: () => void;
@@ -215,6 +228,8 @@ export function createEditorStore(options: EditorStoreOptions) {
       canUndo: false,
       canRedo: false,
       selectedObjectId: null,
+      selectedObjectIds: [],
+      selectedGroupId: null,
       hoveredObjectId: null,
       inProgressTransform: null,
       inProgressMannequinPose: null,
@@ -289,6 +304,8 @@ export function createEditorStore(options: EditorStoreOptions) {
     canUndo: false,
     canRedo: false,
     selectedObjectId: null,
+    selectedObjectIds: [],
+    selectedGroupId: null,
     hoveredObjectId: null,
     transformMode: 'translate',
     mannequinTool: 'object',
@@ -335,6 +352,8 @@ export function createEditorStore(options: EditorStoreOptions) {
         return {
           ...recordMutation(state, nextDocument, 'add-object'),
           selectedObjectId: id,
+          selectedObjectIds: [id],
+          selectedGroupId: null,
           statusMessage: null,
         };
       });
@@ -342,14 +361,48 @@ export function createEditorStore(options: EditorStoreOptions) {
       return id;
     },
     selectObject: (id) => {
-      set((state) => ({
-        selectedObjectId:
+      set((state) => {
+        const selectedObjectId =
           id !== null &&
           state.document.objects.some((object) => object.id === id)
             ? id
-            : null,
-        statusMessage: null,
-      }));
+            : null;
+        return {
+          selectedObjectId,
+          selectedObjectIds:
+            selectedObjectId === null ? [] : [selectedObjectId],
+          selectedGroupId: null,
+          statusMessage: null,
+        };
+      });
+    },
+    toggleObjectSelection: (id) => {
+      set((state) => {
+        if (!state.document.objects.some((object) => object.id === id)) {
+          return state;
+        }
+        const selectedObjectIds = state.selectedObjectIds.includes(id)
+          ? state.selectedObjectIds.filter((objectId) => objectId !== id)
+          : [...state.selectedObjectIds, id];
+        return {
+          selectedObjectIds,
+          selectedObjectId:
+            selectedObjectIds.length === 1 ? selectedObjectIds[0]! : null,
+          selectedGroupId: null,
+          statusMessage: null,
+        };
+      });
+    },
+    selectGroup: (id) => {
+      set((state) => {
+        const group = state.document.groups.find((group) => group.id === id);
+        return {
+          selectedGroupId: group?.id ?? null,
+          selectedObjectIds: group?.memberObjectIds ?? [],
+          selectedObjectId: null,
+          statusMessage: null,
+        };
+      });
     },
     setHoveredObject: (id) => {
       set((state) => ({
@@ -379,6 +432,111 @@ export function createEditorStore(options: EditorStoreOptions) {
         { viewportSelectionLocked: locked },
         'update-object-selection-lock',
       );
+    },
+    createObjectGroup: (objectIds, name) => {
+      const uniqueObjectIds = [...new Set(objectIds)];
+      const state = get();
+      const groupedObjectIds = new Set(
+        state.document.groups.flatMap((group) => group.memberObjectIds),
+      );
+      const eligible = uniqueObjectIds.filter((id) => {
+        const object = state.document.objects.find(
+          (object) => object.id === id,
+        );
+        return (
+          object !== undefined &&
+          object.kind !== 'floor' &&
+          !groupedObjectIds.has(id)
+        );
+      });
+      if (eligible.length < 2 || eligible.length !== uniqueObjectIds.length) {
+        return null;
+      }
+
+      const groupId = options.idFactory();
+      set((current) => {
+        const nextDocument = sceneDocumentSchema.parse({
+          ...current.document,
+          groups: [
+            ...current.document.groups,
+            {
+              id: groupId,
+              name:
+                name?.trim() || `Group ${current.document.groups.length + 1}`,
+              memberObjectIds: eligible,
+            },
+          ],
+        });
+        return {
+          ...recordMutation(current, nextDocument, 'create-object-group'),
+          selectedObjectId: null,
+          selectedObjectIds: eligible,
+          selectedGroupId: groupId,
+          statusMessage: null,
+        };
+      });
+      return groupId;
+    },
+    ungroupObjects: (groupId) => {
+      set((state) => {
+        const group = state.document.groups.find(({ id }) => id === groupId);
+        if (group === undefined) return state;
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          groups: state.document.groups.filter(({ id }) => id !== groupId),
+        });
+        return {
+          ...recordMutation(state, nextDocument, 'delete-object-group'),
+          selectedObjectId: null,
+          selectedObjectIds: group.memberObjectIds,
+          selectedGroupId: null,
+          statusMessage: null,
+        };
+      });
+    },
+    translateObjectGroup: (groupId, delta) => {
+      if (
+        !Number.isFinite(delta.x) ||
+        !Number.isFinite(delta.y) ||
+        !Number.isFinite(delta.z)
+      ) {
+        throw new RangeError('Group translation delta must be finite');
+      }
+      set((state) => {
+        const group = state.document.groups.find(({ id }) => id === groupId);
+        if (
+          group === undefined ||
+          (delta.x === 0 && delta.y === 0 && delta.z === 0)
+        ) {
+          return state;
+        }
+        const memberIds = new Set(group.memberObjectIds);
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          objects: state.document.objects.map((object) =>
+            memberIds.has(object.id)
+              ? {
+                  ...object,
+                  transform: {
+                    ...object.transform,
+                    position: {
+                      x: object.transform.position.x + delta.x,
+                      y: object.transform.position.y + delta.y,
+                      z: object.transform.position.z + delta.z,
+                    },
+                  },
+                }
+              : object,
+          ),
+        });
+        return {
+          ...recordMutation(state, nextDocument, 'translate-object-group'),
+          selectedObjectId: null,
+          selectedObjectIds: group.memberObjectIds,
+          selectedGroupId: group.id,
+          statusMessage: null,
+        };
+      });
     },
     applyMannequinBodyTypePreset: (bodyType) => {
       set((state) => {
@@ -564,6 +722,8 @@ export function createEditorStore(options: EditorStoreOptions) {
         return {
           ...recordMutation(state, nextDocument, 'duplicate-object'),
           selectedObjectId: duplicateId,
+          selectedObjectIds: [duplicateId],
+          selectedGroupId: null,
           statusMessage: null,
         };
       });
@@ -623,10 +783,24 @@ export function createEditorStore(options: EditorStoreOptions) {
         }
 
         const nextDocument = sceneDocumentSchema.parse(document);
+        const selectedGroup = nextDocument.groups.find(
+          ({ id: groupId }) => groupId === state.selectedGroupId,
+        );
+        const survivingSelectedObjectIds = state.selectedObjectIds.filter(
+          (objectId) =>
+            objectId !== id &&
+            nextDocument.objects.some((object) => object.id === objectId),
+        );
+        const selectedObjectIds =
+          selectedGroup?.memberObjectIds ?? survivingSelectedObjectIds;
         return {
           ...recordMutation(state, nextDocument, 'delete-object'),
           selectedObjectId:
-            state.selectedObjectId === id ? null : state.selectedObjectId,
+            selectedGroup === undefined && selectedObjectIds.length === 1
+              ? selectedObjectIds[0]!
+              : null,
+          selectedObjectIds,
+          selectedGroupId: selectedGroup?.id ?? null,
           hoveredObjectId:
             state.hoveredObjectId === id ? null : state.hoveredObjectId,
           inProgressTransform:
@@ -1057,6 +1231,8 @@ export function createEditorStore(options: EditorStoreOptions) {
           canUndo: true,
           canRedo: false,
           selectedObjectId: null,
+          selectedObjectIds: [],
+          selectedGroupId: null,
           hoveredObjectId: null,
           inProgressTransform: null,
           inProgressMannequinPose: null,
@@ -1093,6 +1269,21 @@ export function createEditorStore(options: EditorStoreOptions) {
           result.mutationKind === 'apply-generation-snapshot'
             ? (result.selectedObjectId ?? null)
             : state.selectedObjectId;
+        const selectedGroup = nextDocument.groups.find(
+          ({ id }) => id === state.selectedGroupId,
+        );
+        const selectedObjectIds =
+          selectedGroup?.memberObjectIds ??
+          state.selectedObjectIds.filter((id) =>
+            nextDocument.objects.some((object) => object.id === id),
+          );
+        const validSelectedObjectId = nextDocument.objects.some(
+          ({ id }) => id === selectedObjectId,
+        )
+          ? selectedObjectId
+          : selectedObjectIds.length === 1
+            ? selectedObjectIds[0]!
+            : null;
 
         return {
           document: nextDocument,
@@ -1100,11 +1291,10 @@ export function createEditorStore(options: EditorStoreOptions) {
           history: result.history,
           canUndo: result.history.past.length > 0,
           canRedo: result.history.future.length > 0,
-          selectedObjectId: nextDocument.objects.some(
-            ({ id }) => id === selectedObjectId,
-          )
-            ? selectedObjectId
-            : null,
+          selectedObjectId:
+            selectedGroup === undefined ? validSelectedObjectId : null,
+          selectedObjectIds,
+          selectedGroupId: selectedGroup?.id ?? null,
           hoveredObjectId: nextDocument.objects.some(
             ({ id }) => id === state.hoveredObjectId,
           )
@@ -1136,6 +1326,21 @@ export function createEditorStore(options: EditorStoreOptions) {
                 isInteracting: false,
               }
             : state.navigation;
+        const selectedGroup = nextDocument.groups.find(
+          ({ id }) => id === state.selectedGroupId,
+        );
+        const selectedObjectIds =
+          selectedGroup?.memberObjectIds ??
+          state.selectedObjectIds.filter((id) =>
+            nextDocument.objects.some((object) => object.id === id),
+          );
+        const selectedObjectId = nextDocument.objects.some(
+          ({ id }) => id === state.selectedObjectId,
+        )
+          ? state.selectedObjectId
+          : selectedObjectIds.length === 1
+            ? selectedObjectIds[0]!
+            : null;
 
         return {
           document: nextDocument,
@@ -1143,11 +1348,10 @@ export function createEditorStore(options: EditorStoreOptions) {
           history: result.history,
           canUndo: result.history.past.length > 0,
           canRedo: result.history.future.length > 0,
-          selectedObjectId: nextDocument.objects.some(
-            ({ id }) => id === state.selectedObjectId,
-          )
-            ? state.selectedObjectId
-            : null,
+          selectedObjectId:
+            selectedGroup === undefined ? selectedObjectId : null,
+          selectedObjectIds,
+          selectedGroupId: selectedGroup?.id ?? null,
           hoveredObjectId: nextDocument.objects.some(
             ({ id }) => id === state.hoveredObjectId,
           )

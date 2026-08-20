@@ -288,6 +288,88 @@ describe('editorStore', () => {
     );
   });
 
+  it('다중 선택을 그룹화하고 모든 멤버를 같은 delta로 원자 이동·undo/redo한다', () => {
+    store = makeStore(['cube-grouped', 'sphere-grouped', 'group-props']);
+    const cubeId = store.getState().addObject({ kind: 'cube' });
+    const sphereId = store.getState().addObject({ kind: 'sphere' });
+    store.getState().selectObject(cubeId);
+    store.getState().toggleObjectSelection(sphereId);
+    expect(store.getState()).toMatchObject({
+      selectedObjectId: null,
+      selectedObjectIds: [cubeId, sphereId],
+      selectedGroupId: null,
+    });
+
+    const groupId = store
+      .getState()
+      .createObjectGroup(store.getState().selectedObjectIds, 'Props');
+    expect(groupId).toBe('group-props');
+    expect(store.getState().document.groups).toEqual([
+      {
+        id: 'group-props',
+        name: 'Props',
+        memberObjectIds: [cubeId, sphereId],
+      },
+    ]);
+    expect(store.getState()).toMatchObject({
+      selectedObjectId: null,
+      selectedObjectIds: [cubeId, sphereId],
+      selectedGroupId: 'group-props',
+    });
+
+    const before = Object.fromEntries(
+      store
+        .getState()
+        .document.objects.filter(({ id }) => id === cubeId || id === sphereId)
+        .map(({ id, transform }) => [id, structuredClone(transform.position)]),
+    );
+    store
+      .getState()
+      .translateObjectGroup('group-props', { x: 1.5, y: -0.25, z: 2 });
+    for (const objectId of [cubeId, sphereId]) {
+      const position = store
+        .getState()
+        .document.objects.find(({ id }) => id === objectId)!.transform.position;
+      expect(position).toEqual({
+        x: before[objectId]!.x + 1.5,
+        y: before[objectId]!.y - 0.25,
+        z: before[objectId]!.z + 2,
+      });
+    }
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'translate-object-group',
+    );
+
+    store.getState().undo();
+    for (const objectId of [cubeId, sphereId]) {
+      expect(
+        store.getState().document.objects.find(({ id }) => id === objectId)
+          ?.transform.position,
+      ).toEqual(before[objectId]);
+    }
+    expect(store.getState().selectedGroupId).toBe('group-props');
+
+    store.getState().redo();
+    expect(store.getState().selectedGroupId).toBe('group-props');
+    store.getState().ungroupObjects('group-props');
+    expect(store.getState().document.groups).toEqual([]);
+    expect(store.getState().selectedGroupId).toBeNull();
+    expect(store.getState().selectedObjectIds).toEqual([cubeId, sphereId]);
+  });
+
+  it('floor, 이미 그룹화된 멤버와 1개 선택은 새 그룹으로 만들지 않는다', () => {
+    store = makeStore(['cube-for-group', 'unused-group-id']);
+    const cubeId = store.getState().addObject({ kind: 'cube' });
+
+    expect(store.getState().createObjectGroup([cubeId])).toBeNull();
+    expect(
+      store
+        .getState()
+        .createObjectGroup([STARTER_IDS.floorId, cubeId], 'Invalid'),
+    ).toBeNull();
+    expect(store.getState().document.groups).toEqual([]);
+  });
+
   it('검증된 spec patch와 object transform command를 단일 원자 mutation으로 적용하고 stale/double apply를 거부하며 undo/redo한다', () => {
     const original = structuredClone(
       store.getState().document.semanticSceneSpec,
@@ -932,6 +1014,9 @@ describe('editorStore', () => {
       'commit-transform',
       'update-object-property',
       'update-object-selection-lock',
+      'create-object-group',
+      'delete-object-group',
+      'translate-object-group',
       'commit-camera',
       'update-lighting-background',
       'update-output',

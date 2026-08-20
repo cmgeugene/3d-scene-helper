@@ -226,6 +226,7 @@ function RuntimeScene({
   const document = useStore(store, (state) => state.document);
   const objects = useStore(store, (state) => state.document.objects);
   const selectedObjectId = useStore(store, (state) => state.selectedObjectId);
+  const selectedObjectIds = useStore(store, (state) => state.selectedObjectIds);
   const background = useStore(store, (state) => state.document.background);
   const lighting = useStore(store, (state) => state.document.lighting);
   const focusContoursEnabled = useStore(
@@ -292,7 +293,7 @@ function RuntimeScene({
     selectedRoot.userData.sceneObjectId === selectedObject?.id
       ? selectedRoot
       : undefined;
-  const effectiveSelectedObjectId = readOnly ? null : selectedObjectId;
+  const effectiveSelectedObjectIds = readOnly ? [] : selectedObjectIds;
 
   return (
     <>
@@ -307,7 +308,7 @@ function RuntimeScene({
           <SceneObject
             key={object.id}
             object={object}
-            selected={effectiveSelectedObjectId === object.id}
+            selected={effectiveSelectedObjectIds.includes(object.id)}
             onSelect={readOnly ? () => undefined : selectObject}
             onRootReady={handleRootReady}
             runtimeMannequinPose={runtimeMannequinPoses.get(object.id)}

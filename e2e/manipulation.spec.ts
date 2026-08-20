@@ -384,6 +384,68 @@ test('viewport selection lock passes a click through to an unlocked object behin
   );
 });
 
+test('Outliner grouping moves every member by one translate-only delta and undo restores all members', async ({
+  page,
+}) => {
+  const canvas = await openManipulation(page);
+  await page.getByRole('button', { name: '큐브 추가', exact: true }).click();
+  await page.getByRole('button', { name: '구 추가', exact: true }).click();
+  await page.getByRole('button', { name: 'Cube', exact: true }).click();
+  await page.keyboard.down('Control');
+  await page.getByRole('button', { name: 'Sphere', exact: true }).click();
+  await page.keyboard.up('Control');
+  await expect(page.getByText('2개 선택')).toBeVisible();
+
+  const before = await page.evaluate(() => {
+    const objects = (
+      globalThis as unknown as ManipulationBridge
+    ).__I2V_EDITOR_STORE__?.getState().document.objects;
+    return Object.fromEntries(
+      (objects ?? [])
+        .filter(({ name }) => name === 'Cube' || name === 'Sphere')
+        .map(({ name, transform }) => [name, transform.position]),
+    );
+  });
+
+  await page.getByRole('button', { name: '그룹화' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Group 1 그룹 선택' }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(canvas).not.toHaveAttribute('data-transform-object', /.+/);
+  await page.getByLabel('그룹 이동 X').fill('1.25');
+  await page.getByLabel('그룹 이동 Y').fill('0.5');
+  await page.getByLabel('그룹 이동 Z').fill('-2');
+  await page.getByRole('button', { name: '이동 적용' }).click();
+
+  const readGroupedPositions = () =>
+    page.evaluate(() => {
+      const objects = (
+        globalThis as unknown as ManipulationBridge
+      ).__I2V_EDITOR_STORE__?.getState().document.objects;
+      return Object.fromEntries(
+        (objects ?? [])
+          .filter(({ name }) => name === 'Cube' || name === 'Sphere')
+          .map(({ name, transform }) => [name, transform.position]),
+      );
+    });
+  const moved = await readGroupedPositions();
+  for (const name of ['Cube', 'Sphere']) {
+    expect(moved[name]).toEqual({
+      x: before[name].x + 1.25,
+      y: before[name].y + 0.5,
+      z: before[name].z - 2,
+    });
+  }
+
+  await page.keyboard.press('Control+z');
+  await expect.poll(readGroupedPositions).toEqual(before);
+  await expect(
+    page.getByRole('button', { name: 'Group 1 그룹 선택' }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Control+Shift+z');
+  await expect.poll(readGroupedPositions).toEqual(moved);
+});
+
 test('Room Set scale preview expands grid coverage without scaling its 0.5m cells', async ({
   page,
 }) => {

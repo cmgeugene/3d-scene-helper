@@ -47,6 +47,11 @@ test('persistence refresh restores the latest autosaved scene', async ({
   await expect(
     page.getByRole('button', { name: 'Plane', exact: true }),
   ).toBeVisible();
+  await page.getByRole('button', { name: 'Cube', exact: true }).click();
+  await page.keyboard.down('Control');
+  await page.getByRole('button', { name: 'Plane', exact: true }).click();
+  await page.keyboard.up('Control');
+  await page.getByRole('button', { name: '그룹화' }).click();
   const cubeLock = page.getByRole('button', {
     name: 'Cube 뷰포트 선택 잠금',
   });
@@ -65,6 +70,15 @@ test('persistence refresh restores the latest autosaved scene', async ({
   );
   expect(serializedBeforeReload).not.toBeNull();
   expect(JSON.parse(serializedBeforeReload!).version).toBe(4);
+  expect(JSON.parse(serializedBeforeReload!).groups).toEqual([
+    expect.objectContaining({
+      name: 'Group 1',
+      memberObjectIds: expect.arrayContaining([
+        expect.any(String),
+        expect.any(String),
+      ]),
+    }),
+  ]);
 
   await page.reload();
   await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
@@ -80,6 +94,9 @@ test('persistence refresh restores the latest autosaved scene', async ({
   await expect(
     page.getByRole('button', { name: 'Cube 뷰포트 선택 잠금' }),
   ).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    page.getByRole('button', { name: 'Group 1 그룹 선택' }),
+  ).toBeVisible();
   await expect(page.locator('canvas[data-engine]')).toHaveAttribute(
     'data-surface-grid-kinds',
     'floor,cube,plane',

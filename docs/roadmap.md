@@ -2,7 +2,7 @@
 
 > 기준일: 2026-08-20
 >
-> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료; S36 P6 완료; S37 P7 완료; S38 P8 완료; S39 P9 완료
+> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료; S36 P6 완료; S37 P7 완료; S38 P8 완료; S39 P9 완료; S40 P10 완료
 >
 > 이 문서는 앞으로의 구현 순서와 완료 기준을 관리하는 단일 로드맵이다. 세부 설계는
 > `ai-scene-assistant.md`, 완료된 작업의 검증 기록은 `session-handoffs/`를 따른다.
@@ -37,6 +37,7 @@
 | 생성 자원 수명 | 불변 원본·hash-bound thumbnail, bounded URL/Canvas와 restart 복구           | S37     |
 | 레이아웃 권위  | Image 1 고정, attachment contract v2와 역할·권위 binding fail-closed 검증   | S38     |
 | 장면 v4·잠금   | v1~v3 additive migration, authoring 기반과 viewport click-through 선택 잠금 | S39     |
+| 오브젝트 그룹  | Outliner 다중 선택, 저장 가능한 그룹과 원자적인 translate-only 월드 이동    | S40     |
 
 현재 기본 생성은 `Image 1 현재 3D 레이아웃 + 레퍼런스 최대 4장`, 보정 생성은
 `Image 1 현재 3D 레이아웃 + Image 2 원본 키프레임 + 레퍼런스 최대 3장`을 사용한다.
@@ -211,6 +212,25 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 4. 잠금 변경은 독립 history mutation이며 저장·새로고침과 generation record를 왕복한다.
 5. 이후 그룹·containment·mirror 단계가 dangling reference를 만들 수 없는 schema 기반을 갖는다.
 
+### P10. 오브젝트 그룹과 translate-only 이동 — 완료 (S40)
+
+- [x] Ctrl/⌘·Shift Outliner 다중 선택과 단일 선택 호환 계층
+- [x] 두 개 이상 비-floor·비그룹 오브젝트의 그룹 생성
+- [x] 그룹 선택, 멤버 강조와 그룹 해제
+- [x] XYZ 월드 delta 기반 translate-only 그룹 이동
+- [x] 모든 멤버 위치를 하나의 history mutation으로 commit
+- [x] 그룹 이동 undo/redo와 v4 autosave/JSON 복원
+- [x] 삭제 시 멤버 정리와 한 개 이하 그룹 자동 해제
+- [x] 회전·스케일·중첩·그룹 복제 경로 제외
+
+완료 기준:
+
+1. 한 오브젝트는 최대 한 그룹에만 속하고 floor는 그룹 멤버가 될 수 없다.
+2. 그룹 이동은 멤버마다 동일한 delta를 적용하며 한 번의 undo로 모두 복원된다.
+3. 그룹 선택 중 단일 오브젝트 rotate/scale gizmo가 노출되지 않는다.
+4. 그룹 해제는 멤버 오브젝트와 각자의 월드 transform을 변경하지 않는다.
+5. 저장·새로고침 후 그룹 멤버십과 이동된 개별 위치가 그대로 복원된다.
+
 ## 3. 장기 보류
 
 다음 항목은 위 단계가 안정화된 뒤 검토한다.
@@ -233,6 +253,7 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 
 ## 5. 바로 다음 작업
 
-S40에서는 v4 `groups`를 사용하는 translate-only 그룹화를 구현한다. Outliner 다중 선택과 그룹
-생성·해제, 그룹 선택 상태를 도입하고, 그룹 이동은 모든 멤버에 같은 월드 delta를 적용하는 하나의
-history mutation이어야 한다. 회전·스케일·중첩 그룹·그룹 복제는 이번 단계에서 제외한다.
+S41에서는 v4 `visualization`, `appearanceIntent`와 `spatialRelations.contains`를 UI와 LayoutSpec v2에
+연결한다. proxy opacity는 편집용 cutaway 표시로만 사용하고 최종 표면 타입과 분리한다. containment
+관계는 누락 참조·중복·cycle을 차단하며 opaque/transparent/cutaway 의도를 prompt evidence까지
+구조적으로 전달해야 한다. mirror reflection은 그 다음 S42에서 별도로 구현한다.

@@ -2478,6 +2478,84 @@ p {
   gap: 0.25rem;
 }
 
+.outliner-group-actions,
+.outliner-group-row {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.outliner-group-actions {
+  margin-bottom: 0.25rem;
+  color: #aebbd0;
+  font-size: 0.72rem;
+}
+
+.outliner-hint {
+  margin: 0 0 0.45rem;
+  color: #718097;
+  font-size: 0.67rem;
+}
+
+.outliner-group-list {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0 0 0.45rem;
+  padding: 0;
+  list-style: none;
+}
+
+.outliner-group-row > :first-child {
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+
+.outliner-group-row > :first-child[aria-pressed='true'] {
+  border-color: #6d55ae;
+  color: #fff;
+  background: #302554;
+}
+
+.outliner-group-translate {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin: 0 0 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid #3b315b;
+  border-radius: 0.5rem;
+}
+
+.outliner-group-translate legend {
+  padding: 0 0.2rem;
+  color: #c6b7ff;
+  font-size: 0.72rem;
+}
+
+.outliner-group-translate label {
+  display: grid;
+  gap: 0.2rem;
+  color: #8e9bb0;
+  font-size: 0.65rem;
+}
+
+.outliner-group-translate input {
+  width: 100%;
+  min-width: 0;
+}
+
+.outliner-group-translate button,
+.outliner-group-translate > span {
+  grid-column: 1 / -1;
+}
+
+.outliner-group-translate > span {
+  color: #7f8ba0;
+  font-size: 0.64rem;
+}
+
 .outliner-item {
   display: flex;
   width: 100%;
