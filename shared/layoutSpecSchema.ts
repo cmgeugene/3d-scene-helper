@@ -133,6 +133,18 @@ export const layoutSpecSchema = z.object({
       }),
     )
     .default([]),
+  mirrors: z
+    .array(
+      z.object({
+        relationId: z.string().min(1),
+        mirrorObjectId: z.string().min(1),
+        reflectedObjectIds: z.array(z.string().min(1)).min(1),
+        screenBounds: screenBoundsSchema.nullable(),
+        pointWorld: vector3Schema,
+        normalWorld: vector3Schema,
+      }),
+    )
+    .default([]),
   omittedObjectIds: z.array(z.string().min(1)),
 });
 

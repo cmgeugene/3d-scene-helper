@@ -186,6 +186,69 @@ test('proxy visualization, final surface intent, and containment survive refresh
   ).toContainText('Cube · cutaway');
 });
 
+test('planar mirror surface and reflected targets survive refresh', async ({
+  page,
+}) => {
+  await openPersistence(page);
+  await page.getByRole('button', { name: '평면 추가' }).click();
+  await page.getByRole('button', { name: '큐브 추가', exact: true }).click();
+  await page.getByRole('button', { name: 'Plane', exact: true }).click();
+  await page.getByLabel('최종 표면 타입').selectOption('mirror');
+  await page.getByRole('checkbox', { name: 'Cube 반사 대상' }).check();
+
+  const runtimeCanvas = page.locator('canvas[data-engine]');
+  await expect(runtimeCanvas).toHaveAttribute('data-planar-mirrors', /Cube|\[/);
+  await expect
+    .poll(() =>
+      page.evaluate((key) => {
+        const serialized = (
+          globalThis as unknown as BrowserStorageGlobal
+        ).localStorage.getItem(key);
+        if (serialized === null) return null;
+        const document = JSON.parse(serialized) as {
+          objects: Array<{
+            id: string;
+            kind: string;
+            appearanceIntent: { surfaceType: string };
+          }>;
+          spatialRelations: Array<{
+            type: string;
+            mirrorObjectId?: string;
+            reflectedObjectIds?: string[];
+          }>;
+        };
+        const mirror = document.objects.find(({ kind }) => kind === 'plane');
+        const cube = document.objects.find(({ kind }) => kind === 'cube');
+        const reflection = document.spatialRelations.find(
+          ({ type }) => type === 'reflects',
+        );
+        return {
+          mirrorSurface: mirror?.appearanceIntent.surfaceType,
+          relationMatches:
+            reflection?.mirrorObjectId === mirror?.id &&
+            reflection?.reflectedObjectIds?.length === 1 &&
+            reflection.reflectedObjectIds[0] === cube?.id,
+        };
+      }, STORAGE_KEY),
+    )
+    .toEqual({
+      mirrorSurface: 'mirror',
+      relationMatches: true,
+    });
+
+  await page.reload();
+  await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
+    'data-webgl-state',
+    'available',
+  );
+  await page.getByRole('button', { name: 'Plane', exact: true }).click();
+  await expect(page.getByLabel('최종 표면 타입')).toHaveValue('mirror');
+  await expect(
+    page.getByRole('checkbox', { name: 'Cube 반사 대상' }),
+  ).toBeChecked();
+  await expect(runtimeCanvas).toHaveAttribute('data-planar-mirrors', /\[/);
+});
+
 test('restored autosave is not reused by new scene or starter reset', async ({
   page,
 }) => {

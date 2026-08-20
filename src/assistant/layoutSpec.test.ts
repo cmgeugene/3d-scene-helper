@@ -164,6 +164,46 @@ describe('createLayoutSpec', () => {
     ]);
   });
 
+  it('평면 거울의 화면 bounds·world plane·반사 대상 ID를 구조화한다', () => {
+    const scene = createScene();
+    const mirror = createSceneObject('mirror-layout', {
+      kind: 'plane',
+      name: 'Wall mirror',
+    });
+    mirror.appearanceIntent = {
+      surfaceType: 'mirror',
+      materialNotes: '은색 벽 거울',
+    };
+    mirror.transform.position = { x: 0, y: 1.5, z: 0.5 };
+    mirror.transform.rotationDeg.x = -90;
+    mirror.dimensions = { x: 3, y: 0.02, z: 2 };
+    scene.objects.push(mirror);
+    scene.spatialRelations = [
+      {
+        id: 'reflects-layout',
+        type: 'reflects',
+        mirrorObjectId: mirror.id,
+        reflectedObjectIds: ['person-far'],
+      },
+    ];
+
+    const spec = createLayoutSpec(scene);
+    const mirrorObject = spec.objects.find(
+      ({ objectId }) => objectId === mirror.id,
+    );
+
+    expect(spec.mirrors).toEqual([
+      {
+        relationId: 'reflects-layout',
+        mirrorObjectId: mirror.id,
+        reflectedObjectIds: ['person-far'],
+        screenBounds: mirrorObject?.screen.bounds ?? null,
+        pointWorld: { x: 0, y: 1.5, z: 0.5 },
+        normalWorld: { x: 0, y: 0, z: -1 },
+      },
+    ]);
+  });
+
   it('마네킹 레퍼런스 결합과 잠재 가림을 기록한다', () => {
     const spec = createLayoutSpec(createScene(), [
       {

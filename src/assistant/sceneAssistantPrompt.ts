@@ -13,7 +13,8 @@ SceneDocument의 위치, 카메라, 가림 관계는 구도 기준이며 색상�
 확실하지 않은 의미 정보는 추측을 사실처럼 말하지 말고 사용자에게 확인한다.`;
 
 const OBJECT_SURFACE_INSTRUCTIONS = `LayoutSpec v2의 proxyVisualization.opacity는 내부 배치를 확인하기 위한 3D 편집 표시값일 뿐 최종 재질의 투명도를 뜻하지 않습니다. 최종 표면은 appearanceIntent.surfaceType과 materialNotes만 따르세요.
-containment는 실제 포함 관계와 내부 오브젝트의 최종 가시성 계약입니다. occluded는 외부에서 숨기고, through-opening은 열린 부분으로, through-transparent-surface는 실제 투명 표면을 통해, cutaway는 의도적인 단면/컷어웨이로 표현하세요.`;
+containment는 실제 포함 관계와 내부 오브젝트의 최종 가시성 계약입니다. occluded는 외부에서 숨기고, through-opening은 열린 부분으로, through-transparent-surface는 실제 투명 표면을 통해, cutaway는 의도적인 단면/컷어웨이로 표현하세요.
+mirrors의 screenBounds와 world plane 방향 안에 reflectedObjectIds의 반사상을 표현하세요. 반사상은 거울 표면 내부에만 존재하며 장면 밖에 동일한 실물 오브젝트를 추가하거나 거울 속 오브젝트를 별도 인물·소품으로 복제하지 마세요.`;
 
 function referenceManifest(
   references: ReferenceArtifact[],

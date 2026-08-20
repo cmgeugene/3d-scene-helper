@@ -250,6 +250,26 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 4. LayoutSpec v2와 생성 prompt가 프록시 표시와 최종 이미지 의도를 명확히 구분한다.
 5. 실제 Chromium에서 편집한 세 속성이 자동 저장 후 새로고침을 왕복한다.
 
+### P12. 평면 거울과 구조화된 반사 대상 — 완료 (S42)
+
+- [x] `plane`에만 mirror final surface 허용
+- [x] 거울별 단일 `spatialRelations.reflects`와 필수 반사 대상 체크리스트
+- [x] 자기 반사·mirror target·중복 mirror relation을 schema에서 차단
+- [x] mirror 해제 시 관련 reflection을 같은 appearance mutation으로 정리
+- [x] 뷰포트와 clean PNG export 카메라에서 같은 planar Reflector 사용
+- [x] geometry/material/render target의 명시적 dispose lifecycle
+- [x] LayoutSpec v2에 mirror screen bounds, world point/normal과 reflected object ID 투영
+- [x] 생성 prompt에서 반사상을 거울 밖의 별도 실물로 복제하지 않는 규칙 명시
+- [x] mirror surface·target의 undo/redo·autosave·JSON·새로고침 보존
+
+완료 기준:
+
+1. non-plane 오브젝트는 mirror surface를 저장할 수 없다.
+2. 평면 거울은 실제 뷰포트와 clean export에서 현재 카메라 기준 planar reflection을 렌더한다.
+3. 지정 대상은 물리 렌더의 독점 필터가 아니라 반드시 반사돼야 하는 구조화된 생성 계약이다.
+4. LayoutSpec의 평면 법선은 렌더러가 사용하는 plane local +Y와 같은 transform 규칙을 따른다.
+5. 곡면·재귀·거울 속 거울은 데이터 검증과 UI에서 지원하지 않는다.
+
 ## 3. 장기 보류
 
 다음 항목은 위 단계가 안정화된 뒤 검토한다.
@@ -272,8 +292,8 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 
 ## 5. 바로 다음 작업
 
-S42에서는 첫 거울 범위를 평면 거울로 제한한다. `plane`의 최종 표면을 mirror로 지정하고 반사 대상
-오브젝트를 구조화된 `spatialRelations.reflects`로 편집하며, 뷰포트와 clean export에서 같은 반사
-평면·방향을 사용해야 한다. LayoutSpec에는 거울 화면 bounds, 평면 방향과 반사 대상 ID를 기록하고,
-생성 prompt에는 반사상을 별도 실물 복제로 만들지 않는 규칙을 추가한다. 곡면·재귀·거울 속 거울은
-이번 단계에 포함하지 않는다.
+S38~S42 기능 브랜치를 실제 사용자 장면으로 인수 검증한 뒤 원본 브랜치에 통합한다. 통합 전에는
+기존 generation의 fresh/edit에서 Image 1 레이아웃 권위가 유지되는지, 잠금 click-through와 그룹
+이동, 내부 오브젝트 cutaway, 평면 거울 clean export를 한 흐름으로 확인한다. 곡면 거울, 여러 번의
+재귀 반사, 거울 안의 거울과 반사 대상만 직접 장면에서 숨기는 별도 visibility 모드는 장기 범위로
+남긴다.

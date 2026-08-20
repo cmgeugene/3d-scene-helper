@@ -24,6 +24,7 @@ import {
   MannequinIKControls,
   type MannequinIKBinding,
 } from './MannequinIKControls';
+import { PlanarMirror } from './PlanarMirror';
 import { RoomSet } from './RoomSet';
 import { SurfaceGrid } from './SurfaceGrid';
 import { getSceneObjectModel } from './sceneObjectModel';
@@ -43,6 +44,7 @@ interface SceneObjectProps {
   runtimeMannequinPose?: MannequinPose;
   mannequinIK?: MannequinIKBinding;
   focusContoursEnabled: boolean;
+  reflectedObjectIds?: readonly string[];
 }
 
 interface PrimitiveProps {
@@ -52,6 +54,7 @@ interface PrimitiveProps {
   castShadow: boolean;
   receiveShadow: boolean;
   focusContoursEnabled: boolean;
+  reflectedObjectIds: readonly string[];
 }
 
 function PresetGeometryMesh({
@@ -91,6 +94,7 @@ function Primitive({
   castShadow,
   receiveShadow,
   focusContoursEnabled,
+  reflectedObjectIds,
 }: PrimitiveProps) {
   const { dimensions, kind } = object;
   const material = (
@@ -163,19 +167,29 @@ function Primitive({
     case 'plane':
       return (
         <>
-          <mesh
-            castShadow={castShadow}
-            receiveShadow={receiveShadow}
-            rotation={[-Math.PI / 2, 0, 0]}
-          >
-            <planeGeometry args={[dimensions.x, dimensions.z]} />
-            <meshStandardMaterial
+          {object.appearanceIntent.surfaceType === 'mirror' ? (
+            <PlanarMirror
+              mirrorObjectId={object.id}
+              width={dimensions.x}
+              height={dimensions.z}
               color={object.color}
-              roughness={0.82}
-              metalness={0}
-              side={DoubleSide}
+              reflectedObjectIds={reflectedObjectIds}
             />
-          </mesh>
+          ) : (
+            <mesh
+              castShadow={castShadow}
+              receiveShadow={receiveShadow}
+              rotation={[-Math.PI / 2, 0, 0]}
+            >
+              <planeGeometry args={[dimensions.x, dimensions.z]} />
+              <meshStandardMaterial
+                color={object.color}
+                roughness={0.82}
+                metalness={0}
+                side={DoubleSide}
+              />
+            </mesh>
+          )}
           <SurfaceGrid
             color={object.color}
             depth={dimensions.z}
@@ -328,6 +342,7 @@ export function SceneObject({
   runtimeMannequinPose,
   mannequinIK,
   focusContoursEnabled,
+  reflectedObjectIds = [],
 }: SceneObjectProps) {
   const model = getSceneObjectModel(object);
   const { position, rotationDeg, scale } = object.transform;
@@ -397,6 +412,7 @@ export function SceneObject({
           castShadow={model.castShadow}
           receiveShadow={model.receiveShadow}
           focusContoursEnabled={focusContoursEnabled}
+          reflectedObjectIds={reflectedObjectIds}
         />
       </group>
       {object.kind === 'mannequin' && mannequinIK !== undefined ? (

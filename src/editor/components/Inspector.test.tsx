@@ -234,6 +234,45 @@ describe('Inspector', () => {
     expect(store.getState().document.spatialRelations).toEqual([]);
   });
 
+  it('plane만 거울로 지정하고 기존 오브젝트를 반사 대상에 연결한다', async () => {
+    const user = userEvent.setup();
+    store = createTestStore([
+      'plane-mirror',
+      'cube-reflected',
+      'relation-reflects',
+    ]);
+    const mirrorId = store
+      .getState()
+      .addObject({ kind: 'plane', name: 'Wall mirror' });
+    store.getState().addObject({ kind: 'cube', name: 'Reflected prop' });
+    store.getState().selectObject(mirrorId);
+    render(<Inspector store={store} />);
+
+    await user.selectOptions(screen.getByLabelText('최종 표면 타입'), 'mirror');
+    const reflectionTargets = screen.getByRole('group', {
+      name: '거울 반사 대상',
+    });
+    await user.click(
+      within(reflectionTargets).getByRole('checkbox', {
+        name: 'Reflected prop 반사 대상',
+      }),
+    );
+
+    expect(store.getState().document.spatialRelations).toEqual([
+      {
+        id: 'relation-reflects',
+        type: 'reflects',
+        mirrorObjectId: mirrorId,
+        reflectedObjectIds: ['cube-reflected'],
+      },
+    ]);
+    await user.selectOptions(screen.getByLabelText('최종 표면 타입'), 'opaque');
+    expect(store.getState().document.spatialRelations).toEqual([]);
+    expect(
+      screen.queryByRole('group', { name: '거울 반사 대상' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('연출 탭에서 장면 전체 spec을 구조화해 한 번 적용하고 history/undo 복원한다', async () => {
     const user = userEvent.setup();
     render(<Inspector store={store} />);

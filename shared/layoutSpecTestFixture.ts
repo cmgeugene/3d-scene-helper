@@ -19,5 +19,6 @@ export const TEST_LAYOUT_SPEC: LayoutSpec = {
   objects: [],
   potentialOcclusions: [],
   containment: [],
+  mirrors: [],
   omittedObjectIds: [],
 };

@@ -2579,6 +2579,19 @@ p {
   font-size: 0.7rem;
 }
 
+.mirror-target-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.mirror-target-list label {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  color: #aebbd0;
+  font-size: 0.7rem;
+}
+
 .outliner-item {
   display: flex;
   width: 100%;

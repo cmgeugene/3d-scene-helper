@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
+import type { EditorStore } from '../src/editor/state/editorStore';
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
@@ -189,6 +190,63 @@ test('body type presets remain visibly distinct in clean PNG exports', async ({
 
   expect(changedPixelRatio(standard, athletic)).toBeGreaterThan(0.0005);
   expect(changedPixelRatio(athletic, heavy)).toBeGreaterThan(0.0005);
+});
+
+test('planar mirror renders through the clean PNG export camera', async ({
+  page,
+}) => {
+  await openExportEditor(page);
+  await page.getByRole('button', { name: '평면 추가' }).click();
+  await page.getByRole('button', { name: '큐브 추가', exact: true }).click();
+  await page.evaluate(() => {
+    const state = globalThis.__I2V_EDITOR_STORE__?.getState() as unknown as
+      EditorStore | undefined;
+    if (state === undefined) throw new Error('E2E editor store가 없습니다.');
+    const mirror = state.document.objects.find(({ kind }) => kind === 'plane');
+    const cube = state.document.objects.find(({ kind }) => kind === 'cube');
+    if (mirror === undefined || cube === undefined) {
+      throw new Error('Mirror export fixture가 없습니다.');
+    }
+    state.selectObject(mirror.id);
+    state.beginTransform();
+    state.commitTransform({
+      ...mirror.transform,
+      position: { x: 0, y: 1.35, z: 1 },
+      rotationDeg: { x: -90, y: 0, z: 0 },
+      scale: { x: 2, y: 1, z: 1.5 },
+    });
+    state.selectObject(cube.id);
+    state.beginTransform();
+    state.commitTransform({
+      ...cube.transform,
+      position: { x: 0.9, y: 0.8, z: -0.2 },
+      scale: { x: 0.75, y: 1.4, z: 0.75 },
+    });
+    state.setObjectColor(cube.id, '#d72f2f');
+    state.commitCamera({
+      ...state.document.outputCamera,
+      position: { x: 0, y: 1.5, z: -5 },
+      target: { x: 0, y: 1.35, z: 1 },
+      focalLengthMm: 50,
+      rollDeg: 0,
+    });
+    state.selectObject(mirror.id);
+  });
+
+  const opaque = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+  await page.getByLabel('최종 표면 타입').selectOption('mirror');
+  await page.getByRole('checkbox', { name: 'Cube 반사 대상' }).check();
+  await expect(page.locator('canvas[data-engine]')).toHaveAttribute(
+    'data-planar-mirrors',
+    /\[/,
+  );
+  const reflected = decodePng(
+    (await downloadFrame(page, { preset: '1280x720', mode: 'clean' })).buffer,
+  );
+
+  expect(changedPixelRatio(opaque, reflected)).toBeGreaterThan(0.001);
 });
 
 test('export presets produce sanitized, exact-resolution PNG downloads', async ({

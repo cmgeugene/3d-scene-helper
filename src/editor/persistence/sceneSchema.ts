@@ -378,6 +378,16 @@ export const sceneDocumentSchema = z
       }
       objectIds.add(object.id);
       objectsById.set(object.id, object);
+      if (
+        object.appearanceIntent.surfaceType === 'mirror' &&
+        object.kind !== 'plane'
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Only plane objects can use a mirror surface',
+          path: ['objects', index, 'appearanceIntent', 'surfaceType'],
+        });
+      }
     });
 
     const groupIds = new Set<string>();
@@ -421,6 +431,7 @@ export const sceneDocumentSchema = z
     const relationIds = new Set<string>();
     const containmentEdges = new Set<string>();
     const containmentGraph = new Map<string, Set<string>>();
+    const mirrorRelationObjectIds = new Set<string>();
     document.spatialRelations.forEach((relation, relationIndex) => {
       if (relationIds.has(relation.id)) {
         context.addIssue({
@@ -465,6 +476,14 @@ export const sceneDocumentSchema = z
       }
 
       const mirror = objectsById.get(relation.mirrorObjectId);
+      if (mirrorRelationObjectIds.has(relation.mirrorObjectId)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'A mirror can have only one reflection relation',
+          path: ['spatialRelations', relationIndex, 'mirrorObjectId'],
+        });
+      }
+      mirrorRelationObjectIds.add(relation.mirrorObjectId);
       if (mirror === undefined) {
         context.addIssue({
           code: 'custom',
@@ -498,6 +517,20 @@ export const sceneDocumentSchema = z
           context.addIssue({
             code: 'custom',
             message: 'A mirror cannot reflect itself',
+            path: [
+              'spatialRelations',
+              relationIndex,
+              'reflectedObjectIds',
+              objectIndex,
+            ],
+          });
+        }
+        if (
+          objectsById.get(objectId)?.appearanceIntent.surfaceType === 'mirror'
+        ) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Recursive mirror reflections are not supported',
             path: [
               'spatialRelations',
               relationIndex,

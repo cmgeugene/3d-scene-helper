@@ -294,6 +294,17 @@ function RuntimeScene({
       ? selectedRoot
       : undefined;
   const effectiveSelectedObjectIds = readOnly ? [] : selectedObjectIds;
+  const reflectionTargetsByMirror = useMemo(
+    () =>
+      new Map(
+        document.spatialRelations.flatMap((relation) =>
+          relation.type === 'reflects'
+            ? [[relation.mirrorObjectId, relation.reflectedObjectIds] as const]
+            : [],
+        ),
+      ),
+    [document.spatialRelations],
+  );
 
   return (
     <>
@@ -313,6 +324,7 @@ function RuntimeScene({
             onRootReady={handleRootReady}
             runtimeMannequinPose={runtimeMannequinPoses.get(object.id)}
             focusContoursEnabled={focusContoursEnabled}
+            reflectedObjectIds={reflectionTargetsByMirror.get(object.id)}
             mannequinIK={
               !readOnly &&
               selectedObjectId === object.id &&

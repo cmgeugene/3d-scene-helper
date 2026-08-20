@@ -83,6 +83,7 @@ function createLayout(scene = createScene()): LayoutSpec {
       })),
     potentialOcclusions: [],
     containment: [],
+    mirrors: [],
     omittedObjectIds: [],
   };
 }

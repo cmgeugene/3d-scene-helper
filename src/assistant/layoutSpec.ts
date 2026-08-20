@@ -9,6 +9,7 @@ import type {
   SceneObject,
 } from '../editor/persistence/sceneSchema';
 import { getSceneObjectBounds } from '../editor/scene/sceneObjectModel';
+import { getPlanarMirrorWorldPlane } from '../editor/scene/planarMirrorContract';
 import type { ReferenceArtifact } from './companionClient';
 
 type LayoutObject = LayoutSpec['objects'][number];
@@ -381,6 +382,32 @@ export function createLayoutSpec(
           ]
         : [],
     ),
+    mirrors: document.spatialRelations.flatMap((relation) => {
+      if (relation.type !== 'reflects') return [];
+      const mirror = document.objects.find(
+        ({ id }) => id === relation.mirrorObjectId,
+      );
+      if (
+        mirror === undefined ||
+        mirror.kind !== 'plane' ||
+        mirror.appearanceIntent.surfaceType !== 'mirror'
+      ) {
+        return [];
+      }
+      const layoutMirror = objects.find(
+        ({ objectId }) => objectId === mirror.id,
+      );
+      const plane = getPlanarMirrorWorldPlane(mirror);
+      return [
+        {
+          relationId: relation.id,
+          mirrorObjectId: mirror.id,
+          reflectedObjectIds: relation.reflectedObjectIds,
+          screenBounds: layoutMirror?.screen.bounds ?? null,
+          ...plane,
+        },
+      ];
+    }),
     omittedObjectIds: document.objects
       .filter(({ visible, exportable }) => !visible || !exportable)
       .map(({ id }) => id),

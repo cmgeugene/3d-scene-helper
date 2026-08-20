@@ -76,6 +76,7 @@ export const DOCUMENT_MUTATION_KINDS = [
   'update-object-appearance',
   'create-spatial-relation',
   'delete-spatial-relation',
+  'update-mirror-reflection',
   'commit-camera',
   'update-lighting-background',
   'update-output',
@@ -147,6 +148,10 @@ export interface EditorStore {
     visibility: Extract<SpatialRelation, { type: 'contains' }>['visibility'],
   ) => string | null;
   removeSpatialRelation: (relationId: string) => void;
+  setMirrorReflectionTargets: (
+    mirrorObjectId: string,
+    reflectedObjectIds: string[],
+  ) => boolean;
   createObjectGroup: (objectIds: string[], name?: string) => string | null;
   ungroupObjects: (groupId: string) => void;
   translateObjectGroup: (
@@ -461,7 +466,30 @@ export function createEditorStore(options: EditorStoreOptions) {
       );
     },
     setObjectAppearanceIntent: (id, appearanceIntent) => {
-      updateObject(set, id, { appearanceIntent }, 'update-object-appearance');
+      set((state) => {
+        if (!state.document.objects.some((object) => object.id === id)) {
+          return state;
+        }
+        const parsed = sceneDocumentSchema.safeParse({
+          ...state.document,
+          objects: state.document.objects.map((object) =>
+            object.id === id ? { ...object, appearanceIntent } : object,
+          ),
+          spatialRelations:
+            appearanceIntent.surfaceType === 'mirror'
+              ? state.document.spatialRelations
+              : state.document.spatialRelations.filter(
+                  (relation) =>
+                    relation.type !== 'reflects' ||
+                    relation.mirrorObjectId !== id,
+                ),
+        });
+        if (!parsed.success) return state;
+        return {
+          ...recordMutation(state, parsed.data, 'update-object-appearance'),
+          statusMessage: null,
+        };
+      });
     },
     addContainmentRelation: (
       containerObjectId,
@@ -511,6 +539,58 @@ export function createEditorStore(options: EditorStoreOptions) {
           statusMessage: null,
         };
       });
+    },
+    setMirrorReflectionTargets: (mirrorObjectId, reflectedObjectIds) => {
+      const uniqueTargetIds = [...new Set(reflectedObjectIds)];
+      let relationId: string | null = null;
+      let updated = false;
+      set((state) => {
+        const mirror = state.document.objects.find(
+          ({ id }) => id === mirrorObjectId,
+        );
+        if (
+          mirror?.kind !== 'plane' ||
+          mirror.appearanceIntent.surfaceType !== 'mirror'
+        ) {
+          return state;
+        }
+        const existing = state.document.spatialRelations.find(
+          (
+            relation,
+          ): relation is Extract<SpatialRelation, { type: 'reflects' }> =>
+            relation.type === 'reflects' &&
+            relation.mirrorObjectId === mirrorObjectId,
+        );
+        relationId =
+          uniqueTargetIds.length === 0
+            ? null
+            : (existing?.id ?? options.idFactory());
+        const remainingRelations = state.document.spatialRelations.filter(
+          (relation) => relation !== existing,
+        );
+        const parsed = sceneDocumentSchema.safeParse({
+          ...state.document,
+          spatialRelations:
+            relationId === null
+              ? remainingRelations
+              : [
+                  ...remainingRelations,
+                  {
+                    id: relationId,
+                    type: 'reflects',
+                    mirrorObjectId,
+                    reflectedObjectIds: uniqueTargetIds,
+                  },
+                ],
+        });
+        if (!parsed.success) return state;
+        updated = true;
+        return {
+          ...recordMutation(state, parsed.data, 'update-mirror-reflection'),
+          statusMessage: null,
+        };
+      });
+      return updated;
     },
     createObjectGroup: (objectIds, name) => {
       const uniqueObjectIds = [...new Set(objectIds)];

@@ -395,6 +395,93 @@ describe('editorStore', () => {
     );
   });
 
+  it('plane mirror의 반사 대상을 단일 typed relation으로 갱신·정리한다', () => {
+    store = makeStore([
+      'mirror-plane',
+      'reflected-cube',
+      'reflects-relation',
+      'reflects-relation-2',
+    ]);
+    const mirrorId = store.getState().addObject({ kind: 'plane' });
+    const cubeId = store.getState().addObject({ kind: 'cube' });
+
+    store.getState().setObjectAppearanceIntent(mirrorId, {
+      surfaceType: 'mirror',
+      materialNotes: '은색 평면 거울',
+    });
+    expect(
+      store.getState().setMirrorReflectionTargets(mirrorId, [cubeId]),
+    ).toBe(true);
+    expect(store.getState().document.spatialRelations).toEqual([
+      {
+        id: 'reflects-relation',
+        type: 'reflects',
+        mirrorObjectId: mirrorId,
+        reflectedObjectIds: [cubeId],
+      },
+    ]);
+    store.getState().undo();
+    expect(store.getState().document.spatialRelations).toEqual([]);
+    store.getState().redo();
+    expect(store.getState().document.spatialRelations).toEqual([
+      expect.objectContaining({ id: 'reflects-relation' }),
+    ]);
+
+    expect(
+      store
+        .getState()
+        .setMirrorReflectionTargets(mirrorId, [
+          cubeId,
+          STARTER_IDS.mannequinId,
+        ]),
+    ).toBe(true);
+    expect(store.getState().document.spatialRelations).toEqual([
+      expect.objectContaining({
+        id: 'reflects-relation',
+        reflectedObjectIds: [cubeId, STARTER_IDS.mannequinId],
+      }),
+    ]);
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'update-mirror-reflection',
+    );
+
+    expect(store.getState().setMirrorReflectionTargets(mirrorId, [])).toBe(
+      true,
+    );
+    expect(store.getState().document.spatialRelations).toEqual([]);
+
+    store.getState().setMirrorReflectionTargets(mirrorId, [cubeId]);
+    store.getState().setObjectAppearanceIntent(mirrorId, {
+      surfaceType: 'opaque',
+      materialNotes: '',
+    });
+    expect(store.getState().document.spatialRelations).toEqual([]);
+    store.getState().undo();
+    expect(
+      store.getState().document.objects.find(({ id }) => id === mirrorId)
+        ?.appearanceIntent.surfaceType,
+    ).toBe('mirror');
+    expect(store.getState().document.spatialRelations).toEqual([
+      expect.objectContaining({ id: 'reflects-relation-2' }),
+    ]);
+    store.getState().redo();
+    expect(store.getState().document.spatialRelations).toEqual([]);
+
+    store.getState().setObjectAppearanceIntent(cubeId, {
+      surfaceType: 'mirror',
+      materialNotes: 'invalid',
+    });
+    expect(
+      store.getState().document.objects.find(({ id }) => id === cubeId)
+        ?.appearanceIntent.surfaceType,
+    ).toBe('opaque');
+    expect(
+      store
+        .getState()
+        .setMirrorReflectionTargets(cubeId, [STARTER_IDS.mannequinId]),
+    ).toBe(false);
+  });
+
   it('typed containment를 추가·삭제하고 중복과 cycle을 fail-closed한다', () => {
     store = makeStore(['relation-1', 'relation-duplicate', 'relation-cycle']);
 
@@ -1093,6 +1180,7 @@ describe('editorStore', () => {
       'update-object-appearance',
       'create-spatial-relation',
       'delete-spatial-relation',
+      'update-mirror-reflection',
       'commit-camera',
       'update-lighting-background',
       'update-output',

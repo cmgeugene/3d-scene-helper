@@ -241,6 +241,49 @@ describe('sceneDocumentSchema', () => {
     expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
   });
 
+  it('mirror surface와 reflection은 planar/non-recursive 단일 관계로 제한한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    const mirror = createSceneObject('mirror-plane', { kind: 'plane' });
+    const secondMirror = createSceneObject('mirror-plane-2', { kind: 'plane' });
+    mirror.appearanceIntent.surfaceType = 'mirror';
+    secondMirror.appearanceIntent.surfaceType = 'mirror';
+    document.objects.push(mirror, secondMirror);
+
+    document.spatialRelations = [
+      {
+        id: 'reflects-primary',
+        type: 'reflects',
+        mirrorObjectId: mirror.id,
+        reflectedObjectIds: [STARTER_IDS.mannequinId],
+      },
+    ];
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(true);
+
+    document.spatialRelations.push({
+      id: 'reflects-duplicate',
+      type: 'reflects',
+      mirrorObjectId: mirror.id,
+      reflectedObjectIds: [STARTER_IDS.floorId],
+    });
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+    document.spatialRelations.pop();
+
+    const primaryReflection = document.spatialRelations[0];
+    if (primaryReflection?.type !== 'reflects') {
+      throw new Error('Expected reflection fixture');
+    }
+    primaryReflection.reflectedObjectIds = [secondMirror.id];
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+
+    const cube = createSceneObject('mirror-cube-without-relation', {
+      kind: 'cube',
+    });
+    cube.appearanceIntent.surfaceType = 'mirror';
+    document.spatialRelations = [];
+    document.objects.push(cube);
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+  });
+
   it('0 이하인 object scale을 거부한다', () => {
     const document = createStarterSceneDocument(STARTER_IDS);
     document.objects[1].transform.scale.y = 0;

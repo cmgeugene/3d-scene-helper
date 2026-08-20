@@ -654,6 +654,7 @@ export function Inspector({ store }: InspectorProps) {
     'occluded' | 'through-opening' | 'through-transparent-surface' | 'cutaway'
   >('occluded');
   const [containmentError, setContainmentError] = useState(false);
+  const [mirrorError, setMirrorError] = useState(false);
 
   if (draftObject !== selectedObject) {
     setDraftObject(selectedObject);
@@ -747,6 +748,17 @@ export function Inspector({ store }: InspectorProps) {
   );
   const containmentCandidates = objects.filter(
     ({ id }) => id !== selectedObject?.id,
+  );
+  const reflectionRelation = spatialRelations.find(
+    (relation): relation is Extract<SpatialRelation, { type: 'reflects' }> =>
+      relation.type === 'reflects' &&
+      relation.mirrorObjectId === selectedObject?.id,
+  );
+  const reflectedObjectIds = reflectionRelation?.reflectedObjectIds ?? [];
+  const reflectionCandidates = objects.filter(
+    (object) =>
+      object.id !== selectedObject?.id &&
+      object.appearanceIntent.surfaceType !== 'mirror',
   );
   const effectiveContainedObjectId = containmentCandidates.some(
     ({ id }) => id === containedObjectId,
@@ -1014,8 +1026,11 @@ export function Inspector({ store }: InspectorProps) {
                   <option value="opaque">불투명</option>
                   <option value="transparent">투명</option>
                   <option value="translucent">반투명</option>
-                  <option value="mirror" disabled>
-                    거울 (다음 단계)
+                  <option
+                    value="mirror"
+                    disabled={selectedObject?.kind !== 'plane'}
+                  >
+                    평면 거울
                   </option>
                 </select>
               </label>
@@ -1038,6 +1053,61 @@ export function Inspector({ store }: InspectorProps) {
                 />
               </label>
             </fieldset>
+            {selectedObject?.kind === 'plane' &&
+            selectedObject.appearanceIntent.surfaceType === 'mirror' ? (
+              <fieldset className="object-controls">
+                <legend>평면 거울 반사</legend>
+                <span className="field-help">
+                  거울에 반드시 비쳐야 할 기존 오브젝트를 지정합니다. 곡면·재귀
+                  반사는 지원하지 않습니다.
+                </span>
+                {reflectionCandidates.length === 0 ? (
+                  <span className="field-help">선택할 대상이 없습니다.</span>
+                ) : (
+                  <div
+                    className="mirror-target-list"
+                    role="group"
+                    aria-label="거울 반사 대상"
+                  >
+                    {reflectionCandidates.map((candidate) => (
+                      <label key={candidate.id}>
+                        <input
+                          type="checkbox"
+                          aria-label={`${candidate.name} 반사 대상`}
+                          checked={reflectedObjectIds.includes(candidate.id)}
+                          onChange={(event) => {
+                            if (selectedObject === undefined) return;
+                            const nextTargetIds = event.currentTarget.checked
+                              ? [...reflectedObjectIds, candidate.id]
+                              : reflectedObjectIds.filter(
+                                  (objectId) => objectId !== candidate.id,
+                                );
+                            const updated = store
+                              .getState()
+                              .setMirrorReflectionTargets(
+                                selectedObject.id,
+                                nextTargetIds,
+                              );
+                            setMirrorError(!updated);
+                          }}
+                        />
+                        <span>{candidate.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {mirrorError ? (
+                  <span role="alert">
+                    유효하지 않은 반사 대상은 저장할 수 없습니다.
+                  </span>
+                ) : null}
+                {reflectedObjectIds.length === 0 ? (
+                  <span className="field-help">
+                    아직 지정된 필수 반사 대상이 없습니다.
+                  </span>
+                ) : null}
+              </fieldset>
+            ) : null}
             <fieldset className="object-controls">
               <legend>내부 오브젝트 관계</legend>
               <label className="object-text-field">
