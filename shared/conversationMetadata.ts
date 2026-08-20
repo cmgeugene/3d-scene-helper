@@ -13,6 +13,16 @@ export const conversationTurnStatusSchema = z.enum([
   'interrupted',
 ]);
 
+export const conversationReferenceBindingSchema = z.object({
+  conversationAttachmentIndex: z.number().int().positive(),
+  id: z.string().min(1),
+  name: z.string().min(1).max(300),
+  role: z.enum(['layout', 'background', 'character', 'style']),
+  targetObjectId: z.string().min(1).nullable(),
+  use: z.array(z.string().min(1)).default([]),
+  exclude: z.array(z.string().min(1)).default([]),
+});
+
 export const generationIntentSchema = z.object({
   revision: z.number().int().positive(),
   sourceTurnId: z.string().min(1),
@@ -20,6 +30,7 @@ export const generationIntentSchema = z.object({
   assistantSummary: z.string().max(1_000),
   sceneRevision: z.number().int().nonnegative().nullable(),
   specRevision: z.number().int().nonnegative().nullable(),
+  referenceBindings: z.array(conversationReferenceBindingSchema).optional(),
 });
 
 export const conversationTaskMetadataSchema = z.object({
@@ -33,6 +44,7 @@ export const conversationTaskMetadataSchema = z.object({
   lastAssistantSummary: z.string().max(1_000).nullable(),
   sceneRevision: z.number().int().nonnegative().nullable(),
   specRevision: z.number().int().nonnegative().nullable(),
+  lastReferenceBindings: z.array(conversationReferenceBindingSchema).optional(),
   generationIntent: generationIntentSchema.nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -49,6 +61,7 @@ export const conversationTurnMetadataInputSchema = z.object({
   userMessage: z.string().trim().min(1).max(4_000),
   sceneRevision: z.number().int().nonnegative().nullable().default(null),
   specRevision: z.number().int().nonnegative().nullable().default(null),
+  referenceBindings: z.array(conversationReferenceBindingSchema).optional(),
 });
 
 export type ConversationTaskMetadata = z.infer<

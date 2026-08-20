@@ -822,7 +822,11 @@ function ConnectedSceneAssistant({
           getSceneContext(),
           selectedReferences,
         );
-        const referenceIds = selectedReferences.map(({ id }) => id);
+        const conversationReferenceManifest = referencePromptManifest(
+          selectedReferences,
+          0,
+        );
+        const referenceIds = conversationReferenceManifest.map(({ id }) => id);
         const scene = sceneDocumentSchema.safeParse(getSceneContext());
         const turnId =
           client.startConversationTurn === undefined
@@ -838,6 +842,29 @@ function ConnectedSceneAssistant({
                     ? scene.data.sceneRevision
                     : null,
                   specRevision: scene.success ? scene.data.specRevision : null,
+                  ...(conversationReferenceManifest.length === 0
+                    ? {}
+                    : {
+                        referenceBindings: conversationReferenceManifest.map(
+                          ({
+                            attachmentIndex,
+                            id,
+                            name,
+                            role,
+                            targetObjectId,
+                            use,
+                            exclude,
+                          }) => ({
+                            conversationAttachmentIndex: attachmentIndex,
+                            id,
+                            name,
+                            role,
+                            targetObjectId,
+                            use,
+                            exclude,
+                          }),
+                        ),
+                      }),
                 },
               );
         trackStartedTurn(turnId);

@@ -59,10 +59,6 @@ const requiredPromptSections = [
   { label: 'Use case:', pattern: /^Use case\s*:/imu },
   { label: 'Primary request:', pattern: /^Primary request\s*:/imu },
   {
-    label: 'Input images or Image roles:',
-    pattern: /^(?:Input images|Image roles)[^:\n]*:/imu,
-  },
-  {
     label: 'Style and integration:',
     pattern: /^Style(?:\/medium)?[^:\n]*integration\s*:/imu,
   },
@@ -128,43 +124,61 @@ export interface ImagegenSkillPromptCompilerResult {
   compilerTurnId: string;
 }
 
-function extractImageRoleBindings(inspectedPrompt: string) {
-  const lines = inspectedPrompt.split('\n');
+function removeCompilerOwnedImageAuthoritySection(prompt: string) {
+  const normalized = prompt.replace(/\r\n?/gu, '\n').trim();
+  const lines = normalized.split('\n');
   const headingIndex = lines.findIndex((line) =>
     /^(?:Input images|Image roles)[^:\n]*:/iu.test(line.trim()),
   );
-  if (headingIndex < 0) return [];
-  const candidates: string[] = [];
-  const headingRemainder = lines[headingIndex]!.replace(
-    /^(?:Input images|Image roles)[^:\n]*:\s*/iu,
-    '',
-  );
-  if (headingRemainder.trim() !== '') candidates.push(headingRemainder);
-  for (
-    let lineIndex = headingIndex + 1;
-    lineIndex < lines.length;
-    lineIndex += 1
-  ) {
-    const line = lines[lineIndex]!;
-    if (
-      /^\s*[A-Z][A-Za-z0-9 /&()_-]{2,100}:\s*/u.test(line) &&
-      !/^\s*(?:[-*]|\d+\.)?\s*Image\s+\d+\b/iu.test(line)
-    ) {
+  if (headingIndex < 0) return normalized;
+  let endIndex = headingIndex + 1;
+  while (endIndex < lines.length) {
+    if (/^[A-Z][A-Za-z0-9 /&()_-]{2,100}:\s*/u.test(lines[endIndex]!.trim())) {
       break;
     }
-    candidates.push(line);
+    endIndex += 1;
   }
-  return candidates.flatMap((line) => {
-    const match = /^\s*(?:[-*]|\d+\.)?\s*Image\s+(\d+)\b\s*(.*)$/iu.exec(line);
-    if (match === null) return [];
-    return [{ index: Number(match[1]), description: match[2]!.trim() }];
-  });
+  return [...lines.slice(0, headingIndex), ...lines.slice(endIndex)]
+    .join('\n')
+    .replace(/\n{3,}/gu, '\n\n')
+    .trim();
 }
 
-function validateFinalPrompt(
-  finalPrompt: string,
+export function createCanonicalImageAuthorityBlock(
   descriptors: GenerationImageDescriptor[],
 ) {
+  const canonical = validateGenerationImageDescriptors(descriptors);
+  const lines = canonical.flatMap(
+    ({
+      attachmentIndex,
+      role,
+      artifactId,
+      targetObjectId,
+      authority,
+      prohibitedAuthority,
+    }) => [
+      `Image ${attachmentIndex} — role: ${role}; artifactId: ${artifactId}; targetObjectId: ${targetObjectId ?? 'scene-wide'}.`,
+      `  Authority: ${authority.join('; ')}.`,
+      `  Must not control: ${prohibitedAuthority.join('; ')}.`,
+    ],
+  );
+  return `[SERVER-OWNED CANONICAL IMAGE ROLES AND AUTHORITY — IMMUTABLE]
+This block is generated from the actual ordered attachments after prompt compilation. It overrides any conflicting image number, role, or authority statement elsewhere in the prompt. Every listed image is attached and must be used only within its assigned authority.
+${lines.join('\n')}
+Image 1 is always the current OutputCamera 3D layout and the non-negotiable highest spatial authority. Conversation-local image numbers are never production attachment identities.`;
+}
+
+function composeProductionPrompt(
+  compilerPrompt: string,
+  descriptors: GenerationImageDescriptor[],
+) {
+  return `${createCanonicalImageAuthorityBlock(descriptors)}
+
+[IMAGEGEN SKILL CREATIVE AND INTEGRATION INSTRUCTIONS]
+${removeCompilerOwnedImageAuthoritySection(compilerPrompt)}`;
+}
+
+function validateFinalPrompt(finalPrompt: string) {
   const inspected = finalPrompt.replace(/\r\n?/gu, '\n').trim();
   if (inspected.length < 300) {
     throw new Error(
@@ -178,43 +192,7 @@ function validateFinalPrompt(
       );
     }
   }
-  const roleBindings = extractImageRoleBindings(inspected);
-  if (roleBindings.length !== descriptors.length) {
-    throw new Error(
-      'Codex imagegen 스킬 최종 프롬프트가 모든 입력 이미지의 ordered 역할 바인딩을 정확히 하나씩 지정하지 않았습니다.',
-    );
-  }
-  const unassignedRole =
-    /\b(?:unassigned|unused|ignored?|none|no\s+(?:role|authority)|not\s+assigned)\b/iu;
-  const affirmativeRole =
-    /\b(?:authorit(?:y|ative)|role|reference|layout|spatial|camera|composition|background|appearance|character|subject|identity|style|material|lighting|environment|source|controls?|defines?|provides?|preserves?|used?\s+for)\b/iu;
-  const roleDescriptionPatterns = {
-    layout: /\b(?:layout|spatial|camera|composition)\b/iu,
-    sourceGeneration:
-      /\b(?:source|existing|previous|keyframe|appearance|identity|clothing|material|color|detail)\b/iu,
-    layoutReference: /\b(?:layout|structure|design|environment)\b/iu,
-    backgroundReference:
-      /\b(?:background|environment|location|lighting|material|appearance)\b/iu,
-    characterReference:
-      /\b(?:character|subject|identity|face|body|hair|clothing|appearance)\b/iu,
-    styleReference: /\b(?:style|medium|palette|rendering|treatment)\b/iu,
-  } as const;
-  for (let imageIndex = 1; imageIndex <= descriptors.length; imageIndex += 1) {
-    const binding = roleBindings[imageIndex - 1];
-    const descriptor = descriptors[imageIndex - 1]!;
-    if (
-      binding?.index !== imageIndex ||
-      binding.description.length < 8 ||
-      unassignedRole.test(binding.description) ||
-      !affirmativeRole.test(binding.description) ||
-      !roleDescriptionPatterns[descriptor.role].test(binding.description)
-    ) {
-      throw new Error(
-        `Codex imagegen 스킬 최종 프롬프트의 Image ${imageIndex} 역할 바인딩이 유효하지 않습니다.`,
-      );
-    }
-  }
-  return finalPrompt;
+  return inspected;
 }
 
 function validateCompilerBindings(
@@ -270,15 +248,14 @@ Load and follow the actual imagegen skill installed in Codex and its prompt-shap
 
 DO NOT invoke image_gen, image_generation, scripts/image_gen.py, a CLI, or any other tool. Return only JSON matching the supplied output schema. Copy the canonical bindings below byte-for-byte as the bindings value; do not reinterpret, reorder, omit, or weaken any role or authority.
 
-Write the exact final prompt you would otherwise pass to the image generation tool. Apply the imagegen skill's real prompt-shaping judgment rather than copying or summarizing the source request. The finalPrompt must be a complete standalone production prompt and must include these labeled operational sections:
+Write the creative, scene-specific and integration portion of the final prompt. Apply the imagegen skill's real prompt-shaping judgment rather than copying or summarizing the source request. Do not assign production image numbers or author an image-role section; the server will replace any such section with its immutable canonical block after this turn. Refer to inputs by semantic role or stable reference id. The finalPrompt must include these labeled operational sections:
 - Use case:
 - Primary request:
-- Input images and authority: or Image roles and authority:
 - Style/medium and integration: or Style and integration:
 - Strict composition and camera invariants: or Strict invariants:
 - Avoid:
 
-Image 1 is always the current OutputCamera 3D layout and the highest authority for camera, crop, perspective, placement, pose, scale, depth order, and occlusion. A source generation is appearance evidence only and must never override those spatial attributes. Conversation intent cannot override the layout contract; if it conflicts, preserve the layout. Treat proxy geometry, guide colors, and editor appearance as non-authoritative. Integrate role-bound appearance references without copying their pose, framing, background, text, or sheet layout. Preserve strict invariants verbatim enough to prevent drift.
+Image 1 is always the current OutputCamera 3D layout and the highest authority for camera, crop, perspective, placement, pose, scale, depth order, and occlusion. A source generation is appearance evidence only and must never override those spatial attributes. Conversation intent cannot override the layout contract; if it conflicts, preserve the layout. Any image number found inside confirmed conversation intent is conversation-local and must be resolved through its stable referenceBindings, never copied as a production attachment number. Treat proxy geometry, guide colors, and editor appearance as non-authoritative. Integrate role-bound appearance references without copying their pose, framing, background, text, or sheet layout. Preserve strict invariants verbatim enough to prevent drift.
 
 [CANONICAL IMAGE DESCRIPTORS]
 ${JSON.stringify(descriptorManifest)}
@@ -445,7 +422,10 @@ export async function compileImagegenSkillPrompt(
       const { finalPrompt, bindings } = compilerResponseSchema.parse(
         JSON.parse(agentText),
       );
-      const validatedPrompt = validateFinalPrompt(finalPrompt, descriptors);
+      const validatedPrompt = composeProductionPrompt(
+        validateFinalPrompt(finalPrompt),
+        descriptors,
+      );
       const validatedBindings = validateCompilerBindings(descriptors, bindings);
       settled = true;
       resolveCompletion({

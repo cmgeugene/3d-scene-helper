@@ -5,9 +5,11 @@ import { z } from 'zod';
 import {
   conversationSessionSchema,
   conversationTaskMetadataSchema,
+  conversationTurnMetadataInputSchema,
   conversationTurnKindSchema,
   conversationTurnStatusSchema,
   type ConversationTurnMetadataInput,
+  type GenerationIntent,
 } from '../shared/conversationMetadata';
 
 const conversationTaskSchema = conversationTaskMetadataSchema;
@@ -32,6 +34,24 @@ function bounded(value: string, maximum: number) {
   return normalized.length <= maximum
     ? normalized
     : `${normalized.slice(0, maximum - 1)}…`;
+}
+
+export function normalizeConversationImageReferences(
+  value: string,
+  referenceBindings: NonNullable<GenerationIntent['referenceBindings']>,
+) {
+  return value.replace(
+    /(?:첨부\s*)?(?:이미지|image)\s*#?\s*(\d+)/giu,
+    (original, rawIndex: string) => {
+      const attachmentIndex = Number(rawIndex);
+      const reference = referenceBindings.find(
+        (binding) => binding.conversationAttachmentIndex === attachmentIndex,
+      );
+      return reference === undefined
+        ? `${original} (대화 첨부 번호; 생성 이미지 번호가 아님)`
+        : `레퍼런스 “${reference.name}” (${reference.role}, id: ${reference.id})`;
+    },
+  );
 }
 
 function publicSession(manifest: ConversationManifest) {
@@ -112,6 +132,7 @@ export class ConversationStore {
               lastAssistantSummary: null,
               sceneRevision: null,
               specRevision: null,
+              lastReferenceBindings: [],
               generationIntent: null,
               createdAt: now,
               updatedAt: now,
@@ -137,16 +158,18 @@ export class ConversationStore {
     turnId: string,
     input: ConversationTurnMetadataInput,
   ) {
+    const parsedInput = conversationTurnMetadataInputSchema.parse(input);
     return this.updateTask(threadId, (task) => ({
       ...task,
       turnCount: task.turnCount + 1,
       lastTurnId: turnId,
-      lastTurnKind: conversationTurnKindSchema.parse(input.kind),
+      lastTurnKind: conversationTurnKindSchema.parse(parsedInput.kind),
       lastTurnStatus: 'inProgress',
-      lastUserMessage: bounded(input.userMessage, 500),
+      lastUserMessage: bounded(parsedInput.userMessage, 500),
       lastAssistantSummary: null,
-      sceneRevision: input.sceneRevision ?? task.sceneRevision,
-      specRevision: input.specRevision ?? task.specRevision,
+      sceneRevision: parsedInput.sceneRevision ?? task.sceneRevision,
+      specRevision: parsedInput.specRevision ?? task.specRevision,
+      lastReferenceBindings: parsedInput.referenceBindings ?? [],
     }));
   }
 
@@ -166,6 +189,7 @@ export class ConversationStore {
     return this.updateTask(threadId, (task) => {
       if (task.lastTurnId !== turnId) return task;
       const completed = status === 'completed';
+      const referenceBindings = task.lastReferenceBindings ?? [];
       const generationIntent =
         completed &&
         task.lastTurnKind === 'conversation' &&
@@ -174,10 +198,17 @@ export class ConversationStore {
           ? {
               revision: (task.generationIntent?.revision ?? 0) + 1,
               sourceTurnId: turnId,
-              userMessage: task.lastUserMessage,
-              assistantSummary: task.lastAssistantSummary,
+              userMessage: normalizeConversationImageReferences(
+                task.lastUserMessage,
+                referenceBindings,
+              ),
+              assistantSummary: normalizeConversationImageReferences(
+                task.lastAssistantSummary,
+                referenceBindings,
+              ),
               sceneRevision: task.sceneRevision,
               specRevision: task.specRevision,
+              ...(referenceBindings.length === 0 ? {} : { referenceBindings }),
             }
           : task.generationIntent;
       return {

@@ -181,8 +181,8 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 - [x] fresh/edit 모두 현재 OutputCamera 레이아웃을 Image 1로 고정
 - [x] edit source generation을 Image 2의 외형 권위로 제한
 - [x] canonical image descriptor와 역할별 허용/금지 권위 계약
-- [x] imagegen compiler의 구조화 binding과 readable prompt 역할을 이중 검증
-- [x] 역할 재분류, 권위 약화와 text/binding 모순을 provider 호출 전에 차단
+- [x] imagegen compiler의 구조화 binding 검증과 서버 소유 readable authority block
+- [x] 역할 재분류와 권위 약화는 차단하고 compiler의 누락·모순 prose는 canonical block으로 교체
 - [x] generation record와 키프레임 실행 상세에 contract version과 binding 저장
 - [x] Codex/OAuth/웹 내보내기의 순서와 보정 권위 문구 통일
 
@@ -270,6 +270,24 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 4. LayoutSpec의 평면 법선은 렌더러가 사용하는 plane local +Y와 같은 transform 규칙을 따른다.
 5. 곡면·재귀·거울 속 거울은 데이터 검증과 UI에서 지원하지 않는다.
 
+### P13. 서버 소유 생성 바인딩과 대화 레퍼런스 정규화 — 완료 (S43)
+
+- [x] 실제 ordered attachment에서 서버가 immutable image authority block 생성
+- [x] compiler가 작성한 image-role prose를 최종 prompt에서 제거하고 canonical block으로 교체
+- [x] compiler의 역할 누락·unassigned·text 모순이 3D 바인딩을 제거하거나 불필요한 재시도를 만들지 않음
+- [x] 대화 레퍼런스 첨부 순서와 실제 전송 순서를 동일한 manifest로 정렬
+- [x] Scene Assistant가 이미지 번호 대신 레퍼런스 name, id와 role로 답하도록 지시
+- [x] 완료 대화의 `이미지 N`을 안정적인 reference binding으로 정규화해 generation intent에 저장
+- [x] `targetObjectId: null`인 배경 레퍼런스를 scene-wide 대상으로 명시
+
+완료 기준:
+
+1. 생성 prompt의 Image 1은 compiler prose와 무관하게 서버가 현재 OutputCamera layout으로 직접 작성한다.
+2. compiler가 image-role 섹션을 누락하거나 잘못 작성해도 서버 canonical block이 실제 첨부 전체를 복구한다.
+3. compiler가 반환한 구조화 binding 자체가 canonical binding과 다르면 계속 fail-closed 처리한다.
+4. 대화의 `이미지 1`은 production Image 1로 복사되지 않고 당시 reference id, name과 role로 변환된다.
+5. 기존 reference binding 필드가 없는 conversation/generation 기록은 변경 없이 계속 읽을 수 있다.
+
 ## 3. 장기 보류
 
 다음 항목은 위 단계가 안정화된 뒤 검토한다.
@@ -292,8 +310,8 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 
 ## 5. 바로 다음 작업
 
-S38~S42 기능 브랜치를 실제 사용자 장면으로 인수 검증한 뒤 원본 브랜치에 통합한다. 통합 전에는
-기존 generation의 fresh/edit에서 Image 1 레이아웃 권위가 유지되는지, 잠금 click-through와 그룹
-이동, 내부 오브젝트 cutaway, 평면 거울 clean export를 한 흐름으로 확인한다. 곡면 거울, 여러 번의
-재귀 반사, 거울 안의 거울과 반사 대상만 직접 장면에서 숨기는 별도 visibility 모드는 장기 범위로
-남긴다.
+S43 수정은 실제 사용자 대화에서 배경 레퍼런스를 name/id로 지칭한 뒤 fresh/edit 생성을 각각 한 번
+실행해 확인한다. generation 실행 상세에서 Image 1 layout과 후속 reference 역할이 유지되고, 저장된
+generationSpec 첫 블록이 `SERVER-OWNED CANONICAL IMAGE ROLES AND AUTHORITY`인지 확인한다. 곡면 거울,
+여러 번의 재귀 반사, 거울 안의 거울과 반사 대상만 직접 장면에서 숨기는 별도 visibility 모드는 장기
+범위로 남긴다.

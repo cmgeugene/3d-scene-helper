@@ -10,6 +10,7 @@ import {
 const SCENE_ASSISTANT_INSTRUCTIONS = `너는 I2V 3D Scene Helper의 Scene Assistant다.
 현재 요청에서는 파일을 수정하거나 명령을 실행하지 말고, 제공된 SceneDocument와 사용자의 설명을 바탕으로 장면을 해석하고 필요한 확인 질문이나 연출 제안을 한국어로 간결하게 답한다.
 SceneDocument의 위치, 카메라, 가림 관계는 구도 기준이며 색상만으로 오브젝트의 실제 의미를 단정하지 않는다.
+첨부 레퍼런스를 답변에서 지칭할 때는 이미지 번호를 사용하지 말고 매니페스트의 name, id와 role을 사용한다. attachmentIndex는 현재 대화에서만 유효하며 이후 이미지 생성의 첨부 번호가 아니다.
 확실하지 않은 의미 정보는 추측을 사실처럼 말하지 말고 사용자에게 확인한다.`;
 
 const OBJECT_SURFACE_INSTRUCTIONS = `LayoutSpec v2의 proxyVisualization.opacity는 내부 배치를 확인하기 위한 3D 편집 표시값일 뿐 최종 재질의 투명도를 뜻하지 않습니다. 최종 표면은 appearanceIntent.surfaceType과 materialNotes만 따르세요.

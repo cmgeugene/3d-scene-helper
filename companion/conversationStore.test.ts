@@ -129,6 +129,58 @@ describe('ConversationStore', () => {
     });
   });
 
+  it('대화 첨부 번호를 안정적인 레퍼런스 ID와 역할로 정규화한다', async () => {
+    const { store } = await createStore();
+    await store.activateThread('thread-reference-intent', 'new');
+    await store.recordTurnStarted(
+      'thread-reference-intent',
+      'turn-reference-intent',
+      {
+        kind: 'conversation',
+        userMessage: '이미지 1의 배경을 더 강하게 적용해줘.',
+        sceneRevision: 4,
+        specRevision: 2,
+        referenceBindings: [
+          {
+            conversationAttachmentIndex: 1,
+            id: 'ref-background-corridor',
+            name: '연습실 복도',
+            role: 'background',
+            targetObjectId: null,
+            use: ['surface', 'lighting'],
+            exclude: ['camera', 'text'],
+          },
+        ],
+      },
+    );
+    await store.recordAssistantSummary(
+      'thread-reference-intent',
+      'turn-reference-intent',
+      '이미지 1을 배경 전체에 강하게 적용하되 3D 구도는 유지합니다.',
+    );
+    await store.recordTurnCompleted(
+      'thread-reference-intent',
+      'turn-reference-intent',
+      'completed',
+    );
+
+    await expect(
+      store.getGenerationIntent('thread-reference-intent'),
+    ).resolves.toMatchObject({
+      userMessage:
+        '레퍼런스 “연습실 복도” (background, id: ref-background-corridor)의 배경을 더 강하게 적용해줘.',
+      assistantSummary:
+        '레퍼런스 “연습실 복도” (background, id: ref-background-corridor)을 배경 전체에 강하게 적용하되 3D 구도는 유지합니다.',
+      referenceBindings: [
+        {
+          conversationAttachmentIndex: 1,
+          id: 'ref-background-corridor',
+          role: 'background',
+        },
+      ],
+    });
+  });
+
   it('Companion 재시작에서 마지막 in-progress turn을 interrupted로 복구한다', async () => {
     const { root, store } = await createStore();
     await store.activateThread('thread-restart', 'new');

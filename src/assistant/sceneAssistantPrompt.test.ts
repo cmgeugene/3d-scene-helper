@@ -22,6 +22,9 @@ describe('createSceneAssistantPrompt', () => {
     expect(prompt).toContain(
       '색상만으로 오브젝트의 실제 의미를 단정하지 않는다',
     );
+    expect(prompt).toContain(
+      '이미지 번호를 사용하지 말고 매니페스트의 name, id와 role을 사용',
+    );
   });
 
   it('선택한 레퍼런스 역할과 마네킹 매핑을 첨부 순서대로 전달한다', () => {

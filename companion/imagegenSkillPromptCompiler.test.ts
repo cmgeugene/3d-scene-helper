@@ -120,30 +120,34 @@ describe('compileImagegenSkillPrompt', () => {
     const onThreadStarted = vi.fn();
     emitCompletedPrompt(runtime);
 
-    await expect(
-      compileImagegenSkillPrompt({
-        runtime,
-        projectRoot: '/project-data',
-        sourcePrompt: '$imagegen\n[SceneDocument]\nscene evidence',
-        generationIntent: {
-          revision: 4,
-          sourceTurnId: 'turn-intent-4',
-          userMessage: '맑은 낮의 애니메이션 장면으로 만들어줘.',
-          assistantSummary: '밝은 낮과 애니메이션 마감을 반영합니다.',
-          sceneRevision: 12,
-          specRevision: 5,
-        },
-        images: compilerImages([
-          '/project-data/layout.png',
-          '/project-data/background.png',
-        ]),
-        onThreadStarted,
-        timeoutMs: 1_000,
-      }),
-    ).resolves.toMatchObject({
-      finalPrompt: compiledPrompt,
+    const result = await compileImagegenSkillPrompt({
+      runtime,
+      projectRoot: '/project-data',
+      sourcePrompt: '$imagegen\n[SceneDocument]\nscene evidence',
+      generationIntent: {
+        revision: 4,
+        sourceTurnId: 'turn-intent-4',
+        userMessage: '맑은 낮의 애니메이션 장면으로 만들어줘.',
+        assistantSummary: '밝은 낮과 애니메이션 마감을 반영합니다.',
+        sceneRevision: 12,
+        specRevision: 5,
+      },
+      images: compilerImages([
+        '/project-data/layout.png',
+        '/project-data/background.png',
+      ]),
+      onThreadStarted,
+      timeoutMs: 1_000,
+    });
+    expect(result).toMatchObject({
       compiler: 'codex-imagegen-skill',
     });
+    expect(result.finalPrompt).toContain(
+      '[SERVER-OWNED CANONICAL IMAGE ROLES AND AUTHORITY — IMMUTABLE]',
+    );
+    expect(result.finalPrompt).toContain('Image 1 — role: layout');
+    expect(result.finalPrompt).toContain('Image 2 — role: backgroundReference');
+    expect(result.finalPrompt).not.toContain('Input images and authority:');
 
     expect(runtime.startThread).toHaveBeenCalledWith(
       '/project-data',
@@ -545,29 +549,29 @@ describe('compileImagegenSkillPrompt', () => {
     }
   });
 
-  it('rejects a final prompt that omits an attached image role', async () => {
+  it('repairs a final prompt that omits an attached image role', async () => {
     const runtime = new FakeRuntime();
     emitCompletedPrompt(
       runtime,
       compiledPrompt.replace('- Image 2 is background appearance only.\n', ''),
     );
 
-    await expect(
-      compileImagegenSkillPrompt({
-        runtime,
-        projectRoot: '/project-data',
-        sourcePrompt: '$imagegen scene evidence',
-        generationIntent: null,
-        images: compilerImages([
-          '/project-data/layout.png',
-          '/project-data/background.png',
-        ]),
-        timeoutMs: 1_000,
-      }),
-    ).rejects.toThrow('모든 입력 이미지');
+    const result = await compileImagegenSkillPrompt({
+      runtime,
+      projectRoot: '/project-data',
+      sourcePrompt: '$imagegen scene evidence',
+      generationIntent: null,
+      images: compilerImages([
+        '/project-data/layout.png',
+        '/project-data/background.png',
+      ]),
+      timeoutMs: 1_000,
+    });
+    expect(result.finalPrompt).toContain('Image 1 — role: layout');
+    expect(result.finalPrompt).toContain('Image 2 — role: backgroundReference');
   });
 
-  it('rejects an explicitly unassigned image role', async () => {
+  it('replaces an explicitly unassigned compiler role with canonical authority', async () => {
     const runtime = new FakeRuntime();
     emitCompletedPrompt(
       runtime,
@@ -577,19 +581,19 @@ describe('compileImagegenSkillPrompt', () => {
       ),
     );
 
-    await expect(
-      compileImagegenSkillPrompt({
-        runtime,
-        projectRoot: '/project-data',
-        sourcePrompt: '$imagegen scene evidence',
-        generationIntent: null,
-        images: compilerImages([
-          '/project-data/layout.png',
-          '/project-data/background.png',
-        ]),
-        timeoutMs: 1_000,
-      }),
-    ).rejects.toThrow('역할 바인딩');
+    const result = await compileImagegenSkillPrompt({
+      runtime,
+      projectRoot: '/project-data',
+      sourcePrompt: '$imagegen scene evidence',
+      generationIntent: null,
+      images: compilerImages([
+        '/project-data/layout.png',
+        '/project-data/background.png',
+      ]),
+      timeoutMs: 1_000,
+    });
+    expect(result.finalPrompt).toContain('Image 2 — role: backgroundReference');
+    expect(result.finalPrompt).not.toContain('intentionally unassigned');
   });
 
   it('rejects a compiler response that reclassifies a canonical image role', async () => {
@@ -614,7 +618,7 @@ describe('compileImagegenSkillPrompt', () => {
     ).rejects.toThrow('역할 또는 권위 바인딩을 변경했습니다');
   });
 
-  it('rejects final prompt text that contradicts the structured layout binding', async () => {
+  it('replaces final prompt text that contradicts the structured layout binding', async () => {
     const runtime = new FakeRuntime();
     emitCompletedPrompt(
       runtime,
@@ -624,19 +628,21 @@ describe('compileImagegenSkillPrompt', () => {
       ),
     );
 
-    await expect(
-      compileImagegenSkillPrompt({
-        runtime,
-        projectRoot: '/project-data',
-        sourcePrompt: '$imagegen scene evidence',
-        generationIntent: null,
-        images: compilerImages([
-          '/project-data/layout.png',
-          '/project-data/background.png',
-        ]),
-        timeoutMs: 1_000,
-      }),
-    ).rejects.toThrow('Image 1 역할 바인딩이 유효하지 않습니다');
+    const result = await compileImagegenSkillPrompt({
+      runtime,
+      projectRoot: '/project-data',
+      sourcePrompt: '$imagegen scene evidence',
+      generationIntent: null,
+      images: compilerImages([
+        '/project-data/layout.png',
+        '/project-data/background.png',
+      ]),
+      timeoutMs: 1_000,
+    });
+    expect(result.finalPrompt).toContain('Image 1 — role: layout');
+    expect(result.finalPrompt).not.toContain(
+      'Image 1 is the style appearance reference',
+    );
   });
 
   it('rejects input before thread creation when Image 1 is not the 3D layout', async () => {
@@ -673,24 +679,27 @@ describe('compileImagegenSkillPrompt', () => {
     expect(runtime.startThread).not.toHaveBeenCalled();
   });
 
-  it('returns the validated skill prompt byte-for-byte unchanged', async () => {
+  it('normalizes boundary whitespace and injects server-owned image authority', async () => {
     const runtime = new FakeRuntime();
     const promptWithBoundaryWhitespace = `\n${compiledPrompt}\n`;
     emitCompletedPrompt(runtime, promptWithBoundaryWhitespace);
 
-    await expect(
-      compileImagegenSkillPrompt({
-        runtime,
-        projectRoot: '/project-data',
-        sourcePrompt: '$imagegen scene evidence',
-        generationIntent: null,
-        images: compilerImages([
-          '/project-data/layout.png',
-          '/project-data/background.png',
-        ]),
-        timeoutMs: 1_000,
-      }),
-    ).resolves.toMatchObject({ finalPrompt: promptWithBoundaryWhitespace });
+    const result = await compileImagegenSkillPrompt({
+      runtime,
+      projectRoot: '/project-data',
+      sourcePrompt: '$imagegen scene evidence',
+      generationIntent: null,
+      images: compilerImages([
+        '/project-data/layout.png',
+        '/project-data/background.png',
+      ]),
+      timeoutMs: 1_000,
+    });
+    expect(result.finalPrompt).toMatch(
+      /^\[SERVER-OWNED CANONICAL IMAGE ROLES AND AUTHORITY/u,
+    );
+    expect(result.finalPrompt).toContain('Primary request:');
+    expect(result.finalPrompt).not.toContain('Input images and authority:');
   });
 
   it('rejects an answer that is not the structured imagegen production prompt', async () => {
