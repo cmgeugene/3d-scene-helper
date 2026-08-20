@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { layoutSpecSchema } from '../../shared/layoutSpecSchema';
 import {
+  migratedSceneDocumentSchema,
   sceneDocumentSchema,
   type SceneDocument,
 } from '../editor/persistence/sceneSchema';
@@ -164,7 +165,7 @@ export const generationRecordSchema = z.object({
     .optional(),
   imageBindings: z.array(generationImageBindingSchema).nullable().optional(),
   layoutSpec: layoutSpecSchema.nullable(),
-  sceneSnapshot: sceneDocumentSchema.nullable().default(null),
+  sceneSnapshot: migratedSceneDocumentSchema.nullable().default(null),
   semanticSceneSpecSnapshot: semanticSceneSpecSchema.nullable().default(null),
   referenceSnapshots: z.array(referenceArtifactSchema).default([]),
   parentGenerationId: z.string().min(1).nullable().default(null),

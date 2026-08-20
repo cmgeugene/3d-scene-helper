@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createStarterSceneDocument } from '../persistence/sceneSchema';
+import {
+  createSceneObject,
+  createStarterSceneDocument,
+} from '../persistence/sceneSchema';
 import {
   MANNEQUIN_ARM_ANCHORS,
   createMannequinPose,
@@ -195,6 +198,94 @@ describe('editorStore', () => {
       visible: false,
     });
     expect(store.getState().isDirty).toBe(true);
+  });
+
+  it('viewport selection lock을 별도 document mutation으로 기록하고 undo/redo한다', () => {
+    store.getState().selectObject(STARTER_IDS.mannequinId);
+
+    store
+      .getState()
+      .setObjectViewportSelectionLocked(STARTER_IDS.mannequinId, true);
+
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.viewportSelectionLocked,
+    ).toBe(true);
+    expect(store.getState().selectedObjectId).toBe(STARTER_IDS.mannequinId);
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'update-object-selection-lock',
+    );
+
+    store.getState().undo();
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.viewportSelectionLocked,
+    ).toBe(false);
+
+    store.getState().redo();
+    expect(
+      store
+        .getState()
+        .document.objects.find(({ id }) => id === STARTER_IDS.mannequinId)
+        ?.viewportSelectionLocked,
+    ).toBe(true);
+  });
+
+  it('오브젝트 삭제 시 group과 spatial relation의 dangling reference를 원자 정리한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    const container = createSceneObject('container', { kind: 'cube' });
+    const contained = createSceneObject('contained', { kind: 'sphere' });
+    const mirror = createSceneObject('mirror', { kind: 'plane' });
+    mirror.appearanceIntent.surfaceType = 'mirror';
+    document.objects.push(container, contained, mirror);
+    document.groups = [
+      {
+        id: 'group-props',
+        name: 'Props',
+        memberObjectIds: [container.id, contained.id, mirror.id],
+      },
+    ];
+    document.spatialRelations = [
+      {
+        id: 'contains-contained',
+        type: 'contains',
+        containerObjectId: container.id,
+        containedObjectId: contained.id,
+        visibility: 'occluded',
+      },
+      {
+        id: 'reflects-contained',
+        type: 'reflects',
+        mirrorObjectId: mirror.id,
+        reflectedObjectIds: [container.id, contained.id],
+      },
+    ];
+    store = createEditorStore({
+      initialDocument: document,
+      idFactory: () => 'unused',
+    });
+
+    store.getState().deleteObject(contained.id);
+
+    expect(store.getState().document.groups[0]?.memberObjectIds).toEqual([
+      container.id,
+      mirror.id,
+    ]);
+    expect(store.getState().document.spatialRelations).toEqual([
+      {
+        id: 'reflects-contained',
+        type: 'reflects',
+        mirrorObjectId: mirror.id,
+        reflectedObjectIds: [container.id],
+      },
+    ]);
+    expect(store.getState().history.past.at(-1)?.mutationKind).toBe(
+      'delete-object',
+    );
   });
 
   it('검증된 spec patch와 object transform command를 단일 원자 mutation으로 적용하고 stale/double apply를 거부하며 undo/redo한다', () => {
@@ -840,6 +931,7 @@ describe('editorStore', () => {
       'duplicate-object',
       'commit-transform',
       'update-object-property',
+      'update-object-selection-lock',
       'commit-camera',
       'update-lighting-background',
       'update-output',

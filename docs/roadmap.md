@@ -1,8 +1,8 @@
 # AI Scene Assistant 구현 로드맵
 
-> 기준일: 2026-08-04
+> 기준일: 2026-08-20
 >
-> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료; S36 P6 완료; S37 P7 완료; S38 P8 완료
+> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료; S36 P6 완료; S37 P7 완료; S38 P8 완료; S39 P9 완료
 >
 > 이 문서는 앞으로의 구현 순서와 완료 기준을 관리하는 단일 로드맵이다. 세부 설계는
 > `ai-scene-assistant.md`, 완료된 작업의 검증 기록은 `session-handoffs/`를 따른다.
@@ -36,6 +36,7 @@
 | 수동 웹 생성   | GPT 웹용 동일 의미 프롬프트, 첨부 순서 안내, 모달 복사와 무부작용 fallback  | S36     |
 | 생성 자원 수명 | 불변 원본·hash-bound thumbnail, bounded URL/Canvas와 restart 복구           | S37     |
 | 레이아웃 권위  | Image 1 고정, attachment contract v2와 역할·권위 binding fail-closed 검증   | S38     |
+| 장면 v4·잠금   | v1~v3 additive migration, authoring 기반과 viewport click-through 선택 잠금 | S39     |
 
 현재 기본 생성은 `Image 1 현재 3D 레이아웃 + 레퍼런스 최대 4장`, 보정 생성은
 `Image 1 현재 3D 레이아웃 + Image 2 원본 키프레임 + 레퍼런스 최대 3장`을 사용한다.
@@ -191,6 +192,25 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 3. compiler가 canonical index, role 또는 authority를 바꾸면 생성이 fail-closed 된다.
 4. legacy generation은 기존 attachment 순서와 필드 누락 상태로 계속 읽을 수 있다.
 
+### P9. SceneDocument v4 기반과 뷰포트 선택 잠금 — 완료 (S39)
+
+- [x] v1~v3 장면과 generation snapshot의 불변 v4 migration
+- [x] 오브젝트별 selection lock, visualization과 appearance intent 기본값
+- [x] 빈 group/spatial relation 컬렉션과 참조·중복·cycle·mirror schema 검증
+- [x] 삭제 시 group과 containment/reflection dangling reference 원자 정리
+- [x] Outliner 행 선택과 잠금 토글 클릭 영역·접근성 분리
+- [x] 잠긴 전경을 통과하는 뷰포트 hit propagation
+- [x] 잠긴 오브젝트의 Outliner 선택, Inspector와 transform gizmo 유지
+- [x] 잠금 mutation의 undo/redo·autosave·JSON·snapshot 보존
+
+완료 기준:
+
+1. v1~v3 입력은 원본을 수정하지 않고 결정적인 v4 기본값으로 복원된다.
+2. 잠긴 오브젝트는 뷰포트 선택 대상이 아니지만 Outliner 편집 대상이다.
+3. 잠긴 전경 뒤의 잠기지 않은 오브젝트를 실제 Chromium에서 선택할 수 있다.
+4. 잠금 변경은 독립 history mutation이며 저장·새로고침과 generation record를 왕복한다.
+5. 이후 그룹·containment·mirror 단계가 dangling reference를 만들 수 없는 schema 기반을 갖는다.
+
 ## 3. 장기 보류
 
 다음 항목은 위 단계가 안정화된 뒤 검토한다.
@@ -213,7 +233,6 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 
 ## 5. 바로 다음 작업
 
-S39에서는 `SceneDocument v4`의 additive migration 기반과 뷰포트 선택 잠금을 구현한다. 기존
-v1~v3 장면에는 잠금 해제, 빈 group/spatial relation, 기본 visualization/appearance 값을 넣고,
-첫 vertical slice는 `viewportSelectionLocked`만 UI에 노출한다. 잠긴 오브젝트는 Outliner에서
-선택·편집할 수 있지만 뷰포트 hit target에서는 제외되어 뒤쪽 오브젝트 선택을 방해하지 않아야 한다.
+S40에서는 v4 `groups`를 사용하는 translate-only 그룹화를 구현한다. Outliner 다중 선택과 그룹
+생성·해제, 그룹 선택 상태를 도입하고, 그룹 이동은 모든 멤버에 같은 월드 delta를 적용하는 하나의
+history mutation이어야 한다. 회전·스케일·중첩 그룹·그룹 복제는 이번 단계에서 제외한다.

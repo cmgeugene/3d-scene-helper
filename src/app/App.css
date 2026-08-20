@@ -2472,6 +2472,12 @@ p {
   list-style: none;
 }
 
+.outliner-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 2rem;
+  gap: 0.25rem;
+}
+
 .outliner-item {
   display: flex;
   width: 100%;
@@ -2482,6 +2488,30 @@ p {
   color: #cbd5e4;
   background: transparent;
   text-align: left;
+}
+
+.outliner-lock {
+  display: grid;
+  min-width: 2rem;
+  min-height: 2rem;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #2d3c53;
+  border-radius: 0.45rem;
+  color: #aebbd0;
+  background: #151d29;
+}
+
+.outliner-lock:hover,
+.outliner-lock:focus-visible {
+  border-color: #557bb5;
+  color: #fff;
+}
+
+.outliner-lock[aria-pressed='true'] {
+  border-color: #d5a84a;
+  color: #ffd982;
+  background: #3b2e16;
 }
 
 .outliner-item[aria-pressed='true'] {

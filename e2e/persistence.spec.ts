@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 
-const STORAGE_KEY = 'i2v-3d-scene-helper:scene:v3';
+const STORAGE_KEY = 'i2v-3d-scene-helper:scene:v4';
 
 interface BrowserStorageGlobal {
   localStorage: {
@@ -39,7 +39,7 @@ test('persistence refresh restores the latest autosaved scene', async ({
   page,
 }) => {
   await openPersistence(page);
-  await page.getByRole('button', { name: '큐브 추가' }).click();
+  await page.getByRole('button', { name: '큐브 추가', exact: true }).click();
   await page.getByRole('button', { name: '평면 추가' }).click();
   await expect(
     page.getByRole('button', { name: 'Cube', exact: true }),
@@ -47,6 +47,11 @@ test('persistence refresh restores the latest autosaved scene', async ({
   await expect(
     page.getByRole('button', { name: 'Plane', exact: true }),
   ).toBeVisible();
+  const cubeLock = page.getByRole('button', {
+    name: 'Cube 뷰포트 선택 잠금',
+  });
+  await cubeLock.click();
+  await expect(cubeLock).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('canvas[data-engine]')).toHaveAttribute(
     'data-surface-grid-kinds',
     'floor,cube,plane',
@@ -59,6 +64,7 @@ test('persistence refresh restores the latest autosaved scene', async ({
     STORAGE_KEY,
   );
   expect(serializedBeforeReload).not.toBeNull();
+  expect(JSON.parse(serializedBeforeReload!).version).toBe(4);
 
   await page.reload();
   await expect(page.locator('[data-webgl-state]')).toHaveAttribute(
@@ -71,6 +77,9 @@ test('persistence refresh restores the latest autosaved scene', async ({
   await expect(
     page.getByRole('button', { name: 'Plane', exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Cube 뷰포트 선택 잠금' }),
+  ).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('canvas[data-engine]')).toHaveAttribute(
     'data-surface-grid-kinds',
     'floor,cube,plane',
@@ -90,7 +99,7 @@ test('restored autosave is not reused by new scene or starter reset', async ({
   page,
 }) => {
   await openPersistence(page);
-  await page.getByRole('button', { name: '큐브 추가' }).click();
+  await page.getByRole('button', { name: '큐브 추가', exact: true }).click();
   await waitForAutosave(page);
   await page.reload();
   await expect(
@@ -118,7 +127,7 @@ test('restored autosave is not reused by new scene or starter reset', async ({
     page.getByRole('button', { name: 'Floor', exact: true }),
   ).toHaveCount(0);
 
-  await page.getByRole('button', { name: '큐브 추가' }).click();
+  await page.getByRole('button', { name: '큐브 추가', exact: true }).click();
   await waitForAutosave(page);
   await page.reload();
   await expect(
@@ -154,7 +163,7 @@ test('persistence malformed import preserves the live scene and valid autosave',
   page,
 }) => {
   await openPersistence(page);
-  await page.getByRole('button', { name: '큐브 추가' }).click();
+  await page.getByRole('button', { name: '큐브 추가', exact: true }).click();
   await waitForAutosave(page);
 
   const before = await page.evaluate((key) => {
@@ -204,7 +213,7 @@ test('persistence exports validated scene JSON and undo shortcuts respect input 
   page,
 }) => {
   await openPersistence(page);
-  await page.getByRole('button', { name: '큐브 추가' }).click();
+  await page.getByRole('button', { name: '큐브 추가', exact: true }).click();
 
   const screenRatio = page.getByLabel('화면비');
   await screenRatio.focus();
@@ -236,6 +245,6 @@ test('persistence exports validated scene JSON and undo shortcuts respect input 
     version: number;
     objects: Array<{ kind: string }>;
   };
-  expect(exported.version).toBe(3);
+  expect(exported.version).toBe(4);
   expect(exported.objects.some(({ kind }) => kind === 'cube')).toBe(true);
 });

@@ -21,6 +21,7 @@ import {
   createDefaultSemanticSceneSpec,
   semanticSceneSpecSchema,
 } from './semanticSceneSpec';
+import { migrateSceneDocument } from './sceneMigration';
 
 const stableIdSchema = z.string().trim().min(1);
 
@@ -98,6 +99,19 @@ const semanticObjectSchema = z.strictObject({
   generationNotes: z.string().trim().max(MAX_GENERATION_NOTES_LENGTH),
 });
 
+const objectVisualizationSchema = z
+  .strictObject({
+    proxyOpacity: z.number().min(0.05).max(1),
+  })
+  .default({ proxyOpacity: 1 });
+
+const objectAppearanceIntentSchema = z
+  .strictObject({
+    surfaceType: z.enum(['opaque', 'transparent', 'translucent', 'mirror']),
+    materialNotes: z.string().trim().max(MAX_GENERATION_NOTES_LENGTH),
+  })
+  .default({ surfaceType: 'opaque', materialNotes: '' });
+
 const validatedSceneObjectSchema = z
   .strictObject({
     id: stableIdSchema,
@@ -119,6 +133,9 @@ const validatedSceneObjectSchema = z
     color: z.string().regex(/^#[0-9a-f]{6}$/i),
     visible: z.boolean(),
     exportable: z.boolean(),
+    viewportSelectionLocked: z.boolean().default(false),
+    visualization: objectVisualizationSchema,
+    appearanceIntent: objectAppearanceIntentSchema,
     semantic: semanticObjectSchema.optional(),
     mannequinPose: mannequinPoseSchema.optional(),
     mannequinBodyType: z.enum(MANNEQUIN_BODY_TYPE_IDS).optional(),
@@ -283,12 +300,55 @@ const generationSourceSchema = z.strictObject({
   versionNumber: z.number().int().positive(),
 });
 
+const sceneObjectGroupSchema = z.strictObject({
+  id: stableIdSchema,
+  name: z.string().trim().min(1).max(MAX_OBJECT_NAME_LENGTH),
+  memberObjectIds: z
+    .array(stableIdSchema)
+    .min(2)
+    .refine((ids) => new Set(ids).size === ids.length, {
+      message: 'Group members must be unique',
+    }),
+});
+
+const containsSpatialRelationSchema = z.strictObject({
+  id: stableIdSchema,
+  type: z.literal('contains'),
+  containerObjectId: stableIdSchema,
+  containedObjectId: stableIdSchema,
+  visibility: z.enum([
+    'occluded',
+    'through-opening',
+    'through-transparent-surface',
+    'cutaway',
+  ]),
+});
+
+const reflectsSpatialRelationSchema = z.strictObject({
+  id: stableIdSchema,
+  type: z.literal('reflects'),
+  mirrorObjectId: stableIdSchema,
+  reflectedObjectIds: z
+    .array(stableIdSchema)
+    .min(1)
+    .refine((ids) => new Set(ids).size === ids.length, {
+      message: 'Reflected object IDs must be unique',
+    }),
+});
+
+const spatialRelationSchema = z.discriminatedUnion('type', [
+  containsSpatialRelationSchema,
+  reflectsSpatialRelationSchema,
+]);
+
 export const sceneDocumentSchema = z
   .strictObject({
     version: z.literal(SCENE_DOCUMENT_VERSION),
     id: stableIdSchema,
     name: z.string(),
     objects: z.array(sceneObjectSchema),
+    groups: z.array(sceneObjectGroupSchema).default([]),
+    spatialRelations: z.array(spatialRelationSchema).default([]),
     outputCamera: outputCameraSchema,
     lighting: lightingSchema,
     background: backgroundSchema,
@@ -306,6 +366,7 @@ export const sceneDocumentSchema = z
   })
   .superRefine((document, context) => {
     const objectIds = new Set<string>();
+    const objectsById = new Map<string, (typeof document.objects)[number]>();
 
     document.objects.forEach((object, index) => {
       if (objectIds.has(object.id)) {
@@ -316,7 +377,157 @@ export const sceneDocumentSchema = z
         });
       }
       objectIds.add(object.id);
+      objectsById.set(object.id, object);
     });
+
+    const groupIds = new Set<string>();
+    const groupedObjectIds = new Set<string>();
+    document.groups.forEach((group, groupIndex) => {
+      if (groupIds.has(group.id)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Group IDs must be unique',
+          path: ['groups', groupIndex, 'id'],
+        });
+      }
+      groupIds.add(group.id);
+
+      group.memberObjectIds.forEach((objectId, memberIndex) => {
+        if (!objectIds.has(objectId)) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Group members must reference existing objects',
+            path: ['groups', groupIndex, 'memberObjectIds', memberIndex],
+          });
+        }
+        if (objectsById.get(objectId)?.kind === 'floor') {
+          context.addIssue({
+            code: 'custom',
+            message: 'Floor objects cannot be grouped',
+            path: ['groups', groupIndex, 'memberObjectIds', memberIndex],
+          });
+        }
+        if (groupedObjectIds.has(objectId)) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Objects may belong to at most one group',
+            path: ['groups', groupIndex, 'memberObjectIds', memberIndex],
+          });
+        }
+        groupedObjectIds.add(objectId);
+      });
+    });
+
+    const relationIds = new Set<string>();
+    const containmentEdges = new Set<string>();
+    const containmentGraph = new Map<string, Set<string>>();
+    document.spatialRelations.forEach((relation, relationIndex) => {
+      if (relationIds.has(relation.id)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Spatial relation IDs must be unique',
+          path: ['spatialRelations', relationIndex, 'id'],
+        });
+      }
+      relationIds.add(relation.id);
+
+      if (relation.type === 'contains') {
+        for (const key of ['containerObjectId', 'containedObjectId'] as const) {
+          if (!objectIds.has(relation[key])) {
+            context.addIssue({
+              code: 'custom',
+              message: 'Containment must reference existing objects',
+              path: ['spatialRelations', relationIndex, key],
+            });
+          }
+        }
+        if (relation.containerObjectId === relation.containedObjectId) {
+          context.addIssue({
+            code: 'custom',
+            message: 'An object cannot contain itself',
+            path: ['spatialRelations', relationIndex, 'containedObjectId'],
+          });
+        }
+        const edge = `${relation.containerObjectId}\u0000${relation.containedObjectId}`;
+        if (containmentEdges.has(edge)) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Duplicate containment is not allowed',
+            path: ['spatialRelations', relationIndex],
+          });
+        }
+        containmentEdges.add(edge);
+        const children =
+          containmentGraph.get(relation.containerObjectId) ?? new Set<string>();
+        children.add(relation.containedObjectId);
+        containmentGraph.set(relation.containerObjectId, children);
+        return;
+      }
+
+      const mirror = objectsById.get(relation.mirrorObjectId);
+      if (mirror === undefined) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Reflection must reference an existing mirror object',
+          path: ['spatialRelations', relationIndex, 'mirrorObjectId'],
+        });
+      } else if (
+        mirror.kind !== 'plane' ||
+        mirror.appearanceIntent.surfaceType !== 'mirror'
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Reflection surfaces must be mirror plane objects',
+          path: ['spatialRelations', relationIndex, 'mirrorObjectId'],
+        });
+      }
+      relation.reflectedObjectIds.forEach((objectId, objectIndex) => {
+        if (!objectIds.has(objectId)) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Reflection targets must reference existing objects',
+            path: [
+              'spatialRelations',
+              relationIndex,
+              'reflectedObjectIds',
+              objectIndex,
+            ],
+          });
+        }
+        if (objectId === relation.mirrorObjectId) {
+          context.addIssue({
+            code: 'custom',
+            message: 'A mirror cannot reflect itself',
+            path: [
+              'spatialRelations',
+              relationIndex,
+              'reflectedObjectIds',
+              objectIndex,
+            ],
+          });
+        }
+      });
+    });
+
+    const visitState = new Map<string, 'visiting' | 'visited'>();
+    const hasContainmentCycle = (objectId: string): boolean => {
+      const state = visitState.get(objectId);
+      if (state === 'visiting') return true;
+      if (state === 'visited') return false;
+      visitState.set(objectId, 'visiting');
+      for (const childId of containmentGraph.get(objectId) ?? []) {
+        if (hasContainmentCycle(childId)) return true;
+      }
+      visitState.set(objectId, 'visited');
+      return false;
+    };
+    if ([...objectIds].some(hasContainmentCycle)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Containment relationships cannot form a cycle',
+        path: ['spatialRelations'],
+      });
+    }
 
     if (
       document.subjectMotionGuide !== undefined &&
@@ -342,8 +553,15 @@ export const sceneDocumentSchema = z
     });
   });
 
+export const migratedSceneDocumentSchema = z.preprocess(
+  migrateSceneDocument,
+  sceneDocumentSchema,
+);
+
 export type SceneDocument = z.infer<typeof sceneDocumentSchema>;
 export type SceneObject = SceneDocument['objects'][number];
+export type SceneObjectGroup = SceneDocument['groups'][number];
+export type SpatialRelation = SceneDocument['spatialRelations'][number];
 export type MannequinPose = z.infer<typeof mannequinPoseSchema>;
 
 export interface StarterSceneIds {

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 
-const STORAGE_KEY = 'i2v-3d-scene-helper:scene:v3';
+const STORAGE_KEY = 'i2v-3d-scene-helper:scene:v4';
 
 interface GoldenPathState {
   document: {
@@ -84,7 +84,7 @@ test('golden path completes starter scene to saved 1080×1920 clean PNG without 
     },
   });
 
-  await page.getByRole('button', { name: '큐브 추가' }).click();
+  await page.getByRole('button', { name: '큐브 추가', exact: true }).click();
   await page.getByLabel('위치 X').fill('1.25');
   await page.getByLabel('위치 X').press('Enter');
   await page.getByLabel('화면비').selectOption('9:16');
@@ -231,7 +231,10 @@ test('keyboard-only flow, focus guards, labels, contrast, modal trap, and live f
   for (const ratio of contrastRatios) expect(ratio).toBeGreaterThanOrEqual(4.5);
 
   await page.locator('body').focus();
-  const addCube = page.getByRole('button', { name: '큐브 추가' });
+  const addCube = page.getByRole('button', {
+    name: '큐브 추가',
+    exact: true,
+  });
   await tabTo(page, addCube);
   const focusStyle = await addCube.evaluate((element) => {
     const style = element.ownerDocument.defaultView?.getComputedStyle(element);
@@ -310,7 +313,7 @@ test('WebGL context loss shows a fallback while preserving the serialized scene'
   page,
 }) => {
   await openEditor(page);
-  await page.getByRole('button', { name: '큐브 추가' }).click();
+  await page.getByRole('button', { name: '큐브 추가', exact: true }).click();
   const before = (await readEditorState(page)).document;
 
   await page.locator('canvas[data-engine]').dispatchEvent('webglcontextlost');

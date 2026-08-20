@@ -23,6 +23,15 @@ interface BrowserEditorState {
   inProgressTransform: unknown;
 }
 
+interface BrowserEditorActions {
+  addObject(input: { kind: 'cube'; name: string }): string;
+  beginTransform(): void;
+  commitTransform(transform: Transform): void;
+  deleteObject(id: string): void;
+  selectObject(id: string | null): void;
+  setObjectViewportSelectionLocked(id: string, locked: boolean): void;
+}
+
 interface BrowserEditorStore {
   getState: () => BrowserEditorState;
   subscribe: (
@@ -301,6 +310,78 @@ test('manipulation attaches TransformControls to selected root and switches W/E/
   await expect(canvas).toHaveAttribute('data-transform-mode', 'scale');
   await page.keyboard.press('w');
   await expect(canvas).toHaveAttribute('data-transform-mode', 'translate');
+});
+
+test('viewport selection lock passes a click through to an unlocked object behind it while Outliner selection remains available', async ({
+  page,
+}) => {
+  const canvas = await openManipulation(page);
+  const ids = await page.evaluate(() => {
+    const store = (globalThis as unknown as ManipulationBridge)
+      .__I2V_EDITOR_STORE__ as unknown as {
+      getState(): BrowserEditorState & BrowserEditorActions;
+    };
+    const initial = store.getState();
+    initial.deleteObject('starter-mannequin');
+
+    const backId = store
+      .getState()
+      .addObject({ kind: 'cube', name: 'Back target' });
+    store.getState().beginTransform();
+    store.getState().commitTransform({
+      position: { x: 0, y: 1.6, z: 1 },
+      rotationDeg: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    });
+
+    const frontId = store
+      .getState()
+      .addObject({ kind: 'cube', name: 'Locked foreground' });
+    store.getState().beginTransform();
+    store.getState().commitTransform({
+      position: { x: 0, y: 1.6, z: -1 },
+      rotationDeg: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    });
+    store.getState().setObjectViewportSelectionLocked(frontId, true);
+    store.getState().selectObject(null);
+    return { backId, frontId };
+  });
+
+  const bounds = await canvas.boundingBox();
+  expect(bounds).not.toBeNull();
+  if (bounds === null) throw new Error('Canvas bounds가 없습니다.');
+  await page.mouse.click(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+  );
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            globalThis as unknown as ManipulationBridge
+          ).__I2V_EDITOR_STORE__?.getState().selectedObjectId,
+      ),
+    )
+    .toBe(ids.backId);
+  await expect(
+    page.getByRole('button', { name: 'Back target', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    page.getByRole('button', {
+      name: 'Locked foreground 뷰포트 선택 잠금',
+    }),
+  ).toHaveAttribute('aria-pressed', 'true');
+
+  await page
+    .getByRole('button', { name: 'Locked foreground', exact: true })
+    .click();
+  await expect(canvas).toHaveAttribute(
+    'data-transform-object',
+    `scene-object:${ids.frontId}`,
+  );
 });
 
 test('Room Set scale preview expands grid coverage without scaling its 0.5m cells', async ({

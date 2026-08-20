@@ -341,7 +341,11 @@ export function SceneObject({
     <group
       ref={rootRef}
       name={model.testName}
-      userData={{ sceneObjectId: object.id, displayName: model.displayName }}
+      userData={{
+        sceneObjectId: object.id,
+        displayName: model.displayName,
+        viewportSelectionLocked: object.viewportSelectionLocked,
+      }}
       position={[position.x, position.y, position.z]}
       rotation={[
         MathUtils.degToRad(rotationDeg.x),
@@ -351,6 +355,7 @@ export function SceneObject({
       scale={[scale.x, scale.y, scale.z]}
       visible={object.visible}
       onClick={(event) => {
+        if (object.viewportSelectionLocked) return;
         event.stopPropagation();
         if (consumeObjectSelectionSuppression()) return;
         onSelect(object.id);

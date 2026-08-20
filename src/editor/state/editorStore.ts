@@ -67,6 +67,7 @@ export const DOCUMENT_MUTATION_KINDS = [
   'duplicate-object',
   'commit-transform',
   'update-object-property',
+  'update-object-selection-lock',
   'commit-camera',
   'update-lighting-background',
   'update-output',
@@ -122,6 +123,7 @@ export interface EditorStore {
   setObjectSemantic: (id: string, semantic: SceneObject['semantic']) => void;
   setObjectColor: (id: string, color: string) => void;
   setObjectVisibility: (id: string, visible: boolean) => void;
+  setObjectViewportSelectionLocked: (id: string, locked: boolean) => void;
   applyMannequinBodyTypePreset: (bodyType: MannequinBodyTypeId) => void;
   applyMannequinPosePreset: (presetId: MannequinPosePresetId) => void;
   beginMannequinPose: () => void;
@@ -262,6 +264,7 @@ export function createEditorStore(options: EditorStoreOptions) {
     set: StoreApi<EditorStore>['setState'],
     id: string,
     update: Partial<SceneObject>,
+    mutationKind: DocumentMutationKind = 'update-object-property',
   ) => {
     set((state) => {
       if (!state.document.objects.some((object) => object.id === id)) {
@@ -275,7 +278,7 @@ export function createEditorStore(options: EditorStoreOptions) {
         ),
       });
       return {
-        ...recordMutation(state, nextDocument, 'update-object-property'),
+        ...recordMutation(state, nextDocument, mutationKind),
       };
     });
   };
@@ -368,6 +371,14 @@ export function createEditorStore(options: EditorStoreOptions) {
     },
     setObjectVisibility: (id, visible) => {
       updateObject(set, id, { visible });
+    },
+    setObjectViewportSelectionLocked: (id, locked) => {
+      updateObject(
+        set,
+        id,
+        { viewportSelectionLocked: locked },
+        'update-object-selection-lock',
+      );
     },
     applyMannequinBodyTypePreset: (bodyType) => {
       set((state) => {
@@ -565,9 +576,38 @@ export function createEditorStore(options: EditorStoreOptions) {
           return state;
         }
 
+        const spatialRelations: SceneDocument['spatialRelations'] = [];
+        state.document.spatialRelations.forEach((relation) => {
+          if (relation.type === 'contains') {
+            if (
+              relation.containerObjectId !== id &&
+              relation.containedObjectId !== id
+            ) {
+              spatialRelations.push(relation);
+            }
+            return;
+          }
+          if (relation.mirrorObjectId === id) return;
+          const reflectedObjectIds = relation.reflectedObjectIds.filter(
+            (objectId) => objectId !== id,
+          );
+          if (reflectedObjectIds.length > 0) {
+            spatialRelations.push({ ...relation, reflectedObjectIds });
+          }
+        });
+
         const documentWithoutObject = {
           ...state.document,
           objects: state.document.objects.filter((object) => object.id !== id),
+          groups: state.document.groups.flatMap((group) => {
+            const memberObjectIds = group.memberObjectIds.filter(
+              (objectId) => objectId !== id,
+            );
+            return memberObjectIds.length >= 2
+              ? [{ ...group, memberObjectIds }]
+              : [];
+          }),
+          spatialRelations,
           semanticSceneSpec: {
             ...state.document.semanticSceneSpec,
             relationships:

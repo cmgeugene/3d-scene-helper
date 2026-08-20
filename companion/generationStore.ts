@@ -13,6 +13,7 @@ import sharp from 'sharp';
 import { z } from 'zod';
 import { layoutSpecSchema, type LayoutSpec } from '../shared/layoutSpecSchema';
 import {
+  migratedSceneDocumentSchema,
   sceneDocumentSchema,
   type SceneDocument,
 } from '../src/editor/persistence/sceneSchema';
@@ -123,7 +124,7 @@ const generationSchema = z
       .nullable()
       .default(null),
     layoutSpec: layoutSpecSchema.nullable().default(null),
-    sceneSnapshot: sceneDocumentSchema.nullable().default(null),
+    sceneSnapshot: migratedSceneDocumentSchema.nullable().default(null),
     semanticSceneSpecSnapshot: semanticSceneSpecSchema.nullable().default(null),
     referenceSnapshots: z.array(publicReferenceSchema).default([]),
     parentGenerationId: z.string().min(1).nullable().default(null),

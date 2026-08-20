@@ -1,4 +1,4 @@
-export const SCENE_DOCUMENT_VERSION = 3 as const;
+export const SCENE_DOCUMENT_VERSION = 4 as const;
 export const FILM_GAUGE_MM = 36 as const;
 export const MANNEQUIN_REFERENCE_HEIGHT_M = 1.7 as const;
 export const MAX_SCENE_NOTES_LENGTH = 2000 as const;
@@ -29,6 +29,7 @@ export const ASPECT_RATIO_VALUES = {
 export const STORAGE_NAMESPACE = 'i2v-3d-scene-helper' as const;
 export const SCENE_STORAGE_KEY = `${STORAGE_NAMESPACE}:scene:v${SCENE_DOCUMENT_VERSION}`;
 export const LEGACY_SCENE_STORAGE_KEYS = [
+  `${STORAGE_NAMESPACE}:scene:v3`,
   `${STORAGE_NAMESPACE}:scene:v2`,
   `${STORAGE_NAMESPACE}:scene:v1`,
 ] as const;

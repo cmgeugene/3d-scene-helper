@@ -79,7 +79,7 @@ describe('sceneDocumentSchema', () => {
 
     expect(parsed).toEqual(document);
     expect(parsed.id).toBe('scene-starter');
-    expect(parsed.version).toBe(3);
+    expect(parsed.version).toBe(4);
     expect(parsed.objects).toHaveLength(2);
     expect(parsed.objects.find(({ kind }) => kind === 'floor')).toMatchObject({
       id: 'object-floor',
@@ -154,6 +154,89 @@ describe('sceneDocumentSchema', () => {
   it('중복 object ID를 거부한다', () => {
     const document = createStarterSceneDocument(STARTER_IDS);
     document.objects[1].id = document.objects[0].id;
+
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+  });
+
+  it('v4 오브젝트 authoring 기본값과 빈 group/spatial relation을 생성한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+
+    expect(document.groups).toEqual([]);
+    expect(document.spatialRelations).toEqual([]);
+    expect(document.objects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          viewportSelectionLocked: false,
+          visualization: { proxyOpacity: 1 },
+          appearanceIntent: { surfaceType: 'opaque', materialNotes: '' },
+        }),
+      ]),
+    );
+  });
+
+  it('group membership와 containment/reflection 관계 무결성을 검증한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    const container = createSceneObject('container', { kind: 'cube' });
+    const contained = createSceneObject('contained', { kind: 'sphere' });
+    const mirror = createSceneObject('mirror', { kind: 'plane' });
+    mirror.appearanceIntent.surfaceType = 'mirror';
+    document.objects.push(container, contained, mirror);
+    document.groups = [
+      {
+        id: 'group-1',
+        name: 'Props',
+        memberObjectIds: [container.id, contained.id],
+      },
+    ];
+    document.spatialRelations = [
+      {
+        id: 'contains-1',
+        type: 'contains',
+        containerObjectId: container.id,
+        containedObjectId: contained.id,
+        visibility: 'cutaway',
+      },
+      {
+        id: 'reflects-1',
+        type: 'reflects',
+        mirrorObjectId: mirror.id,
+        reflectedObjectIds: [contained.id],
+      },
+    ];
+
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(true);
+
+    document.groups.push({
+      id: 'group-2',
+      name: 'Duplicate membership',
+      memberObjectIds: [container.id, mirror.id],
+    });
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+    document.groups.pop();
+
+    document.spatialRelations.push({
+      id: 'contains-cycle',
+      type: 'contains',
+      containerObjectId: contained.id,
+      containedObjectId: container.id,
+      visibility: 'occluded',
+    });
+    expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
+  });
+
+  it('mirror relation은 mirror appearance의 plane만 허용한다', () => {
+    const document = createStarterSceneDocument(STARTER_IDS);
+    const invalidMirror = createSceneObject('mirror-cube', { kind: 'cube' });
+    invalidMirror.appearanceIntent.surfaceType = 'mirror';
+    document.objects.push(invalidMirror);
+    document.spatialRelations = [
+      {
+        id: 'reflects-invalid',
+        type: 'reflects',
+        mirrorObjectId: invalidMirror.id,
+        reflectedObjectIds: [STARTER_IDS.mannequinId],
+      },
+    ];
 
     expect(sceneDocumentSchema.safeParse(document).success).toBe(false);
   });
@@ -277,7 +360,7 @@ describe('sceneDocumentSchema', () => {
     );
 
     expect(parsed).toEqual(document);
-    expect(parsed.version).toBe(3);
+    expect(parsed.version).toBe(4);
 
     if (parsed.subjectMotionGuide === undefined) {
       throw new Error('subject motion guide was not restored');
