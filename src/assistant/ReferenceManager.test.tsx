@@ -422,6 +422,95 @@ describe('ReferenceManager', () => {
     ).toBeDisabled();
   });
 
+  it('선택된 레퍼런스만 한 번에 삭제한다', async () => {
+    const user = userEvent.setup();
+    const references = [
+      characterReference,
+      {
+        ...characterReference,
+        id: 'ref-2',
+        artifactId: 'artifact-2',
+        name: '선택한 배경',
+      },
+      {
+        ...characterReference,
+        id: 'ref-3',
+        artifactId: 'artifact-3',
+        name: '남길 스타일',
+        enabled: false,
+      },
+    ];
+    const deleteReference = vi.fn(async (id: string) => id);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const client = {
+      listReferences: async () => references,
+      importReference: async () => references[0]!,
+      loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference,
+      updateReference: unusedDelete,
+    };
+    render(
+      <ReferenceManager
+        connection={connection}
+        clientFactory={() => client}
+        createObjectUrl={() => `blob:reference-${Math.random()}`}
+        revokeObjectUrl={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText('남길 스타일')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '선택 항목 삭제' }));
+
+    await waitFor(() => expect(deleteReference).toHaveBeenCalledTimes(2));
+    expect(deleteReference).toHaveBeenCalledWith('ref-1');
+    expect(deleteReference).toHaveBeenCalledWith('ref-2');
+    expect(deleteReference).not.toHaveBeenCalledWith('ref-3');
+    expect(screen.queryByText('정민 캐릭터 시트')).not.toBeInTheDocument();
+    expect(screen.queryByText('선택한 배경')).not.toBeInTheDocument();
+    expect(screen.getByText('남길 스타일')).toBeVisible();
+    confirm.mockRestore();
+  });
+
+  it('전체 삭제로 선택 여부와 관계없이 모든 레퍼런스를 삭제한다', async () => {
+    const user = userEvent.setup();
+    const references = [
+      characterReference,
+      {
+        ...characterReference,
+        id: 'ref-2',
+        artifactId: 'artifact-2',
+        name: '선택하지 않은 배경',
+        enabled: false,
+      },
+    ];
+    const deleteReference = vi.fn(async (id: string) => id);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const client = {
+      listReferences: async () => references,
+      importReference: async () => references[0]!,
+      loadReferenceBlob: async () => new Blob(['image'], { type: 'image/png' }),
+      deleteReference,
+      updateReference: unusedDelete,
+    };
+    render(
+      <ReferenceManager
+        connection={connection}
+        clientFactory={() => client}
+        createObjectUrl={() => `blob:reference-${Math.random()}`}
+        revokeObjectUrl={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText('선택하지 않은 배경')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '전체 삭제' }));
+
+    await waitFor(() => expect(deleteReference).toHaveBeenCalledTimes(2));
+    expect(deleteReference).toHaveBeenCalledWith('ref-1');
+    expect(deleteReference).toHaveBeenCalledWith('ref-2');
+    expect(screen.getByText(/이미지를 끌어다 놓거나 가져오기로/)).toBeVisible();
+    confirm.mockRestore();
+  });
+
   it('확인 후 레퍼런스를 삭제하고 썸네일 URL을 해제한다', async () => {
     const user = userEvent.setup();
     const deleteReference = vi.fn(async () => 'ref-1');

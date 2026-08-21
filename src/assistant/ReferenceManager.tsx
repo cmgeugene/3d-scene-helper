@@ -167,6 +167,7 @@ function ConnectedReferenceManager({
   const [useScope, setUseScope] = useState('');
   const [excludeScope, setExcludeScope] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const objectUrls = useRef(new Set<string>());
@@ -408,35 +409,72 @@ function ConnectedReferenceManager({
     [client, maximumSelected, selectionAtLimit, updateCard],
   );
 
-  const deleteCard = useCallback(
-    async (reference: ReferenceCard) => {
-      if (
-        !window.confirm(
-          `"${reference.name}" 레퍼런스를 프로젝트에서 삭제할까요?`,
-        )
-      ) {
+  const deleteCards = useCallback(
+    async (cards: ReferenceCard[], confirmation: string) => {
+      if (deleting || cards.length === 0 || !window.confirm(confirmation))
         return;
-      }
+
+      setDeleting(true);
       setError(null);
       try {
-        await client.deleteReference(reference.id);
-        setReferences((current) =>
-          current.filter(({ id }) => id !== reference.id),
+        const results = await Promise.allSettled(
+          cards.map((reference) => client.deleteReference(reference.id)),
         );
-        objectUrls.current.delete(reference.thumbnailUrl);
-        revokeObjectUrl(reference.thumbnailUrl);
-        if (editingId === reference.id) {
+        const deletedCards = cards.filter(
+          (_reference, index) => results[index]?.status === 'fulfilled',
+        );
+        const deletedIds = new Set(deletedCards.map(({ id }) => id));
+
+        setReferences((current) =>
+          current.filter(({ id }) => !deletedIds.has(id)),
+        );
+        for (const reference of deletedCards) {
+          objectUrls.current.delete(reference.thumbnailUrl);
+          revokeObjectUrl(reference.thumbnailUrl);
+        }
+        if (editingId !== null && deletedIds.has(editingId)) {
           setEditingId(null);
         }
-      } catch (reason) {
-        setError(
-          reason instanceof Error
-            ? reason.message
-            : '레퍼런스를 삭제하지 못했습니다.',
-        );
+        const failedCount = cards.length - deletedCards.length;
+        if (failedCount > 0) {
+          setError(
+            deletedCards.length === 0
+              ? '레퍼런스를 삭제하지 못했습니다.'
+              : `${deletedCards.length}개를 삭제했지만 ${failedCount}개는 삭제하지 못했습니다.`,
+          );
+        }
+      } finally {
+        setDeleting(false);
       }
     },
-    [client, editingId, revokeObjectUrl],
+    [client, deleting, editingId, revokeObjectUrl],
+  );
+
+  const deleteCard = useCallback(
+    (reference: ReferenceCard) =>
+      deleteCards(
+        [reference],
+        `"${reference.name}" 레퍼런스를 프로젝트에서 삭제할까요?`,
+      ),
+    [deleteCards],
+  );
+
+  const deleteSelectedCards = useCallback(
+    () =>
+      deleteCards(
+        references.filter(({ enabled }) => enabled),
+        `선택한 레퍼런스 ${selectedCount}개를 프로젝트에서 삭제할까요? 이 작업은 되돌릴 수 없습니다.`,
+      ),
+    [deleteCards, references, selectedCount],
+  );
+
+  const deleteAllCards = useCallback(
+    () =>
+      deleteCards(
+        references,
+        `프로젝트의 레퍼런스 ${references.length}개를 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.`,
+      ),
+    [deleteCards, references],
   );
 
   const beginEditing = useCallback((reference: ReferenceCard) => {
@@ -524,6 +562,22 @@ function ConnectedReferenceManager({
               onChange={chooseFile}
             />
           </label>
+          <button
+            type="button"
+            className="reference-bulk-delete-button"
+            disabled={loading || deleting || selectedCount === 0}
+            onClick={() => void deleteSelectedCards()}
+          >
+            {deleting ? '삭제 중…' : '선택 항목 삭제'}
+          </button>
+          <button
+            type="button"
+            className="reference-bulk-delete-button reference-delete-all-button"
+            disabled={loading || deleting || references.length === 0}
+            onClick={() => void deleteAllCards()}
+          >
+            전체 삭제
+          </button>
           <ReferenceTrayToggle
             collapsed={collapsed}
             onToggleCollapsed={onToggleCollapsed}
@@ -650,7 +704,9 @@ function ConnectedReferenceManager({
                 <input
                   type="checkbox"
                   checked={reference.enabled}
-                  disabled={!reference.enabled && selectionAtLimit}
+                  disabled={
+                    deleting || (!reference.enabled && selectionAtLimit)
+                  }
                   onChange={() => void toggleSelection(reference)}
                   aria-label={`${reference.name} 생성에 포함`}
                   aria-describedby="reference-selection-budget"
@@ -672,13 +728,18 @@ function ConnectedReferenceManager({
                 </span>
               </label>
               <div className="reference-card-actions">
-                <button type="button" onClick={() => beginEditing(reference)}>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => beginEditing(reference)}
+                >
                   {reference.targetObjectId === null
                     ? '설정'
                     : `연결 · ${targets.find(({ id }) => id === reference.targetObjectId)?.name ?? reference.targetObjectId}`}
                 </button>
                 <button
                   type="button"
+                  disabled={deleting}
                   onClick={() => void deleteCard(reference)}
                   aria-label={`${reference.name} 삭제`}
                 >

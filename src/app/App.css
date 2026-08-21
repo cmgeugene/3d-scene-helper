@@ -2163,7 +2163,8 @@ p {
 }
 
 .reference-manager--collapsed .reference-selection-count,
-.reference-manager--collapsed .reference-import-button {
+.reference-manager--collapsed .reference-import-button,
+.reference-manager--collapsed .reference-bulk-delete-button {
   display: none;
 }
 
@@ -2174,7 +2175,8 @@ p {
   line-height: 1.35;
 }
 
-.reference-import-button {
+.reference-import-button,
+.reference-bulk-delete-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2187,6 +2189,18 @@ p {
   font-weight: 700;
   background: #1a2d4d;
   cursor: pointer;
+}
+
+.reference-bulk-delete-button {
+  color: #ffb3a6;
+  border-color: #68443d;
+  background: #2b1818;
+}
+
+.reference-delete-all-button {
+  color: #ffd0c8;
+  border-color: #8a4a40;
+  background: #3a1a1a;
 }
 
 .reference-import-button input {
