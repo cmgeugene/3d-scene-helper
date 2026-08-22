@@ -123,6 +123,24 @@ describe('createLayoutSpec', () => {
     expect(person?.facing?.screenDirection?.y).toBeGreaterThan(0);
   });
 
+  it('리깅 GLB 캐릭터를 정면 정보가 있는 subject로 계약화한다', () => {
+    const scene = createScene();
+    scene.objects.push(
+      createSceneObject('meshy-character', { kind: 'character-glb' }),
+    );
+
+    const character = createLayoutSpec(scene).objects.find(
+      ({ objectId }) => objectId === 'meshy-character',
+    );
+    expect(character).toMatchObject({
+      kind: 'character-glb',
+      role: 'subject',
+      poseId: null,
+      facing: { relativeToCamera: 'toward-camera' },
+      worldBounds: { size: { y: 1.7 } },
+    });
+  });
+
   it('오브젝트에 저장한 실제 의미와 생성 메모를 계약에 포함한다', () => {
     const scene = createScene();
     const pole = scene.objects.find(({ id }) => id === 'pole-near');

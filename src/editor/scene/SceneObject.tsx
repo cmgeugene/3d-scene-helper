@@ -1,4 +1,5 @@
 import {
+  Suspense,
   useCallback,
   useLayoutEffect,
   useMemo,
@@ -26,6 +27,9 @@ import {
 } from './MannequinIKControls';
 import { PlanarMirror } from './PlanarMirror';
 import { RoomSet } from './RoomSet';
+import { RiggedCharacter } from '../character/RiggedCharacter';
+import type { RiggedCharacterIkBinding } from '../character/RiggedCharacterIK';
+import { getBundledRiggedCharacterUrl } from '../character/riggedCharacterUrls';
 import { SurfaceGrid } from './SurfaceGrid';
 import { getSceneObjectModel } from './sceneObjectModel';
 import { applyProxyOpacityToMaterial } from './proxyVisualization';
@@ -45,6 +49,8 @@ interface SceneObjectProps {
   mannequinIK?: MannequinIKBinding;
   focusContoursEnabled: boolean;
   reflectedObjectIds?: readonly string[];
+  characterAssetUrl?: string;
+  riggedCharacterIK?: RiggedCharacterIkBinding;
 }
 
 interface PrimitiveProps {
@@ -55,6 +61,8 @@ interface PrimitiveProps {
   receiveShadow: boolean;
   focusContoursEnabled: boolean;
   reflectedObjectIds: readonly string[];
+  characterAssetUrl?: string;
+  riggedCharacterIK?: RiggedCharacterIkBinding;
 }
 
 function PresetGeometryMesh({
@@ -95,6 +103,8 @@ function Primitive({
   receiveShadow,
   focusContoursEnabled,
   reflectedObjectIds,
+  characterAssetUrl,
+  riggedCharacterIK,
 }: PrimitiveProps) {
   const { dimensions, kind } = object;
   const material = (
@@ -272,6 +282,45 @@ function Primitive({
           receiveShadow={receiveShadow}
         />
       );
+    case 'character-glb':
+      return (characterAssetUrl ??
+        getBundledRiggedCharacterUrl(object.characterAssetId ?? '')) ===
+        undefined ? (
+        <mesh castShadow={castShadow} receiveShadow={receiveShadow}>
+          <boxGeometry args={[dimensions.x, dimensions.y, dimensions.z]} />
+          <meshStandardMaterial
+            color="#7b8794"
+            wireframe
+            transparent
+            opacity={0.45}
+          />
+        </mesh>
+      ) : (
+        <Suspense
+          fallback={
+            <mesh castShadow={castShadow} receiveShadow={receiveShadow}>
+              <boxGeometry args={[dimensions.x, dimensions.y, dimensions.z]} />
+              <meshStandardMaterial
+                color="#7b8794"
+                wireframe
+                transparent
+                opacity={0.45}
+              />
+            </mesh>
+          }
+        >
+          <RiggedCharacter
+            object={object}
+            assetUrl={
+              characterAssetUrl ??
+              getBundledRiggedCharacterUrl(object.characterAssetId ?? '')!
+            }
+            castShadow={castShadow}
+            receiveShadow={receiveShadow}
+            ik={riggedCharacterIK}
+          />
+        </Suspense>
+      );
   }
 }
 
@@ -343,6 +392,8 @@ export function SceneObject({
   mannequinIK,
   focusContoursEnabled,
   reflectedObjectIds = [],
+  characterAssetUrl,
+  riggedCharacterIK,
 }: SceneObjectProps) {
   const model = getSceneObjectModel(object);
   const { position, rotationDeg, scale } = object.transform;
@@ -413,6 +464,8 @@ export function SceneObject({
           receiveShadow={model.receiveShadow}
           focusContoursEnabled={focusContoursEnabled}
           reflectedObjectIds={reflectedObjectIds}
+          characterAssetUrl={characterAssetUrl}
+          riggedCharacterIK={riggedCharacterIK}
         />
       </group>
       {object.kind === 'mannequin' && mannequinIK !== undefined ? (

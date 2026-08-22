@@ -478,6 +478,7 @@ describe('sceneDocumentSchema', () => {
       'bent-plane',
       'triangle',
       'mannequin',
+      'character-glb',
     ] as const;
 
     const objects = kinds.map((kind) =>
@@ -495,6 +496,66 @@ describe('sceneDocumentSchema', () => {
     expect(createSceneObject('object-cube', { kind: 'cube' })).toEqual(
       createSceneObject('object-cube', { kind: 'cube' }),
     );
+  });
+
+  it('Meshy 리깅 캐릭터 자산과 고정 애니메이션 계약을 직렬화한다', () => {
+    const character = createSceneObject('object-character', {
+      kind: 'character-glb',
+    });
+
+    expect(character).toMatchObject({
+      kind: 'character-glb',
+      dimensions: { x: 1.0291533, y: 1.7, z: 0.4099451 },
+      transform: { position: { y: 0.85 } },
+      characterAssetId: 'meshy-idle-3',
+      characterAnimation: {
+        clipName: 'Armature|Idle_3|baselayer',
+        durationSeconds: 10,
+        timeSeconds: 0,
+        playing: false,
+      },
+    });
+    expect(
+      sceneDocumentSchema.shape.objects.element.safeParse(character).success,
+    ).toBe(true);
+
+    expect(
+      sceneDocumentSchema.shape.objects.element.safeParse({
+        ...character,
+        characterAnimation: {
+          ...character.characterAnimation,
+          timeSeconds: 11,
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('가져온 리깅 GLB의 실제 비율과 무애니메이션 상태를 보존한다', () => {
+    const character = createSceneObject('object-imported-character', {
+      kind: 'character-glb',
+      name: 'Rodin Knight',
+      characterAssetId: 'character_rodin_knight',
+      characterAsset: {
+        source: 'project',
+        label: 'Rodin Knight',
+        originalFileName: 'knight.glb',
+        dimensions: { x: 1.2, y: 2.15, z: 0.6 },
+        center: { x: 0.1, y: 1.075, z: -0.03 },
+        forwardRotationYDeg: 180,
+        boneCount: 68,
+        skinnedMeshCount: 2,
+        animation: null,
+        ikBoneMap: null,
+      },
+    });
+
+    expect(character).toMatchObject({
+      dimensions: { x: 1.2, y: 2.15, z: 0.6 },
+      transform: { position: { y: 1.075 } },
+      characterAssetId: 'character_rodin_knight',
+      characterAsset: { source: 'project', boneCount: 68 },
+    });
+    expect(character.characterAnimation).toBeUndefined();
   });
 
   it('Room Set은 기본 정면 카메라 쪽으로 열린 면을 향해 생성된다', () => {

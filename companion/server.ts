@@ -57,6 +57,12 @@ import {
   referenceMetadataInputSchema,
   toPublicReference,
 } from './referenceStore';
+import {
+  RiggedCharacterInputError,
+  RiggedCharacterNotFoundError,
+  RiggedCharacterStore,
+} from './riggedCharacterStore';
+import { riggedCharacterAnalysisSchema } from '../shared/riggedCharacterAsset';
 
 const threadBodySchema = z
   .object({
@@ -128,6 +134,25 @@ const referenceImportQuerySchema = z.object({
   name: z.string().min(1).max(120),
   kind: referenceKindSchema,
   fileName: z.string().min(1).max(255),
+});
+
+const riggedCharacterImportQuerySchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+  fileName: z.string().trim().min(1).max(255),
+  analysis: z.string().transform((value, context) => {
+    try {
+      return riggedCharacterAnalysisSchema.parse(JSON.parse(value) as unknown);
+    } catch (error) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          error instanceof Error
+            ? `캐릭터 분석 정보가 올바르지 않습니다: ${error.message}`
+            : '캐릭터 분석 정보가 올바르지 않습니다.',
+      });
+      return z.NEVER;
+    }
+  }),
 });
 
 const sceneRenderQuerySchema = z.object({
@@ -364,6 +389,7 @@ export async function startCompanionServer(
   const sseClients = new Set<SseClient>();
   const allowedOrigins = new Set(options.allowedOrigins);
   const referenceStore = new ReferenceStore(options.projectRoot);
+  const riggedCharacterStore = new RiggedCharacterStore(options.projectRoot);
   const generationStore = new GenerationStore(options.projectRoot);
   const conversationStore = new ConversationStore(options.projectRoot);
   const oauthImageGenerator =
@@ -911,6 +937,17 @@ export async function startCompanionServer(
       }
 
       if (
+        request.method === 'GET' &&
+        requestUrl.pathname === '/api/rigged-characters'
+      ) {
+        sendJson(response, 200, {
+          version: 1,
+          assets: await riggedCharacterStore.list(),
+        });
+        return;
+      }
+
+      if (
         request.method === 'POST' &&
         requestUrl.pathname === '/api/scene-renders'
       ) {
@@ -1305,6 +1342,41 @@ export async function startCompanionServer(
         return;
       }
 
+      if (
+        request.method === 'POST' &&
+        requestUrl.pathname === '/api/rigged-characters'
+      ) {
+        const query = riggedCharacterImportQuerySchema.parse(
+          Object.fromEntries(requestUrl.searchParams),
+        );
+        const asset = await riggedCharacterStore.importAsset({
+          name: query.name,
+          originalFileName: query.fileName,
+          analysis: query.analysis,
+          data: await readBody(request, 100 * 1024 * 1024),
+        });
+        sendJson(response, 201, { asset });
+        return;
+      }
+
+      const riggedCharacterContentMatch = requestUrl.pathname.match(
+        /^\/api\/rigged-characters\/([^/]+)\/content$/,
+      );
+      if (request.method === 'GET' && riggedCharacterContentMatch !== null) {
+        const assetId = decodeURIComponent(
+          riggedCharacterContentMatch[1] ?? '',
+        );
+        const { asset, data } = await riggedCharacterStore.readContent(assetId);
+        response.writeHead(200, {
+          'Content-Type': asset.mimeType,
+          'Content-Length': String(data.byteLength),
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        response.end(data);
+        return;
+      }
+
       const referenceMatch = requestUrl.pathname.match(
         /^\/api\/references\/([^/]+)$/,
       );
@@ -1457,6 +1529,7 @@ export async function startCompanionServer(
       const statusCode =
         error instanceof z.ZodError ||
         error instanceof ReferenceInputError ||
+        error instanceof RiggedCharacterInputError ||
         error instanceof RequestBodyTooLargeError ||
         error instanceof RuntimeRequestInputError
           ? 400
@@ -1466,7 +1539,9 @@ export async function startCompanionServer(
               ? 409
               : error instanceof ReferenceNotFoundError
                 ? 404
-                : 500;
+                : error instanceof RiggedCharacterNotFoundError
+                  ? 404
+                  : 500;
       sendJson(response, statusCode, {
         error: message,
       });

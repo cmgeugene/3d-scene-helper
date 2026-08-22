@@ -31,6 +31,12 @@ import {
   type RuntimeRequestResponse,
 } from '../../shared/runtimeRequest';
 import type { CompanionConnection } from './companionConnection';
+import {
+  riggedCharacterAnalysisSchema,
+  riggedCharacterAssetSchema,
+  type RiggedCharacterAnalysis,
+  type RiggedCharacterAsset,
+} from '../../shared/riggedCharacterAsset';
 
 const accountSchema = z
   .discriminatedUnion('type', [
@@ -314,6 +320,17 @@ export interface CompanionBrowserClient {
   ): Promise<ReferenceArtifact>;
   deleteReference(referenceId: string, signal?: AbortSignal): Promise<string>;
   loadReferenceBlob(referenceId: string, signal?: AbortSignal): Promise<Blob>;
+  listRiggedCharacters?(signal?: AbortSignal): Promise<RiggedCharacterAsset[]>;
+  importRiggedCharacter?(
+    file: File,
+    name: string,
+    analysis: RiggedCharacterAnalysis,
+    signal?: AbortSignal,
+  ): Promise<RiggedCharacterAsset>;
+  loadRiggedCharacterBlob?(
+    assetId: string,
+    signal?: AbortSignal,
+  ): Promise<Blob>;
   createSceneRender(
     blob: Blob,
     sceneId: string,
@@ -563,6 +580,58 @@ export class CompanionClient implements CompanionBrowserClient {
     if (!response.ok) {
       throw await this.createHttpError(response);
     }
+    return response.blob();
+  }
+
+  async listRiggedCharacters(signal?: AbortSignal) {
+    const response = await this.fetchImpl(
+      `${this.connection.url}/api/rigged-characters`,
+      { headers: this.headers(), signal },
+    );
+    if (!response.ok) throw await this.createHttpError(response);
+    return z
+      .strictObject({
+        version: z.literal(1),
+        assets: z.array(riggedCharacterAssetSchema),
+      })
+      .parse(await response.json()).assets;
+  }
+
+  async importRiggedCharacter(
+    file: File,
+    name: string,
+    analysis: RiggedCharacterAnalysis,
+    signal?: AbortSignal,
+  ) {
+    const query = new URLSearchParams({
+      name,
+      fileName: file.name,
+      analysis: JSON.stringify(riggedCharacterAnalysisSchema.parse(analysis)),
+    });
+    const response = await this.fetchImpl(
+      `${this.connection.url}/api/rigged-characters?${query.toString()}`,
+      {
+        method: 'POST',
+        headers: {
+          ...this.headers(),
+          'Content-Type': 'model/gltf-binary',
+        },
+        body: file,
+        signal,
+      },
+    );
+    if (!response.ok) throw await this.createHttpError(response);
+    return z
+      .strictObject({ asset: riggedCharacterAssetSchema })
+      .parse(await response.json()).asset;
+  }
+
+  async loadRiggedCharacterBlob(assetId: string, signal?: AbortSignal) {
+    const response = await this.fetchImpl(
+      `${this.connection.url}/api/rigged-characters/${encodeURIComponent(assetId)}/content`,
+      { headers: this.headers(), signal },
+    );
+    if (!response.ok) throw await this.createHttpError(response);
     return response.blob();
   }
 

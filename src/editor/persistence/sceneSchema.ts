@@ -12,6 +12,8 @@ import {
 } from '../constants';
 import { MANNEQUIN_BODY_TYPE_IDS } from '../mannequin/mannequinBodyType';
 import { createMannequinPose } from '../mannequin/mannequinRig';
+import { getRiggedCharacterAsset } from '../character/riggedCharacterAssets';
+import { riggedCharacterSceneAssetSchema } from '../../../shared/riggedCharacterAsset';
 import {
   createLensDepthOfFieldSettings,
   MAX_F_STOP,
@@ -112,6 +114,20 @@ const objectAppearanceIntentSchema = z
   })
   .default({ surfaceType: 'opaque', materialNotes: '' });
 
+const characterAnimationSchema = z.strictObject({
+  clipName: z.string().trim().min(1),
+  durationSeconds: z.number().positive(),
+  timeSeconds: z.number().nonnegative(),
+  playing: z.boolean(),
+});
+
+export const riggedCharacterIkTargetsSchema = z.strictObject({
+  leftHand: vector3Schema,
+  rightHand: vector3Schema,
+  leftFoot: vector3Schema,
+  rightFoot: vector3Schema,
+});
+
 const validatedSceneObjectSchema = z
   .strictObject({
     id: stableIdSchema,
@@ -126,6 +142,7 @@ const validatedSceneObjectSchema = z
       'triangle',
       'mannequin',
       'room',
+      'character-glb',
     ]),
     name: z.string().trim().min(1).max(MAX_OBJECT_NAME_LENGTH),
     transform: transformSchema,
@@ -139,6 +156,10 @@ const validatedSceneObjectSchema = z
     semantic: semanticObjectSchema.optional(),
     mannequinPose: mannequinPoseSchema.optional(),
     mannequinBodyType: z.enum(MANNEQUIN_BODY_TYPE_IDS).optional(),
+    characterAssetId: stableIdSchema.optional(),
+    characterAsset: riggedCharacterSceneAssetSchema.optional(),
+    characterAnimation: characterAnimationSchema.optional(),
+    characterIkTargets: riggedCharacterIkTargetsSchema.optional(),
   })
   .superRefine((object, context) => {
     if (object.kind === 'mannequin' && object.mannequinPose === undefined) {
@@ -162,6 +183,56 @@ const validatedSceneObjectSchema = z
         path: ['mannequinBodyType'],
       });
     }
+    if (
+      object.kind === 'character-glb' &&
+      (object.characterAssetId === undefined ||
+        object.characterAsset === undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Rigged GLB characters require persisted asset metadata',
+        path: ['characterAssetId'],
+      });
+    }
+    if (
+      object.kind !== 'character-glb' &&
+      (object.characterAssetId !== undefined ||
+        object.characterAsset !== undefined ||
+        object.characterAnimation !== undefined ||
+        object.characterIkTargets !== undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Only rigged GLB characters may contain character asset data',
+        path: ['characterAssetId'],
+      });
+    }
+    if (
+      object.kind === 'character-glb' &&
+      object.characterIkTargets !== undefined &&
+      object.characterAsset?.ikBoneMap == null
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Character IK targets require a recognized humanoid bone map',
+        path: ['characterIkTargets'],
+      });
+    }
+    if (
+      object.kind === 'character-glb' &&
+      object.characterAnimation !== undefined
+    ) {
+      if (
+        object.characterAnimation.timeSeconds >
+        object.characterAnimation.durationSeconds
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Character animation time exceeds its duration',
+          path: ['characterAnimation', 'timeSeconds'],
+        });
+      }
+    }
   });
 
 const sceneObjectSchema = z.preprocess((value) => {
@@ -171,6 +242,30 @@ const sceneObjectSchema = z.preprocess((value) => {
   const object = value as Record<string, unknown>;
   if (object.kind === 'mannequin' && object.mannequinBodyType === undefined) {
     return { ...object, mannequinBodyType: 'standard' };
+  }
+  if (
+    object.kind === 'character-glb' &&
+    object.characterAsset === undefined &&
+    typeof object.characterAssetId === 'string'
+  ) {
+    const bundled = getRiggedCharacterAsset(object.characterAssetId);
+    if (bundled !== undefined) {
+      return {
+        ...object,
+        characterAsset: {
+          source: 'bundled',
+          label: bundled.label,
+          originalFileName: bundled.originalFileName,
+          dimensions: bundled.dimensions,
+          center: bundled.center,
+          forwardRotationYDeg: bundled.forwardRotationYDeg,
+          boneCount: bundled.boneCount,
+          skinnedMeshCount: bundled.skinnedMeshCount,
+          animation: bundled.animation,
+          ikBoneMap: bundled.ikBoneMap,
+        },
+      };
+    }
   }
   return value;
 }, validatedSceneObjectSchema);
@@ -610,6 +705,9 @@ export interface CreateSceneObjectInput {
   kind: SceneObjectKind;
   name?: string;
   position?: { x: number; z: number };
+  characterAssetId?: string;
+  characterAsset?: SceneObject['characterAsset'];
+  characterAnimation?: SceneObject['characterAnimation'];
 }
 
 export interface AddSceneObjectInput extends CreateSceneObjectInput {
@@ -690,6 +788,12 @@ const OBJECT_DEFAULTS: Record<
     positionY: 1.35,
     rotationY: 180,
   },
+  'character-glb': {
+    name: 'Meshy Idle Character',
+    dimensions: getRiggedCharacterAsset('meshy-idle-3')!.dimensions,
+    color: '#ffffff',
+    positionY: getRiggedCharacterAsset('meshy-idle-3')!.dimensions.y / 2,
+  },
 };
 
 export function createSceneObject(
@@ -697,12 +801,35 @@ export function createSceneObject(
   input: CreateSceneObjectInput,
 ): SceneObject {
   const defaults = OBJECT_DEFAULTS[input.kind];
+  const characterAsset =
+    input.kind === 'character-glb'
+      ? (input.characterAsset ?? {
+          source: 'bundled' as const,
+          label: getRiggedCharacterAsset('meshy-idle-3')!.label,
+          originalFileName:
+            getRiggedCharacterAsset('meshy-idle-3')!.originalFileName,
+          dimensions: getRiggedCharacterAsset('meshy-idle-3')!.dimensions,
+          center: getRiggedCharacterAsset('meshy-idle-3')!.center,
+          forwardRotationYDeg:
+            getRiggedCharacterAsset('meshy-idle-3')!.forwardRotationYDeg,
+          boneCount: getRiggedCharacterAsset('meshy-idle-3')!.boneCount,
+          skinnedMeshCount:
+            getRiggedCharacterAsset('meshy-idle-3')!.skinnedMeshCount,
+          animation: getRiggedCharacterAsset('meshy-idle-3')!.animation,
+          ikBoneMap: getRiggedCharacterAsset('meshy-idle-3')!.ikBoneMap,
+        })
+      : undefined;
+  const effectiveDimensions = characterAsset?.dimensions ?? defaults.dimensions;
+  const effectivePositionY = effectiveDimensions.y / 2;
   const position =
     input.position === undefined
       ? undefined
       : {
           x: input.position.x,
-          y: defaults.positionY,
+          y:
+            input.kind === 'character-glb'
+              ? effectivePositionY
+              : defaults.positionY,
           z: input.position.z,
         };
 
@@ -711,10 +838,15 @@ export function createSceneObject(
     kind: input.kind,
     name: input.name ?? defaults.name,
     transform: {
-      ...identityTransform(defaults.positionY, defaults.rotationY),
+      ...identityTransform(
+        input.kind === 'character-glb'
+          ? effectivePositionY
+          : defaults.positionY,
+        defaults.rotationY,
+      ),
       ...(position === undefined ? {} : { position }),
     },
-    dimensions: defaults.dimensions,
+    dimensions: effectiveDimensions,
     color: defaults.color,
     visible: true,
     exportable: true,
@@ -722,6 +854,26 @@ export function createSceneObject(
       ? {
           mannequinPose: createMannequinPose('default'),
           mannequinBodyType: 'standard',
+        }
+      : {}),
+    ...(input.kind === 'character-glb'
+      ? {
+          characterAssetId: 'meshy-idle-3',
+          characterAsset,
+          ...(input.characterAnimation === undefined
+            ? characterAsset?.animation === null
+              ? {}
+              : {
+                  characterAnimation: {
+                    ...characterAsset!.animation!,
+                    timeSeconds: 0,
+                    playing: false,
+                  },
+                }
+            : { characterAnimation: input.characterAnimation }),
+          ...(input.characterAssetId === undefined
+            ? {}
+            : { characterAssetId: input.characterAssetId }),
         }
       : {}),
   });

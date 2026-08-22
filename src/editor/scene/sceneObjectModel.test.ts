@@ -18,6 +18,7 @@ describe('sceneObjectModel', () => {
     ['triangle', 'triangle'],
     ['mannequin', 'mannequin'],
     ['room', 'room'],
+    ['character-glb', 'character-glb'],
   ] as const)('%s 문서 종류를 %s runtime model로 매핑한다', (kind, model) => {
     const object = createSceneObject(`object-${kind}`, { kind });
 
@@ -54,6 +55,17 @@ describe('sceneObjectModel', () => {
     expect(getSceneObjectBounds(mannequin).size.y).toBe(1.7);
     expect(getSceneObjectBounds(mannequin).min.y).toBeCloseTo(0);
     expect(getSceneObjectBounds(mannequin).max.y).toBeCloseTo(1.7);
+  });
+
+  it('리깅 캐릭터의 실제 미터 치수와 바닥 정렬을 bounds에 반영한다', () => {
+    const character = createSceneObject('rigged-character-bounds', {
+      kind: 'character-glb',
+    });
+
+    const bounds = getSceneObjectBounds(character);
+    expect(bounds.min.y).toBeCloseTo(0);
+    expect(bounds.max.y).toBeCloseTo(1.7);
+    expect(bounds.size).toEqual({ x: 1.0291533, y: 1.7, z: 0.4099451 });
   });
 
   it('체형별 절차형 실루엣을 frame/selection bounds에 반영한다', () => {

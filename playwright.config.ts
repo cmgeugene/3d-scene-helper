@@ -2,7 +2,9 @@ import { defineConfig, devices } from '@playwright/test';
 
 const baseURL = 'http://127.0.0.1:4173';
 const usesExternalServer =
-  process.env.npm_lifecycle_event === 'test:e2e:external';
+  process.env.npm_lifecycle_event === 'test:e2e:external' ||
+  process.env.I2V_PLAYWRIGHT_EXTERNAL === '1';
+const localChromiumExecutable = process.env.I2V_PLAYWRIGHT_EXECUTABLE;
 
 export default defineConfig({
   testDir: './e2e',
@@ -28,6 +30,9 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         launchOptions: {
+          ...(localChromiumExecutable === undefined
+            ? {}
+            : { executablePath: localChromiumExecutable }),
           args: [
             '--enable-webgl',
             '--enable-unsafe-swiftshader',

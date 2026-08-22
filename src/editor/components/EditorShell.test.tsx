@@ -843,6 +843,9 @@ describe('EditorShell', () => {
     expect(screen.getByRole('button', { name: '정삼각형 추가' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '마네킹 추가' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '방 세트 추가' })).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Meshy Idle 캐릭터 추가' }),
+    ).toBeEnabled();
 
     await user.click(screen.getByRole('button', { name: '방 세트 추가' }));
     expect(store.getState().document.objects.at(-1)).toMatchObject({
@@ -859,6 +862,37 @@ describe('EditorShell', () => {
         '이 편집기는 1280×720 이상의 데스크톱 화면이 필요합니다.',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('Meshy 리깅 캐릭터의 키와 Idle 샘플 시간을 편집한다', async () => {
+    const user = userEvent.setup();
+    const store = createTestStore();
+    render(<EditorShell store={store} webGLState="available" />);
+
+    await user.click(
+      screen.getByRole('button', { name: 'Meshy Idle 캐릭터 추가' }),
+    );
+    const character = store.getState().document.objects.at(-1);
+    expect(character).toMatchObject({
+      kind: 'character-glb',
+      characterAssetId: 'meshy-idle-3',
+    });
+    expect(screen.getByLabelText('캐릭터 키')).toHaveValue(1.7);
+    expect(screen.getByLabelText('애니메이션 시간')).toHaveValue('0');
+
+    await user.click(
+      screen.getByRole('button', { name: 'Idle 미리보기 재생' }),
+    );
+    expect(character?.id).toBe('generated-test');
+    expect(
+      store.getState().document.objects.at(-1)?.characterAnimation?.playing,
+    ).toBe(true);
+
+    const height = screen.getByLabelText('캐릭터 키');
+    await user.clear(height);
+    await user.type(height, '2.1');
+    await user.keyboard('{Enter}');
+    expect(store.getState().document.objects.at(-1)?.dimensions.y).toBe(2.1);
   });
 
   it('상태 표시줄에서 선택과 변형 모드를 알린다', async () => {

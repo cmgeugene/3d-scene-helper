@@ -158,6 +158,15 @@ export interface EditorStore {
     groupId: string,
     delta: SceneObject['transform']['position'],
   ) => void;
+  setRiggedCharacterAnimation: (
+    id: string,
+    animation: NonNullable<SceneObject['characterAnimation']>,
+  ) => void;
+  setRiggedCharacterHeight: (id: string, heightMeters: number) => void;
+  setRiggedCharacterIkTargets: (
+    id: string,
+    targets: NonNullable<SceneObject['characterIkTargets']>,
+  ) => void;
   applyMannequinBodyTypePreset: (bodyType: MannequinBodyTypeId) => void;
   applyMannequinPosePreset: (presetId: MannequinPosePresetId) => void;
   beginMannequinPose: () => void;
@@ -696,6 +705,66 @@ export function createEditorStore(options: EditorStoreOptions) {
           statusMessage: null,
         };
       });
+    },
+    setRiggedCharacterAnimation: (id, animation) => {
+      const object = get().document.objects.find(
+        (candidate) => candidate.id === id,
+      );
+      if (object?.kind !== 'character-glb') return;
+      updateObject(set, id, { characterAnimation: animation });
+    },
+    setRiggedCharacterHeight: (id, heightMeters) => {
+      if (!Number.isFinite(heightMeters) || heightMeters <= 0) return;
+      set((state) => {
+        const selected = state.document.objects.find(
+          (candidate) => candidate.id === id,
+        );
+        if (selected?.kind !== 'character-glb') return state;
+        const ratio = heightMeters / selected.dimensions.y;
+        const resized: SceneObject = {
+          ...selected,
+          dimensions: {
+            x: selected.dimensions.x * ratio,
+            y: heightMeters,
+            z: selected.dimensions.z * ratio,
+          },
+        };
+        const floorOffset =
+          getSceneObjectBounds(selected).min.y -
+          getSceneObjectBounds(resized).min.y;
+        const grounded: SceneObject = {
+          ...resized,
+          transform: {
+            ...resized.transform,
+            position: {
+              ...resized.transform.position,
+              y: resized.transform.position.y + floorOffset,
+            },
+          },
+        };
+        const nextDocument = sceneDocumentSchema.parse({
+          ...state.document,
+          objects: state.document.objects.map((object) =>
+            object.id === id ? grounded : object,
+          ),
+        });
+        return {
+          ...recordMutation(state, nextDocument, 'update-object-property'),
+          statusMessage: `${selected.name}의 키를 ${heightMeters.toFixed(2)}m로 설정했습니다.`,
+        };
+      });
+    },
+    setRiggedCharacterIkTargets: (id, targets) => {
+      const object = get().document.objects.find(
+        (candidate) => candidate.id === id,
+      );
+      if (
+        object?.kind !== 'character-glb' ||
+        object.characterAsset?.ikBoneMap == null
+      ) {
+        return;
+      }
+      updateObject(set, id, { characterIkTargets: targets });
     },
     applyMannequinBodyTypePreset: (bodyType) => {
       set((state) => {

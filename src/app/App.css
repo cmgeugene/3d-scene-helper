@@ -2478,6 +2478,55 @@ p {
   font-size: 0.75rem;
 }
 
+.asset-import-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.15rem;
+  margin-top: 0.55rem;
+  border: 1px solid #3c5d82;
+  border-radius: 0.45rem;
+  color: #dbeaff;
+  background: #17263a;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.asset-import-button:hover {
+  border-color: #6aa7e8;
+  background: #1c3049;
+}
+
+.asset-import-button[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.asset-import-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.asset-import-status {
+  margin: 0.45rem 0 0;
+  color: #9fb3ca;
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.asset-import-status--error {
+  color: #ff9f9f;
+}
+
+.asset-import-status--success {
+  color: #8edbb5;
+}
+
 .outliner-list {
   display: grid;
   gap: 0.25rem;

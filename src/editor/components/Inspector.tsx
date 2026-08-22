@@ -632,6 +632,145 @@ function createTransformDraft(object: SceneObject | undefined) {
   };
 }
 
+function RiggedCharacterControls({
+  store,
+  object,
+}: InspectorProps & { object: SceneObject }) {
+  const animation = object.characterAnimation;
+  const mannequinTool = useStore(store, (state) => state.mannequinTool);
+  const [heightDraft, setHeightDraft] = useState<string | null>(null);
+  const [timeDraft, setTimeDraft] = useState<number | null>(null);
+  if (object.kind !== 'character-glb') return null;
+
+  const displayedTime = timeDraft ?? animation?.timeSeconds ?? 0;
+  const commitHeight = () => {
+    const value = Number(heightDraft ?? object.dimensions.y);
+    if (Number.isFinite(value) && value > 0 && value <= 20) {
+      store.getState().setRiggedCharacterHeight(object.id, value);
+    }
+    setHeightDraft(null);
+  };
+  const commitTime = (value = displayedTime) => {
+    if (animation === undefined) return;
+    store.getState().setRiggedCharacterAnimation(object.id, {
+      ...animation,
+      timeSeconds: Math.min(animation.durationSeconds, Math.max(0, value)),
+      playing: false,
+    });
+    setTimeDraft(null);
+  };
+
+  return (
+    <fieldset className="object-controls">
+      <legend>리깅 캐릭터</legend>
+      <label className="object-text-field">
+        <span>캐릭터 키 (m)</span>
+        <input
+          aria-label="캐릭터 키"
+          type="number"
+          min="0.1"
+          max="20"
+          step="0.01"
+          value={heightDraft ?? String(object.dimensions.y)}
+          onChange={(event) => setHeightDraft(event.currentTarget.value)}
+          onBlur={commitHeight}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur();
+          }}
+        />
+      </label>
+      <p className="panel-description">
+        {object.characterAsset?.label} · {object.characterAsset?.boneCount}본
+      </p>
+      <div className="object-actions">
+        <button
+          type="button"
+          aria-pressed={mannequinTool === 'object'}
+          onClick={() => store.getState().setMannequinTool('object')}
+        >
+          오브젝트 변형
+        </button>
+        <button
+          type="button"
+          aria-pressed={mannequinTool === 'ik'}
+          disabled={object.characterAsset?.ikBoneMap == null}
+          onClick={() => {
+            if (animation?.playing) {
+              store.getState().setRiggedCharacterAnimation(object.id, {
+                ...animation,
+                playing: false,
+              });
+            }
+            store.getState().setMannequinTool('ik');
+          }}
+        >
+          손·발 IK
+        </button>
+      </div>
+      {object.characterAsset?.ikBoneMap == null ? (
+        <p className="panel-description">
+          표준 휴머노이드 팔·다리 본을 찾지 못해 IK를 사용할 수 없습니다.
+        </p>
+      ) : (
+        <p className="panel-description">
+          IK 모드에서 손과 발 핸들을 드래그하세요.
+        </p>
+      )}
+      {animation === undefined ? (
+        <p className="panel-description">포함된 애니메이션이 없습니다.</p>
+      ) : (
+        <>
+          <label>
+            <span>
+              애니메이션 시간 {displayedTime.toFixed(2)} /{' '}
+              {animation.durationSeconds.toFixed(2)}초
+            </span>
+            <input
+              aria-label="애니메이션 시간"
+              type="range"
+              min="0"
+              max={animation.durationSeconds}
+              step="0.01"
+              value={displayedTime}
+              onChange={(event) =>
+                setTimeDraft(Number(event.currentTarget.value))
+              }
+              onPointerUp={(event) =>
+                commitTime(Number(event.currentTarget.value))
+              }
+              onBlur={() => {
+                if (timeDraft !== null) commitTime();
+              }}
+              onKeyUp={(event) => {
+                if (event.key.startsWith('Arrow')) {
+                  commitTime(Number(event.currentTarget.value));
+                }
+              }}
+            />
+          </label>
+          <div className="object-actions">
+            <button
+              type="button"
+              aria-pressed={animation.playing}
+              onClick={() => {
+                store.getState().setRiggedCharacterAnimation(object.id, {
+                  ...animation,
+                  playing: !animation.playing,
+                });
+              }}
+            >
+              {animation.playing ? '미리보기 중지' : 'Idle 미리보기 재생'}
+            </button>
+          </div>
+          <p className="panel-description">
+            미리보기를 중지하면 선택한 시간의 포즈로 돌아갑니다.
+          </p>
+        </>
+      )}
+    </fieldset>
+  );
+}
+
 export function Inspector({ store }: InspectorProps) {
   const objects = useStore(store, (state) => state.document.objects);
   const spatialRelations = useStore(
@@ -869,7 +1008,10 @@ export function Inspector({ store }: InspectorProps) {
                   aria-label="색상"
                   type="color"
                   value={selectedObject?.color ?? '#000000'}
-                  disabled={selectedObject === undefined}
+                  disabled={
+                    selectedObject === undefined ||
+                    selectedObject.kind === 'character-glb'
+                  }
                   onChange={(event) => {
                     if (selectedObject !== undefined) {
                       store
@@ -1267,6 +1409,13 @@ export function Inspector({ store }: InspectorProps) {
                   </div>
                 </fieldset>
               </>
+            ) : null}
+            {selectedObject?.kind === 'character-glb' ? (
+              <RiggedCharacterControls
+                key={selectedObject.id}
+                store={store}
+                object={selectedObject}
+              />
             ) : null}
             <SubjectMotionControls
               store={store}

@@ -15,11 +15,13 @@ import { SceneAssistantPanel } from '../../assistant/SceneAssistantPanel';
 import { KeyframeWorkspace } from '../../assistant/KeyframeWorkspace';
 import { ReferenceManager } from '../../assistant/ReferenceManager';
 import { SceneSnapshotPreview } from '../../assistant/SceneSnapshotPreview';
-import type {
-  CompanionBrowserClient,
-  GenerationRecord,
-  ReferenceArtifact,
+import {
+  CompanionClient,
+  type CompanionBrowserClient,
+  type GenerationRecord,
+  type ReferenceArtifact,
 } from '../../assistant/companionClient';
+import type { RiggedCharacterAsset } from '../../../shared/riggedCharacterAsset';
 import type { CompanionConnection } from '../../assistant/companionConnection';
 import {
   IMAGEGEN_MAX_INPUT_IMAGES,
@@ -227,10 +229,118 @@ export function EditorShell({
   const widthBeforeExpand = useRef(assistantPanelWidth);
   const sceneObjects = useStore(store, (state) => state.document.objects);
   const sceneDocument = useStore(store, (state) => state.document);
+  const companionClient = useMemo(
+    () =>
+      companionConnection === null
+        ? null
+        : (assistantClientFactory?.(companionConnection) ??
+          new CompanionClient(companionConnection)),
+    [assistantClientFactory, companionConnection],
+  );
+  const [characterAssetUrls, setCharacterAssetUrls] = useState(
+    () => new Map<string, string>(),
+  );
+  const characterAssetUrlsRef = useRef(characterAssetUrls);
+  const loadingCharacterAssetsRef = useRef(new Set<string>());
+  const createCharacterObjectUrl = useCallback(
+    (blob: Blob) =>
+      createAssistantObjectUrl === undefined
+        ? URL.createObjectURL(blob)
+        : createAssistantObjectUrl(blob),
+    [createAssistantObjectUrl],
+  );
+  const revokeCharacterObjectUrl = useCallback(
+    (url: string) => {
+      if (revokeAssistantObjectUrl === undefined) URL.revokeObjectURL(url);
+      else revokeAssistantObjectUrl(url);
+    },
+    [revokeAssistantObjectUrl],
+  );
+  const projectCharacterAssetIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          sceneObjects
+            .filter(
+              (object) =>
+                object.kind === 'character-glb' &&
+                object.characterAsset?.source === 'project' &&
+                object.characterAssetId !== undefined,
+            )
+            .map((object) => object.characterAssetId!),
+        ),
+      ),
+    [sceneObjects],
+  );
+
+  useEffect(() => {
+    characterAssetUrlsRef.current = characterAssetUrls;
+  }, [characterAssetUrls]);
+
+  useEffect(() => {
+    if (companionClient?.loadRiggedCharacterBlob === undefined) return;
+    const controller = new AbortController();
+    for (const assetId of projectCharacterAssetIds) {
+      if (
+        characterAssetUrlsRef.current.has(assetId) ||
+        loadingCharacterAssetsRef.current.has(assetId)
+      ) {
+        continue;
+      }
+      loadingCharacterAssetsRef.current.add(assetId);
+      void companionClient
+        .loadRiggedCharacterBlob(assetId, controller.signal)
+        .then((blob) => {
+          if (controller.signal.aborted) return;
+          const objectUrl = createCharacterObjectUrl(blob);
+          setCharacterAssetUrls((current) => {
+            if (current.has(assetId)) {
+              revokeCharacterObjectUrl(objectUrl);
+              return current;
+            }
+            const next = new Map(current).set(assetId, objectUrl);
+            characterAssetUrlsRef.current = next;
+            return next;
+          });
+        })
+        .catch(() => undefined)
+        .finally(() => loadingCharacterAssetsRef.current.delete(assetId));
+    }
+    return () => controller.abort();
+  }, [
+    companionClient,
+    createCharacterObjectUrl,
+    projectCharacterAssetIds,
+    revokeCharacterObjectUrl,
+  ]);
+
+  useEffect(
+    () => () => {
+      for (const objectUrl of characterAssetUrlsRef.current.values()) {
+        revokeCharacterObjectUrl(objectUrl);
+      }
+      characterAssetUrlsRef.current = new Map();
+    },
+    [revokeCharacterObjectUrl],
+  );
+
+  const handleCharacterAssetAvailable = useCallback(
+    (asset: RiggedCharacterAsset, file: File) => {
+      const objectUrl = createCharacterObjectUrl(file);
+      setCharacterAssetUrls((current) => {
+        const previous = current.get(asset.id);
+        if (previous !== undefined) revokeCharacterObjectUrl(previous);
+        const next = new Map(current).set(asset.id, objectUrl);
+        characterAssetUrlsRef.current = next;
+        return next;
+      });
+    },
+    [createCharacterObjectUrl, revokeCharacterObjectUrl],
+  );
   const referenceTargets = useMemo(
     () =>
       sceneObjects
-        .filter(({ kind }) => kind === 'mannequin')
+        .filter(({ kind }) => kind === 'mannequin' || kind === 'character-glb')
         .map(({ id, name }) => ({ id, name })),
     [sceneObjects],
   );
@@ -450,7 +560,11 @@ export function EditorShell({
           {workspaceMode === 'scene' ? (
             <>
               <aside className="left-panel" aria-label="에셋과 장면">
-                <AssetPanel store={store} />
+                <AssetPanel
+                  store={store}
+                  companionClient={companionClient}
+                  onCharacterAssetAvailable={handleCharacterAssetAvailable}
+                />
                 <Outliner store={store} />
               </aside>
               <section className="viewport-panel" aria-label="장면 뷰포트">
@@ -508,6 +622,7 @@ export function EditorShell({
                         store={store}
                         onExportReady={handleExportReady}
                         onRuntimeFailure={handleRuntimeFailure}
+                        characterAssetUrls={characterAssetUrls}
                       />
                     </Suspense>
                   </SceneErrorBoundary>

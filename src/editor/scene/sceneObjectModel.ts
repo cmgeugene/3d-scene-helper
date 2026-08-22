@@ -11,7 +11,8 @@ export type RuntimeGeometry =
   | 'bent-plane'
   | 'triangle'
   | 'mannequin'
-  | 'room';
+  | 'room'
+  | 'character-glb';
 
 export interface SceneObjectModel {
   geometry: RuntimeGeometry;
@@ -39,6 +40,7 @@ const GEOMETRY_BY_KIND: Record<SceneObjectKind, RuntimeGeometry> = {
   triangle: 'triangle',
   mannequin: 'mannequin',
   room: 'room',
+  'character-glb': 'character-glb',
 };
 
 const ASSET_PLACEMENT_SLOTS = [

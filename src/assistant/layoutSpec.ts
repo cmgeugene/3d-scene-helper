@@ -48,7 +48,9 @@ function clipBounds(bounds: ScreenBounds): ScreenBounds | null {
 }
 
 function roleForObject(object: SceneObject): LayoutObject['role'] {
-  if (object.kind === 'mannequin') return 'subject';
+  if (object.kind === 'mannequin' || object.kind === 'character-glb') {
+    return 'subject';
+  }
   if (object.kind === 'floor' || object.kind === 'room') return 'environment';
   return 'proxy';
 }
@@ -91,7 +93,9 @@ function mannequinFacing(
   centerWorld: Vector3,
   camera: PerspectiveCamera,
 ): LayoutObject['facing'] {
-  if (object.kind !== 'mannequin') return null;
+  if (object.kind !== 'mannequin' && object.kind !== 'character-glb') {
+    return null;
+  }
   const direction = new Vector3(0, 0, -1)
     .applyEuler(
       new Euler(

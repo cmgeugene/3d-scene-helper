@@ -131,6 +131,47 @@ describe('editorStore', () => {
     expect(store.getState().document.objects).toHaveLength(2);
   });
 
+  it('리깅 캐릭터의 Idle 시간과 키를 저장하고 발을 바닥에 유지한다', () => {
+    store = makeStore(['object-character']);
+    const id = store.getState().addObject({ kind: 'character-glb' });
+    const initial = store
+      .getState()
+      .document.objects.find((object) => object.id === id);
+    if (initial?.characterAnimation === undefined) {
+      throw new Error('Expected rigged character animation');
+    }
+
+    store.getState().setRiggedCharacterAnimation(id, {
+      ...initial.characterAnimation,
+      timeSeconds: 4.25,
+      playing: true,
+    });
+    store.getState().setRiggedCharacterHeight(id, 2.1);
+    store.getState().setRiggedCharacterIkTargets(id, {
+      leftHand: { x: -0.4, y: 0.3, z: 0.1 },
+      rightHand: { x: 0.4, y: 0.3, z: 0.1 },
+      leftFoot: { x: -0.15, y: -0.8, z: 0 },
+      rightFoot: { x: 0.15, y: -0.8, z: 0 },
+    });
+
+    const character = store
+      .getState()
+      .document.objects.find((object) => object.id === id);
+    if (character === undefined) throw new Error('Expected rigged character');
+    expect(character.characterAnimation).toMatchObject({
+      timeSeconds: 4.25,
+      playing: true,
+    });
+    expect(character.dimensions.y).toBe(2.1);
+    expect(character.dimensions.x).toBeCloseTo(1.2713053);
+    expect(getSceneObjectBounds(character).min.y).toBeCloseTo(0);
+    expect(character.characterIkTargets?.leftHand).toEqual({
+      x: -0.4,
+      y: 0.3,
+      z: 0.1,
+    });
+  });
+
   it('selection과 hover는 document와 dirty를 변경하지 않는다', () => {
     const originalDocument = store.getState().document;
 

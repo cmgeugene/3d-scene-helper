@@ -43,6 +43,7 @@ import { SelectionTransformControls } from './SelectionTransformControls';
 
 interface SceneViewportProps {
   store: StoreApi<EditorStore>;
+  characterAssetUrls?: ReadonlyMap<string, string>;
   onExportReady?: (exportFrame: FrameExportHandler | null) => void;
   onRuntimeFailure?: (message: string) => void;
   readOnly?: boolean;
@@ -219,9 +220,11 @@ function SceneObjectsDiagnostic({
 function RuntimeScene({
   store,
   readOnly,
+  characterAssetUrls,
 }: {
   store: StoreApi<EditorStore>;
   readOnly: boolean;
+  characterAssetUrls: ReadonlyMap<string, string>;
 }) {
   const document = useStore(store, (state) => state.document);
   const objects = useStore(store, (state) => state.document.objects);
@@ -325,6 +328,24 @@ function RuntimeScene({
             runtimeMannequinPose={runtimeMannequinPoses.get(object.id)}
             focusContoursEnabled={focusContoursEnabled}
             reflectedObjectIds={reflectionTargetsByMirror.get(object.id)}
+            characterAssetUrl={
+              object.characterAssetId === undefined
+                ? undefined
+                : characterAssetUrls.get(object.characterAssetId)
+            }
+            riggedCharacterIK={
+              object.kind === 'character-glb'
+                ? {
+                    store,
+                    enabled:
+                      !readOnly &&
+                      selectedObjectId === object.id &&
+                      object.characterAsset?.ikBoneMap != null &&
+                      mannequinTool === 'ik',
+                    onDraggingChange: setTransformDragging,
+                  }
+                : undefined
+            }
             mannequinIK={
               !readOnly &&
               selectedObjectId === object.id &&
@@ -347,7 +368,10 @@ function RuntimeScene({
       selectedObject !== undefined &&
       validSelectedRoot !== undefined ? (
         <>
-          {selectedObject.kind !== 'mannequin' || mannequinTool !== 'ik' ? (
+          {(selectedObject.kind !== 'mannequin' &&
+            (selectedObject.kind !== 'character-glb' ||
+              selectedObject.characterAsset?.ikBoneMap == null)) ||
+          mannequinTool !== 'ik' ? (
             <SelectionTransformControls
               key={`${selectedObject.id}:${transformMode}`}
               store={store}
@@ -393,6 +417,7 @@ export function SceneViewport({
   onExportReady,
   onRuntimeFailure,
   readOnly = false,
+  characterAssetUrls = new Map(),
 }: SceneViewportProps) {
   const outputAspectId = useStore(
     store,
@@ -478,7 +503,11 @@ export function SceneViewport({
         }}
       >
         <WebGLContextMonitor onRuntimeFailure={onRuntimeFailure} />
-        <RuntimeScene store={store} readOnly={readOnly} />
+        <RuntimeScene
+          store={store}
+          readOnly={readOnly}
+          characterAssetUrls={characterAssetUrls}
+        />
         {onExportReady === undefined ? null : (
           <ExportFrameBridge onExportReady={onExportReady} />
         )}

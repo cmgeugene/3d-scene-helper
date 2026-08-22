@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -89,6 +89,88 @@ async function createServer(options: Record<string, unknown> = {}) {
 }
 
 describe('Companion loopback API', () => {
+  it('리깅 GLB를 인증된 프로젝트 자산으로 저장하고 제공한다', async () => {
+    const { server } = await createServer();
+    const data = await readFile(
+      path.resolve('assets/Meshy_AI_Animation_Idle_3_withSkin.glb'),
+    );
+    const analysis = {
+      dimensions: { x: 1.029, y: 1.7, z: 0.41 },
+      center: { x: 0, y: 0.85, z: 0 },
+      forwardRotationYDeg: 180,
+      boneCount: 24,
+      skinnedMeshCount: 1,
+      animation: {
+        clipName: 'Armature|Idle_3|baselayer',
+        durationSeconds: 10,
+      },
+      ikBoneMap: {
+        leftHand: {
+          root: 'LeftArm',
+          middle: 'LeftForeArm',
+          effector: 'LeftHand',
+        },
+        rightHand: {
+          root: 'RightArm',
+          middle: 'RightForeArm',
+          effector: 'RightHand',
+        },
+        leftFoot: {
+          root: 'LeftUpLeg',
+          middle: 'LeftLeg',
+          effector: 'LeftFoot',
+        },
+        rightFoot: {
+          root: 'RightUpLeg',
+          middle: 'RightLeg',
+          effector: 'RightFoot',
+        },
+      },
+    };
+    const query = new URLSearchParams({
+      name: 'Meshy 캐릭터',
+      fileName: 'meshy.glb',
+      analysis: JSON.stringify(analysis),
+    });
+
+    const importedResponse = await fetch(
+      `${server.url}/api/rigged-characters?${query.toString()}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-token',
+          'Content-Type': 'model/gltf-binary',
+        },
+        body: data,
+      },
+    );
+    expect(importedResponse.status).toBe(201);
+    const imported = (await importedResponse.json()) as {
+      asset: { id: string; analysis: typeof analysis };
+    };
+    expect(imported.asset.analysis).toEqual(analysis);
+
+    const listResponse = await fetch(`${server.url}/api/rigged-characters`, {
+      headers: { Authorization: 'Bearer test-token' },
+    });
+    await expect(listResponse.json()).resolves.toMatchObject({
+      version: 1,
+      assets: [{ id: imported.asset.id }],
+    });
+
+    const contentResponse = await fetch(
+      `${server.url}/api/rigged-characters/${imported.asset.id}/content`,
+      { headers: { Authorization: 'Bearer test-token' } },
+    );
+    expect(contentResponse.status).toBe(200);
+    expect(contentResponse.headers.get('content-type')).toBe(
+      'model/gltf-binary',
+    );
+    expect(Buffer.from(await contentResponse.arrayBuffer()).equals(data)).toBe(
+      true,
+    );
+  });
+
   it('healthz 외의 API에는 세션 토큰을 요구한다', async () => {
     const { server } = await createServer();
 

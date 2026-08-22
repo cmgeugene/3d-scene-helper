@@ -53,6 +53,7 @@ export const layoutSpecSchema = z.object({
         'triangle',
         'mannequin',
         'room',
+        'character-glb',
       ]),
       role: z.enum(['subject', 'proxy', 'environment']),
       guideColor: z.string(),
