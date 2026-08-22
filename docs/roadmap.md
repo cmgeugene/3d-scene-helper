@@ -1,8 +1,8 @@
 # AI Scene Assistant 구현 로드맵
 
-> 기준일: 2026-08-20
+> 기준 커밋: `220683f feat(editor): import rigged GLB characters with IK`
 >
-> 현재 기준: S23 Semantic Scene Spec과 P2 완료; S24–S27 P3 완료; S28–S31 P4 완료; S32–S35 P5 완료; S36 P6 완료; S37 P7 완료; S38 P8 완료; S39 P9 완료; S40 P10 완료
+> 현재 기준: P0–P14 완료; 프로젝트 레퍼런스 일괄 삭제와 리깅 GLB 캐릭터 가져오기·IK까지 main에 통합
 >
 > 이 문서는 앞으로의 구현 순서와 완료 기준을 관리하는 단일 로드맵이다. 세부 설계는
 > `ai-scene-assistant.md`, 완료된 작업의 검증 기록은 `session-handoffs/`를 따른다.
@@ -11,33 +11,39 @@
 
 다음 기능은 현재 브랜치에 구현되어 있다.
 
-| 영역           | 완료된 기능                                                                 | 기록    |
-| -------------- | --------------------------------------------------------------------------- | ------- |
-| Codex 연결     | Local Companion, 인증된 loopback API, App Server 연결, 대화 시작·재개·중단  | S13     |
-| 이미지 생성    | OutputCamera 캡처, 레퍼런스 첨부, 내장 imagegen 실행, 결과 프로젝트 편입    | S14     |
-| 3D 변환 계약   | 카메라·화면 점유율·깊이·포즈·잠재 가림을 포함한 `LayoutSpec`                | S15     |
-| 오브젝트 의미  | 이름, 실제 의미, 생성 메모의 저장·JSON 왕복·prompt 전달                     | S16     |
-| Assistant UI   | 가변 폭·접기 가능한 우측 도크, 대화/변환 계약 탭                            | S17     |
-| 생성 원본 보존 | 생성 당시 SceneDocument·레퍼런스·LayoutSpec 불변 스냅샷과 버전 계보         | S18     |
-| 키프레임 보정  | 기존 결과 + 현재 3D 레이아웃을 사용하는 단일 단계 `edit` 생성               | S19     |
-| 키프레임 작업  | 전체 generation 이력과 sceneSnapshot 읽기 전용 3D 미리보기·차이·무결성 표시 | S20–S21 |
-| 스냅샷 적용    | generation sceneSnapshot의 fail-closed 적용·undo·durable recovery·출처 보존 | S22     |
-| 장면 전체 명세 | versioned Semantic Scene Spec 저장·편집·snapshot·prompt와 권위 경계         | S23     |
-| 대화형 변경    | specPatch와 object ID 명령의 이중 검증·원자 적용·generation 전달 증거       | S24–S27 |
-| 생성 사전검사  | 참조·LayoutSpec 무결성 차단과 충돌 경고의 브라우저·Companion 재검증         | S26     |
-| 보정 지시 계약 | versioned 유지·변경 지시의 UI·prompt·generation 저장과 이중 검증            | S28     |
-| 버전 결과 비교 | 부모·형제 결과 이미지와 mode·directive·SceneDocument·LayoutSpec 비교·복원   | S29     |
-| 생성 실행 복구 | request ID idempotency·중복 방지·응답 유실 재전송·재시작 상태 복구          | S30     |
-| 실행 재현 증거 | 입력 스냅샷·원본·레퍼런스 해시, 실제 첨부 순서와 prompt 근거 재검증         | S31     |
-| 프로젝트 대화  | versioned task metadata, 명시적 재개·새 task 선택, 재시작 중단 상태 복구    | S32     |
-| 런타임 요청    | 명령·파일 승인과 사용자 질문의 인증 응답, 비밀 비저장, 재시작 만료 복구     | S33     |
-| 실행 수명주기  | 프로젝트 lock, 포트 fallback, 브라우저 자동 실행, 제한된 무중복 재연결      | S34     |
-| 브라우저 배포  | 동일-origin 정적 편집기, platform Codex bundle, 크기 manifest와 배포 결정   | S35     |
-| 수동 웹 생성   | GPT 웹용 동일 의미 프롬프트, 첨부 순서 안내, 모달 복사와 무부작용 fallback  | S36     |
-| 생성 자원 수명 | 불변 원본·hash-bound thumbnail, bounded URL/Canvas와 restart 복구           | S37     |
-| 레이아웃 권위  | Image 1 고정, attachment contract v2와 역할·권위 binding fail-closed 검증   | S38     |
-| 장면 v4·잠금   | v1~v3 additive migration, authoring 기반과 viewport click-through 선택 잠금 | S39     |
-| 오브젝트 그룹  | Outliner 다중 선택, 저장 가능한 그룹과 원자적인 translate-only 월드 이동    | S40     |
+| 영역           | 완료된 기능                                                                 | 기록      |
+| -------------- | --------------------------------------------------------------------------- | --------- |
+| Codex 연결     | Local Companion, 인증된 loopback API, App Server 연결, 대화 시작·재개·중단  | S13       |
+| 이미지 생성    | OutputCamera 캡처, 레퍼런스 첨부, 내장 imagegen 실행, 결과 프로젝트 편입    | S14       |
+| 3D 변환 계약   | 카메라·화면 점유율·깊이·포즈·잠재 가림을 포함한 `LayoutSpec`                | S15       |
+| 오브젝트 의미  | 이름, 실제 의미, 생성 메모의 저장·JSON 왕복·prompt 전달                     | S16       |
+| Assistant UI   | 가변 폭·접기 가능한 우측 도크, 대화/변환 계약 탭                            | S17       |
+| 생성 원본 보존 | 생성 당시 SceneDocument·레퍼런스·LayoutSpec 불변 스냅샷과 버전 계보         | S18       |
+| 키프레임 보정  | 기존 결과 + 현재 3D 레이아웃을 사용하는 단일 단계 `edit` 생성               | S19       |
+| 키프레임 작업  | 전체 generation 이력과 sceneSnapshot 읽기 전용 3D 미리보기·차이·무결성 표시 | S20–S21   |
+| 스냅샷 적용    | generation sceneSnapshot의 fail-closed 적용·undo·durable recovery·출처 보존 | S22       |
+| 장면 전체 명세 | versioned Semantic Scene Spec 저장·편집·snapshot·prompt와 권위 경계         | S23       |
+| 대화형 변경    | specPatch와 object ID 명령의 이중 검증·원자 적용·generation 전달 증거       | S24–S27   |
+| 생성 사전검사  | 참조·LayoutSpec 무결성 차단과 충돌 경고의 브라우저·Companion 재검증         | S26       |
+| 보정 지시 계약 | versioned 유지·변경 지시의 UI·prompt·generation 저장과 이중 검증            | S28       |
+| 버전 결과 비교 | 부모·형제 결과 이미지와 mode·directive·SceneDocument·LayoutSpec 비교·복원   | S29       |
+| 생성 실행 복구 | request ID idempotency·중복 방지·응답 유실 재전송·재시작 상태 복구          | S30       |
+| 실행 재현 증거 | 입력 스냅샷·원본·레퍼런스 해시, 실제 첨부 순서와 prompt 근거 재검증         | S31       |
+| 프로젝트 대화  | versioned task metadata, 명시적 재개·새 task 선택, 재시작 중단 상태 복구    | S32       |
+| 런타임 요청    | 명령·파일 승인과 사용자 질문의 인증 응답, 비밀 비저장, 재시작 만료 복구     | S33       |
+| 실행 수명주기  | 프로젝트 lock, 포트 fallback, 브라우저 자동 실행, 제한된 무중복 재연결      | S34       |
+| 브라우저 배포  | 동일-origin 정적 편집기, platform Codex bundle, 크기 manifest와 배포 결정   | S35       |
+| 수동 웹 생성   | GPT 웹용 동일 의미 프롬프트, 첨부 순서 안내, 모달 복사와 무부작용 fallback  | S36       |
+| 생성 자원 수명 | 불변 원본·hash-bound thumbnail, bounded URL/Canvas와 restart 복구           | S37       |
+| 레이아웃 권위  | Image 1 고정, attachment contract v2와 역할·권위 binding fail-closed 검증   | S38       |
+| 장면 v4·잠금   | v1~v3 additive migration, authoring 기반과 viewport click-through 선택 잠금 | S39       |
+| 오브젝트 그룹  | Outliner 다중 선택, 저장 가능한 그룹과 원자적인 translate-only 월드 이동    | S40       |
+| 표면·포함 관계 | 프록시 표시와 최종 표면 의도 분리, 구조화된 containment와 가시성            | S41       |
+| 평면 거울      | plane 반사 렌더, 필수 반사 대상과 LayoutSpec 공간 계약                      | S42       |
+| 생성 바인딩    | 서버 소유 canonical 이미지 역할·권위와 대화 레퍼런스 이름 정규화            | S43       |
+| 대화 구도 접지 | 현재 OutputCamera 렌더·LayoutSpec과 화면상 방향을 일반 대화에 전달          | S44       |
+| 프로젝트 자산  | 레퍼런스 개별·선택·전체 삭제와 부분 실패 처리                               | `641fc3d` |
+| 리깅 캐릭터    | 번들/프로젝트 GLB, 스킨·본 분석, 애니메이션 시간과 양손·양발 IK             | `220683f` |
 
 현재 기본 생성은 `Image 1 현재 3D 레이아웃 + 레퍼런스 최대 4장`, 보정 생성은
 `Image 1 현재 3D 레이아웃 + Image 2 원본 키프레임 + 레퍼런스 최대 3장`을 사용한다.
@@ -288,6 +294,32 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 4. 대화의 `이미지 1`은 production Image 1로 복사되지 않고 당시 reference id, name과 role로 변환된다.
 5. 기존 reference binding 필드가 없는 conversation/generation 기록은 변경 없이 계속 읽을 수 있다.
 
+### P14. 일반 대화의 현재 구도와 화면 방향 접지 — 완료 (S44)
+
+- [x] 일반 Scene Assistant turn에서도 현재 장면의 `LayoutSpec` 계산
+- [x] WebGL 캡처가 가능하면 현재 OutputCamera 렌더를 대화 attachment 1로 고정
+- [x] 장면·카메라가 같은 후속 turn에서 최근 대화 렌더 재사용
+- [x] 월드 heading, 카메라 상대 view와 화면상 투영 방향을 분리한 mannequin facing 계약
+- [x] 화면상 대각선만으로 오브젝트 회전이나 카메라 변경이 필요하다고 추론하지 않는 지시
+- [x] 캡처·업로드 실패 시 SceneDocument와 LayoutSpec만으로 대화를 계속하는 fallback
+
+완료 기준:
+
+1. 같은 월드 회전도 카메라 위치에 따라 달라지는 화면상 방향을 구조화해 설명할 수 있다.
+2. 카메라만 움직이면 화면상 방향은 바뀌어도 저장된 오브젝트 회전은 바뀌지 않는다.
+3. 선택 레퍼런스가 있으면 현재 레이아웃 뒤에서 실제 대화 attachment 순서와 binding이 일치한다.
+4. viewport capture가 없어도 일반 대화를 중단하거나 장면을 변경하지 않는다.
+
+### 현재 main 추가 구현 — 프로젝트 자산과 리깅 캐릭터
+
+- [x] 프로젝트 레퍼런스 카드별 삭제, 생성 선택 항목 일괄 삭제와 전체 삭제
+- [x] 삭제 성공·실패가 섞인 경우 성공한 항목만 UI와 manifest에서 제거하고 실패 수 표시
+- [x] 번들 `Meshy Idle` 리깅 캐릭터 추가
+- [x] Companion 연결 시 100MB 이하 스킨된 GLB 2.0 가져오기와 프로젝트 manifest 저장
+- [x] 캐릭터 크기·중심·전방·본·스킨·첫 애니메이션·IK chain 분석
+- [x] 높이 조절, animation time scrub, Idle 미리보기와 매핑 가능한 양손·양발 IK
+- [x] 장면 저장·복원, LayoutSpec과 실제 Chromium 렌더 경로 통합
+
 ## 3. 장기 보류
 
 다음 항목은 위 단계가 안정화된 뒤 검토한다.
@@ -296,7 +328,7 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 - 캐릭터 시트 자동 크롭과 영역 마스킹
 - 여러 생성 공급자와 모델별 입력 예산 설정 UI
 - 배치 생성과 자동 후보 비교
-- 임의 3D 에셋 import, animation timeline과 physics
+- 일반 목적의 임의 메시·재질·텍스처 import, 다중 클립 timeline과 physics
 - cloud 저장과 협업
 - 원격 Codex App Server 운영
 
@@ -308,10 +340,13 @@ Codex task는 대화 연속성을 위한 보조 상태다. SceneDocument, Semant
 - 단계가 완료되면 `현재 제품 기준선`으로 이동하고 다음 단계의 범위를 다시 확인한다.
 - 실제 imagegen 수동 검증과 사용량을 소모하지 않는 자동 테스트를 구분해 기록한다.
 
-## 5. 바로 다음 작업
+## 5. 바로 다음 설계 작업
 
-S43 수정은 실제 사용자 대화에서 배경 레퍼런스를 name/id로 지칭한 뒤 fresh/edit 생성을 각각 한 번
-실행해 확인한다. generation 실행 상세에서 Image 1 layout과 후속 reference 역할이 유지되고, 저장된
-generationSpec 첫 블록이 `SERVER-OWNED CANONICAL IMAGE ROLES AND AUTHORITY`인지 확인한다. 곡면 거울,
-여러 번의 재귀 반사, 거울 안의 거울과 반사 대상만 직접 장면에서 숨기는 별도 visibility 모드는 장기
-범위로 남긴다.
+다음 구현 단계는 아직 고정하지 않는다. 실제 Companion 대화에서 확인한 사용성 문제를 바탕으로
+장면의 저장 사실, 카메라에서 파생한 관측값, 의미·연출 의도와 대화 문맥의 책임 경계를 먼저
+재검토한다. 이 검토가 끝나기 전에는 현재 SceneDocument 구조를 장기 제품 계약으로 확대하거나
+기능 제안을 기존 스키마에 억지로 맞추지 않는다. 범위와 완료 기준이 합의되면 구현 전에 이 로드맵에
+새 단계로 추가한다.
+
+곡면 거울, 재귀 반사, 거울 안의 거울, 반사 대상만 실제 장면에서 숨기는 별도 visibility 모드와
+일반 목적의 임의 메시 import는 장기 범위로 남긴다.
